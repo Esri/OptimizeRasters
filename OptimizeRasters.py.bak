@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150504
+# Version: 20150414
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -1168,7 +1168,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.7c'
+__program_ver__ = 'v3.7b'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1462,12 +1462,6 @@ cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
 # read in the gdal_path from config.
 gdal_path = cfg.getValue(CCFG_GDAL_PATH)      # note: validity is checked within (compression-mod)
 # ends
-
-# set gdal_data enviornment path
-gdal_data = os.path.join(os.path.dirname(gdal_path), 'data')
-os.environ['GDAL_DATA'] = gdal_data
-# ends
-
 comp = compression(gdal_path)
 ret = comp.init(Message, 0, user_config = cfg)      # warning/error messages get printed within .init()
 if (ret == False):
