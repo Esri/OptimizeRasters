@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150504
+# Version: 20150513
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -243,7 +243,8 @@ class S3Storage:
                 self.m_bucketname = s3_bucket
             # setup s3 connection
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
-                con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET)
+                con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET,
+                calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat') if len([c for c in self.m_bucketname if c.isupper()]) == 0 else OrdinaryCallingFormat() )
                 self.bucketupload = con.get_bucket(self.m_bucketname, False, None)
             # ends
 
@@ -1168,7 +1169,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.7c'
+__program_ver__ = 'v3.7d'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
