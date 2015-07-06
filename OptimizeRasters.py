@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150513
+# Version: 20150706
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -122,7 +122,10 @@ class S3Upload_:
 
             while True:
                 chunk = f.read(buff)
-                if not chunk: break
+                if not chunk:
+                    if (os.path.getsize(self.m_local_file) == 0):       # support uploading of (zero) byte files.
+                        fbuff.append(SlnTMStringIO(1))
+                    break
                 fbuff.append(SlnTMStringIO(buff))
                 fbuff[len(fbuff) - 1].write(chunk)
 
@@ -1169,7 +1172,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.7d'
+__program_ver__ = 'v3.7f'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1695,11 +1698,11 @@ if (is_caching == True and
             terminate(eFAIL)
 
     for req in raster_buff:
-        (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+        (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
         (f, ext) = os.path.splitext(req['f'])
         ext = ext.lower()
-        CMRF_EXT = ext
-        output_file = output_file.replace(ext, CMRF_EXT)
+        if (cfg_keep_original_ext == False):
+            output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
 
         # does the input (mrf) have the required associate(s) e.g. (idx) file?
         # This is a simple check to make sure, we're only dealilng with valid (mrf) formats.
