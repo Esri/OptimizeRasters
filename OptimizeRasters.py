@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150706
+# Version: 20150709
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -336,11 +336,13 @@ class S3Storage:
             fout.write(S3_key.read())
             fout.flush()
         except Exception as exp:
-            Message ('(%s)' % (str(exp)), const_critical_text);
+            Message ('({})'.format(str(exp)), const_critical_text);
             return False
         finally:
-            if (fout is not None):
+            if (fout):
                 fout.close()
+            if (S3_key):
+                S3_key.close()
         # ends
 
         # Handle any post-processing, if the final destination is to S3, upload right away.
@@ -544,6 +546,7 @@ def args_Callback(args, user_data = None):
         args.append ('OPTIONS=LERC_PREC=%s' % (m_lerc_prec))
     args.append ('-co')
     args.append ('BLOCKSIZE=%s' % (m_bsize))
+
     return args
 
 
@@ -795,7 +798,7 @@ class compression:
             self.m_user_config = user_config
 
         if (os.path.exists(self.m_gdal_path) == False):
-            self.message('Err: Invalid GDAL path (%s)' % (self.m_gdal_path), const_critical_text)
+            self.message('Err: Invalid GDAL path (%s)' % (self.m_gdal_path))
             return False
         msg_text = 'Error: %s is not found at (%s)'
         if (os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)) == False):
@@ -975,21 +978,16 @@ class compression:
             message = p.stdout.readline()
             if not message:
                 break
-
             if (bSuccess == False):
                 if (message.find('100 - done.') >= 0):
                     bSuccess = True
-
             messages.append(message.strip())
-
-
         if (bSuccess == True):
             self.message('messages:')
             for m in messages:
                     self.message(m)
 
         warnings = p.stderr.readlines()
-
         if (len(warnings) > 0):
             self.message('warnings:')
             for w in warnings:
@@ -1172,7 +1170,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.7f'
+__program_ver__ = 'v3.7g'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
