@@ -110,8 +110,8 @@ class S3Upload_:
     def upload(self):
         # read in big-file in chunk
         CHUNK_MIN_SIZE = 5242880
-##        if (self.m_local_file.endswith('.lrc')):
-##            return False
+        if (self.m_local_file.endswith('.lrc')):
+            return False
         Message ('[S3-Push] %s..' % (self.m_local_file))
 
         f = None
@@ -240,14 +240,20 @@ class S3Storage:
         self.CAWS_ACCESS_KEY_SECRET = s3_secret
 
         self.m_bucketname = ''         # no default bucket-name
-        if (self.m_user_config is not None):
-            s3_bucket = self.m_user_config.getValue('Out_S3_Bucket' if direction == CS3STORAGE_OUT else 'In_S3_Bucket', False)
-            if (s3_bucket is not None):
+        if (self.m_user_config):
+            s3_bucket = self.m_user_config.getValue('{}_S3_Bucket'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
+            if (s3_bucket):
                 self.m_bucketname = s3_bucket
+            _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
             # setup s3 connection
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
-                con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET,
-                calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat') if len([c for c in self.m_bucketname if c.isupper()]) == 0 else OrdinaryCallingFormat() )
+                _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat') if len([c for c in self.m_bucketname if c.isupper()]) == 0 else OrdinaryCallingFormat()
+                try:
+                    con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET,
+                    profile_name = _profile_name if _profile_name else '', calling_format = _calling_format)
+                except Exception as e:
+                    Message(format(str(e)), const_critical_text)
+                    return False
                 self.bucketupload = con.get_bucket(self.m_bucketname, False, None)
             # ends
 
@@ -785,7 +791,6 @@ class compression:
         self.m_id = None
 
     def init(self, user_callback = None, id = None, user_config = None):
-
         self.m_user_callback = False
         if (user_callback != None):
             self.m_user_callback = True
@@ -797,9 +802,20 @@ class compression:
         if (user_config != None):
             self.m_user_config = user_config
 
-        if (os.path.exists(self.m_gdal_path) == False):
-            self.message('Err: Invalid GDAL path (%s)' % (self.m_gdal_path))
-            return False
+        # intenal gdal_pathc could get modified here.
+        if (not self.m_gdal_path or
+            os.path.isdir(self.m_gdal_path) == False):
+            if (self.m_gdal_path):
+                self.message('Warning: Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path))
+            self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'tools/bin')
+            if (not os.path.isdir(self.m_gdal_path)):
+                self.message('Err: GDAL not found at ({}).'.format(self.m_gdal_path))
+                return False
+        # ends
+        # set gdal_data enviornment path
+        os.environ['GDAL_DATA'] = self.m_gdal_path
+        # ends
+
         msg_text = 'Error: %s is not found at (%s)'
         if (os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)) == False):
             self.message(msg_text % (self.CGDAL_TRANSLATE_EXE, self.m_gdal_path))
@@ -1170,7 +1186,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.7g'
+__program_ver__ = 'v3.8'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1465,11 +1481,6 @@ cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
 gdal_path = cfg.getValue(CCFG_GDAL_PATH)      # note: validity is checked within (compression-mod)
 # ends
 
-# set gdal_data enviornment path
-gdal_data = os.path.join(os.path.dirname(gdal_path), 'data')
-os.environ['GDAL_DATA'] = gdal_data
-# ends
-
 comp = compression(gdal_path)
 ret = comp.init(Message, 0, user_config = cfg)      # warning/error messages get printed within .init()
 if (ret == False):
@@ -1478,6 +1489,10 @@ if (ret == False):
 
 
 # s3 upload settings.
+out_s3_profile_name = cfg.getValue('Out_S3_AWS_ProfileName', False)
+if (out_s3_profile_name):
+    cfg.setValue ('Out_S3_AWS_ProfileName', out_s3_profile_name)
+
 s3_output = cfg.getValue(COUT_S3_PARENTFOLDER, False)
 s3_id = cfg.getValue('Out_S3_ID', False)
 s3_secret = cfg.getValue('Out_S3_Secret', False)
@@ -1485,9 +1500,9 @@ s3_secret = cfg.getValue('Out_S3_Secret', False)
 S3_storage = None        # acts global
 if (is_s3_upload == True):
     if (s3_output is None or
-        s3_id is None or
-        s3_secret is None):
-            Message ('Empty/Invalid values detected for keys in the (%s) beginning with (S3)' % (config_), const_critical_text)
+        (s3_id is None and out_s3_profile_name is None) or
+        (s3_secret is None and out_s3_profile_name is None)):
+            Message ('Empty/Invalid values detected for keys in the (%s) beginning with (Out_S3)' % (config_), const_critical_text)
             terminate(eFAIL)
     # instance of upload storage.
     S3_storage = S3Storage()
@@ -1569,15 +1584,18 @@ if (isinput_s3 == True):
         in_s3_parent = args.input_path       # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
         cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
 
+    in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName', False)
+    if (in_s3_profile_name):
+        cfg.setValue ('In_S3_AWS_ProfileName', in_s3_profile_name)
     in_s3_id = cfg.getValue('In_S3_ID', False)
     in_s3_secret = cfg.getValue('In_S3_Secret', False)
     in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
 
     if (in_s3_parent is None or
-        in_s3_id is None or
-        in_s3_secret is None or
+        (in_s3_id is None and in_s3_profile_name is None) or
+        (in_s3_secret is None and in_s3_profile_name is None) or
         in_s3_bucket is None):
-            Message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_ID, In_S3_Secret, In_S3_Bucket]', const_critical_text)
+            Message ('Invalid/empty value(s) found in node(s) [In_S3_AWS_ProfileName, In_S3_ParentFodler, In_S3_ID, In_S3_Secret, In_S3_Bucket]', const_critical_text)
             terminate(eFAIL)
 
     in_s3_parent = in_s3_parent.replace('\\', '/')
