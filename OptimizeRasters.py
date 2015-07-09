@@ -110,8 +110,8 @@ class S3Upload_:
     def upload(self):
         # read in big-file in chunk
         CHUNK_MIN_SIZE = 5242880
-        if (self.m_local_file.endswith('.lrc')):
-            return False
+##        if (self.m_local_file.endswith('.lrc')):
+##            return False
         Message ('[S3-Push] %s..' % (self.m_local_file))
 
         f = None
