@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150709
+# Version: 20150714
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -249,8 +249,10 @@ class S3Storage:
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
                 _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat') if len([c for c in self.m_bucketname if c.isupper()]) == 0 else OrdinaryCallingFormat()
                 try:
+                    is_bucket_public = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None
                     con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET,
-                    profile_name = _profile_name if _profile_name else '', calling_format = _calling_format)
+                    profile_name = _profile_name if _profile_name else None, calling_format = _calling_format,
+                    anon = True if is_bucket_public else False)
                 except Exception as e:
                     Message(format(str(e)), const_critical_text)
                     return False
@@ -281,17 +283,21 @@ class S3Storage:
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
             if (root_only_ is not None):    # if there's a value, take it else defaults to (True)
                 root_only = getBooleanValue(root_only_)
-        for key in keys:
-            if (key.name.endswith('/') == False):
-                if (not root_only == True):
-                    if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
-                        continue
-                if (cb is not None):
-                    if (precb is not None):
-                        if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath) == True):     # if raster/exclude list, do not proceed.
-                            if (getBooleanValue(self.m_user_config.getValue('istempinput')) == False):
-                                continue
-                    cb(key, key.name)       # callback on the client-side
+        try:
+            for key in keys:
+                if (key.name.endswith('/') == False):
+                    if (not root_only == True):
+                        if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
+                            continue
+                    if (cb is not None):
+                        if (precb is not None):
+                            if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath) == True):     # if raster/exclude list, do not proceed.
+                                if (getBooleanValue(self.m_user_config.getValue('istempinput')) == False):
+                                    continue
+                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
+        except Exception as e:
+            Message (e.message, const_critical_text)
+            return False
         return True
     # ends
 
@@ -323,7 +329,7 @@ class S3Storage:
             return False
 
         is_cpy_to_s3 = getBooleanValue(cfg.getValue(COUT_S3_UPLOAD))
-        mk_path =  input_path.replace('\\', '/').replace(self.remote_path, '')
+        mk_path = input_path    # input_path.replace('\\', '/').replace(self.remote_path, '')
         Message ('[S3-Pull] %s' % (mk_path))
 
         flr = os.path.dirname(mk_path)
@@ -1186,7 +1192,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.8'
+__program_ver__ = 'v3.8c'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1592,10 +1598,8 @@ if (isinput_s3 == True):
     in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
 
     if (in_s3_parent is None or
-        (in_s3_id is None and in_s3_profile_name is None) or
-        (in_s3_secret is None and in_s3_profile_name is None) or
         in_s3_bucket is None):
-            Message ('Invalid/empty value(s) found in node(s) [In_S3_AWS_ProfileName, In_S3_ParentFodler, In_S3_ID, In_S3_Secret, In_S3_Bucket]', const_critical_text)
+            Message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', const_critical_text)
             terminate(eFAIL)
 
     in_s3_parent = in_s3_parent.replace('\\', '/')
@@ -1608,15 +1612,13 @@ if (isinput_s3 == True):
     if (ret == False):
         Message ('Unable to initialize S3-storage module!. Quitting..', const_critical_text);
         terminate(eFAIL)
-
-    cfg.setValue('In_S3_Prefix', '/vsicurl/' + o_S3_storage.bucketupload.generate_url(0, force_http=True).split('?')[0])
+    cfg.setValue('In_S3_Prefix', '/vsicurl/http://{}.s3.amazonaws.com/'.format(in_s3_bucket)) # [pre_s3_in_public_bucket_sup] + o_S3_storage.bucketupload.generate_url(0, force_http=True).split('?')[0])
     o_S3_storage.inputPath = args.output_path
     if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
         Message ('Err: Unable to read S3-Content', const_critical_text);
         terminate(eFAIL)
 # =/vsicurl/http://esridatasets.s3.amazonaws.com/
 # ends
-
 # control flow if conversions required.
 if (is_caching == False):
     if (isinput_s3 == False):
