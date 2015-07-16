@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150714
+# Version: 20150716
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -55,6 +55,7 @@ USR_ARG_DEL = 'del'
 # const node-names in the config file
 COUT_S3_PARENTFOLDER = 'Out_S3_ParentFolder'
 COUT_S3_UPLOAD = 'Out_S3_Upload'
+COUT_S3_ACL = 'Out_S3_ACL'
 CIN_S3_PARENTFOLDER = 'In_S3_ParentFolder'
 # ends
 
@@ -91,16 +92,17 @@ class S3Upload:
 
 
 class S3Upload_:
-    def __init__(self, s3_bucket, s3_path, local_file):
+    def __init__(self, s3_bucket, s3_path, local_file, acl_policy = 'private'):
         self.m_s3_path =  s3_path
         self.m_local_file = local_file
         self.m_s3_bucket = s3_bucket
+        self.m_acl_policy = 'private' if acl_policy is None or acl_policy.strip() == '' else acl_policy
         pass;
 
     def init(self):
         # multip-upload test
         try:
-            self.mp = self.m_s3_bucket.initiate_multipart_upload(self.m_s3_path, policy='public-read')
+            self.mp = self.m_s3_bucket.initiate_multipart_upload(self.m_s3_path, policy=self.m_acl_policy)
         except Exception as exp:
             Message ('Err: (%s)' % (str(exp)), const_critical_text)
             return False
@@ -381,7 +383,7 @@ class S3Storage:
                 Message (upl_file)
                 # ends
                 try:
-                    S3 = S3Upload_(self.bucketupload, upl_file, lcl_file);
+                    S3 = S3Upload_(self.bucketupload, upl_file, lcl_file, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                     if (S3.init() == False):
                         Message ('Unable to initialize [S3-Push] for (%s=%s)' % (lcl_file, upl_file), const_warning_text)
                         continue
@@ -421,7 +423,7 @@ class S3Storage:
                             if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
                                 rep = self.m_user_config.getValue('tempoutput')
                             upl_file = mk_path.replace(rep, self.remote_path if cfg.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
-                        S3 = S3Upload_(self.bucketupload, upl_file, mk_path);
+                        S3 = S3Upload_(self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
                             Message ('Err: Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), const_warning_text)
                             continue
@@ -1192,7 +1194,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.8c'
+__program_ver__ = 'v3.8d'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1515,7 +1517,6 @@ if (is_s3_upload == True):
     if (args.output_path is not None):
         s3_output = args.output_path
         cfg.getValue(COUT_S3_PARENTFOLDER, s3_output)
-
     ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT, cfg)
     if (ret == False):
         Message ('Unable to initialize the S3 upload module!. Quitting..', const_critical_text);
