@@ -24,7 +24,7 @@ In this case you need to define the s3 output folder and the keys in the config 
 
 ## Issues
 
-Find a bug or want to request a new feature?  Please let us know by [submitting an issue](https://github.com/Esri/raster-functions/issues).
+Find a bug or want to request a new feature?  Please let us know by [submitting an issue](https://github.com/esri/OptimizeRasters/issues).
 
 
 ## Contributing
