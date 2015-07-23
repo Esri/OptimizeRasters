@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: Logger.py
 # Description: Class to log status from components to log files.
-# Version: 20140417
+# Version: 20150723
 # Requirements: ArcGIS 10.1 SP1
 # Author: Esri Imagery Workflows team
 #------------------------------------------------------------------------------
@@ -263,7 +263,7 @@ class Logger:
 
             logPath = os.path.join(self.logFolder, recordUpdated )
             c = open(logPath, "w")
-            c.write(doc.toxml())
+            c.write(doc.toprettyxml())
             c.close()
         except:
             print ("\nError creating log file.")
