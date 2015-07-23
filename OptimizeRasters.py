@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150716
+# Version: 20150723
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -80,13 +80,12 @@ class S3Upload:
     def __init__(self):
         pass;
 
-    def run(self, bobj, fobj, id):
+    def run(self, bobj, fobj, id, tot_ids):
         fobj.seek(0)
-        if (CS3_MSG_DETAIL == True):
-            Message ('Starting (%d)' % (id));
+        msg_frmt = '[Push] block'
+        Message ('{} ({}/{})'.format(msg_frmt, id, tot_ids));
         bobj.upload_part_from_file(fobj, id)
-        if (CS3_MSG_DETAIL == True):
-            Message ('Done (%d)' % (id));
+        Message ('{} ({}/{}) - Done'.format(msg_frmt, id, tot_ids));
         fobj.close()
         del fobj
 
@@ -97,6 +96,7 @@ class S3Upload_:
         self.m_local_file = local_file
         self.m_s3_bucket = s3_bucket
         self.m_acl_policy = 'private' if acl_policy is None or acl_policy.strip() == '' else acl_policy
+        self.mp = None
         pass;
 
     def init(self):
@@ -104,7 +104,7 @@ class S3Upload_:
         try:
             self.mp = self.m_s3_bucket.initiate_multipart_upload(self.m_s3_path, policy=self.m_acl_policy)
         except Exception as exp:
-            Message ('Err: (%s)' % (str(exp)), const_critical_text)
+            Message ('Err. ({})'.format(str(exp)), const_critical_text)
             return False
         return True
         # ends
@@ -114,60 +114,94 @@ class S3Upload_:
         CHUNK_MIN_SIZE = 5242880
 ##        if (self.m_local_file.endswith('.lrc')):
 ##            return False
-        Message ('[S3-Push] %s..' % (self.m_local_file))
+        Message('[S3-Push] {}..'.format(self.m_local_file))
+
+        Message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
+
+        s3upl = S3Upload();
+        idx = 1
 
         f = None
         try:         # see if we can open it
             f = open (self.m_local_file, 'rb')
-            buff = CHUNK_MIN_SIZE
-            fbuff = []
-
-            while True:
-                chunk = f.read(buff)
-                if not chunk:
-                    if (os.path.getsize(self.m_local_file) == 0):       # support uploading of (zero) byte files.
-                        fbuff.append(SlnTMStringIO(1))
-                    break
-                fbuff.append(SlnTMStringIO(buff))
-                fbuff[len(fbuff) - 1].write(chunk)
-
-        except Exception as exp:
-            Message ('Err: (%s)' % (str(exp)), const_critical_text)
-            return False
-        finally:
-            if (f is not None):
+            f_size = os.path.getsize(self.m_local_file)
+            if (f_size == 0):       # support uploading of (zero) byte files.
+                s3upl.run (self.mp, SlnTMStringIO(1), idx, idx)
+                try:
+                    self.mp.complete_upload()
+                    if (f):
+                        f.close()
+                    return True
+                except:
+                    self.mp.cancel_upload()
+                    raise
+        except Exception as e:
+            Message ('Err. File open/Upload: ({})'.format(str(e)))
+            if (f):
                 f.close()
+            return False
 
-        idx = 1
         threads = []
 
-        s3upl = S3Upload();
+        pos_buffer = 0
+        len_buffer = 20     # set this to no of parallel (chunk) uploads at once.
 
-        if (CS3_MSG_DETAIL):
-            Message ('Creating (%d) worker(s)..' % (len(fbuff)));
+        tot_blocks = (f_size / CHUNK_MIN_SIZE) + 1
+        upl_blocks = 0
+
+        Message ('Total blocks to upload ({})'.format(tot_blocks))
+
+        while(1):
+            len_threads = len(threads)
+            while(len_threads > 0):
+                alive = [t.isAlive() for t in threads]
+                cnt_dead = sum(not x for x in alive)
+                if (cnt_dead):
+                    upl_blocks += cnt_dead
+                    len_buffer = cnt_dead
+                    threads = [t for t in threads if t.isAlive()]
+                    ##percent = int((1 - float(tot_blocks - upl_blocks)) * 100)
+                    ##print '{}% complete.'.format(percent)
+                    break
+            buffer = []
+            for i in range(0, len_buffer):
+                chunk = f.read(CHUNK_MIN_SIZE)
+                if not chunk:
+                    break
+                buffer.append(SlnTMStringIO(CHUNK_MIN_SIZE))
+                buffer[len(buffer) - 1].write(chunk)
+
+            if (len(buffer) == 0 and
+                len(threads) == 0):
+                break
+
+            for e in buffer:
+                try:
+                    t = threading.Thread(target = s3upl.run,
+                    args = (self.mp, e, idx, tot_blocks))
+                    t.daemon = True
+                    t.start()
+                    threads.append(t)
+                    idx += 1
+                except Exception as e:
+                    Message ('Err. {}'.format(str(e)));
+                    if (f):
+                        f.close()
+                    return False
         try:
-            for e in fbuff:
-                t = threading.Thread(target = s3upl.run, args = (self.mp, e, idx))
-                t.daemon = True
-                t.start()
-                threads.append(t)
-                idx += 1
-            if (CS3_MSG_DETAIL):
-                Message ('\nUploading..')
-
-            for t in threads:
-                t.join()
             self.mp.complete_upload()
         except Exception as exp:
-            Message ('Err: (%s)' % (str(exp)), const_critical_text)
+            Message ('Err. {}'.format(str(exp)))
             self.mp.cancel_upload()
             return False
         finally:
-            pass
+            if (f):
+                f.close()
+
         return True
 
     def __del__(self):
-        if (self.mp is not None):
+        if (self.mp):
             self.mp = None
 
 
@@ -311,7 +345,7 @@ class S3Storage:
                 return False
 
         if (self.m_user_config is None):     # shouldn't happen
-            Message ('Err: Intenal/User config not initialized.', const_critical_text)
+            Message ('Err. Intenal/User config not initialized.', const_critical_text)
             return False
         input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT) + S3_path
         if ((self.m_user_config.getValue('istempoutput')) == True):
@@ -339,7 +373,7 @@ class S3Storage:
             try:
                 os.makedirs(flr)
             except Exception as exp:
-                Message ('Err: (%s)' % (str(exp)), const_critical_text)
+                Message ('Err. (%s)' % (str(exp)), const_critical_text)
                 return False
         #if (is_raster):
         #    return True
@@ -425,7 +459,7 @@ class S3Storage:
                             upl_file = mk_path.replace(rep, self.remote_path if cfg.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
                         S3 = S3Upload_(self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
-                            Message ('Err: Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), const_warning_text)
+                            Message ('Err. Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), const_warning_text)
                             continue
                         upl_retries = CS3_UPLOAD_RETRIES
                         ret  = False
@@ -434,7 +468,7 @@ class S3Storage:
                             if (ret == False):
                                 time.sleep(10)   # let's sleep for a while until s3 kick-starts
                                 upl_retries -= 1
-                                Message ('Err: [S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), const_warning_text)
+                                Message ('Err. [S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), const_warning_text)
                         if (ret == False):
                             if (not 'upl' in  self.__m_failed_upl_lst):
                                 self.__m_failed_upl_lst['upl'] = []
@@ -450,7 +484,7 @@ class S3Storage:
                                 S3 = None
                             continue
                     except Exception as inf:
-                        Message ('Err: (%s)' % (str(inf)), const_critical_text)
+                        Message ('Err. (%s)' % (str(inf)), const_critical_text)
                     finally:
                         if (S3 is not None):
                             del S3
@@ -727,7 +761,7 @@ class Copy:
                             ret = post_processing_callback(dst_file, post_processing_callback_args)    # ignore errors from the callback
                     # ends
                 except Exception as info:
-                    Message ('Err: (%s)' % (str(info)), const_critical_text)
+                    Message ('Err. (%s)' % (str(info)), const_critical_text)
                     continue
 
         Message('Done.')
@@ -817,7 +851,7 @@ class compression:
                 self.message('Warning: Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path))
             self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'tools/bin')
             if (not os.path.isdir(self.m_gdal_path)):
-                self.message('Err: GDAL not found at ({}).'.format(self.m_gdal_path))
+                self.message('Err. GDAL not found at ({}).'.format(self.m_gdal_path))
                 return False
         # ends
         # set gdal_data enviornment path
@@ -867,7 +901,7 @@ class compression:
             except Exception as exp:
                 time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
                 if (os.path.exists(out_dir_path) == False):
-                    Message ('Err: (%s)' % str(exp), const_critical_text)
+                    Message ('Err. (%s)' % str(exp), const_critical_text)
                     return False
         # ends
 
@@ -1030,7 +1064,7 @@ class Config:
         try:
             self.m_doc = minidom.parse(config)
         except Exception as exp:
-            Message ('Err: (%s)' % str(exp), const_critical_text)
+            Message ('Err. (%s)' % str(exp), const_critical_text)
             return False
 
         nodes = self.m_doc.getElementsByTagName(root)
@@ -1094,7 +1128,7 @@ def S3Upl(input_file, user_args, *args):
                         os.remove(f)
                         Message ('[Del] %s' % (f))
                     except Exception as exp:
-                        Message ('[Del] Err: (%s)' % (str(exp)), const_critical_text)
+                        Message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
     return (len(ret_buff) > 0)
 
 
@@ -1194,7 +1228,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.8d'
+__program_ver__ = 'v3.9'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1561,8 +1595,8 @@ callbacks_for_meta = {
 }
 
 
-CONST_CPY_ERR_0 = 'Err: Unable to initialize (Copy) module!'
-CONST_CPY_ERR_1 = 'Err: Unable to process input data/(Copy) module!'
+CONST_CPY_ERR_0 = 'Err. Unable to initialize (Copy) module!'
+CONST_CPY_ERR_1 = 'Err. Unable to process input data/(Copy) module!'
 
 CONST_OUTPUT_EXT = '.%s' % ('mrf')
 
@@ -1616,7 +1650,7 @@ if (isinput_s3 == True):
     cfg.setValue('In_S3_Prefix', '/vsicurl/http://{}.s3.amazonaws.com/'.format(in_s3_bucket)) # [pre_s3_in_public_bucket_sup] + o_S3_storage.bucketupload.generate_url(0, force_http=True).split('?')[0])
     o_S3_storage.inputPath = args.output_path
     if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
-        Message ('Err: Unable to read S3-Content', const_critical_text);
+        Message ('Err. Unable to read S3-Content', const_critical_text);
         terminate(eFAIL)
 # =/vsicurl/http://esridatasets.s3.amazonaws.com/
 # ends
@@ -1835,7 +1869,7 @@ if (dbg_delete == True):
 
 
 if (len(raster_buff) == 0):
-    Message ('Err: No input rasters to process..', const_warning_text);
+    Message ('Err. No input rasters to process..', const_warning_text);
 # ends
 
 
