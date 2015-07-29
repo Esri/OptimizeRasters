@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150723
+# Version: 20150729
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -855,7 +855,7 @@ class compression:
                 return False
         # ends
         # set gdal_data enviornment path
-        os.environ['GDAL_DATA'] = self.m_gdal_path
+        os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
         # ends
 
         msg_text = 'Error: %s is not found at (%s)'
