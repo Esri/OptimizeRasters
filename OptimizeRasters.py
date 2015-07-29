@@ -351,13 +351,14 @@ class S3Storage:
         if ((self.m_user_config.getValue('istempoutput')) == True):
             input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -s3input=true
         is_raster = False
-        (f, e) = os.path.splitext(S3_path)
+
+        extension = S3_path[S3_path.find('.') + 1:]
         is_tmp_input = getBooleanValue(cfg.getValue('istempinput'))
 
-        if ((e[1:] in self.m_user_config.getValue('ExcludeFilter')) == True or
+        if ((extension in self.m_user_config.getValue('ExcludeFilter')) == True or
             S3_path.lower().endswith('aux.xml') == True):
             return False
-        elif (e[1:] in self.m_user_config.getValue(CCFG_RASTERS_NODE)):
+        elif (extension in self.m_user_config.getValue(CCFG_RASTERS_NODE)):
             if (is_tmp_input == True):
                 input_path = self.m_user_config.getValue('tempinput', False) + S3_path
                 is_raster = True
@@ -702,11 +703,7 @@ class Copy:
         return True
 
     def processs(self, post_processing_callback = None, post_processing_callback_args = None, pre_processing_callback = None):
-
-        CONST_EXT_AUX_XML = 'aux.xml'
-        CONST_EXT_AUX_XML_LEN = len(CONST_EXT_AUX_XML)
-
-        if (log is not None):
+        if (log):
             log.CreateCategory('Copy')
         Message('Copying non rasters/aux files (%s=>%s)..' % (self.src, self.dst))
 
@@ -715,11 +712,7 @@ class Copy:
                 if (self.__m_include_subs == False):
                     if ((r[:-1] if r[-1:] == '/' else r) != os.path.dirname(self.src)):     # note: first arg to walk (self.src) has a trailing '/'
                         continue
-                (f_, ext) = os.path.splitext(file)
-                extension = ext[1:]
-                if (extension == 'xml' and                  # special case-check of the 'xml' extension.
-                    file[-CONST_EXT_AUX_XML_LEN:] == CONST_EXT_AUX_XML):
-                        extension = CONST_EXT_AUX_XML
+                extension = file[file.find('.') + 1:]
                 free_pass = False
 
                 dst_path = r.replace(self.src, self.dst)
@@ -1228,7 +1221,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.9'
+__program_ver__ = 'v3.9a'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
