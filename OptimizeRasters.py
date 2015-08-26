@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150729
+# Version: 20150826
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -924,7 +924,7 @@ class compression:
         if (do_pyramids == 'true' or
             do_pyramids == CCMD_PYRAMIDS_ONLY):
             iss3 = self.m_user_config.getValue('iss3')
-            if (iss3 == True):
+            if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
                 if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
                     input_file = output_file
                 output_file = output_file + '.__vrt__'
@@ -939,7 +939,7 @@ class compression:
             if (ret == False):
                 return False
 
-            if (iss3 == True):
+            if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
                 try:
                     os.remove(output_file)      #*.ext__or__ temp vrt file.
                     in_  = output_file + '.ovr'
@@ -1221,7 +1221,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v3.9a'
+__program_ver__ = 'v3.9b'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1870,4 +1870,4 @@ Message ('\nDone..')
 
 terminate(eOK)
 
-
+ 
