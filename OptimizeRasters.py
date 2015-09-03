@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150806
+# Version: 20150903
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -41,7 +41,6 @@ import time
 from xml.dom import minidom
 import subprocess
 import shutil
-import time
 import datetime
 
 import argparse
@@ -1173,39 +1172,34 @@ class compression:
         return self.__call_external(args)
 
 
-
     def __call_external(self, args):
-
         p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         message = ''
         first_pass_ = True
         messages = []
-
-        bSuccess = False
-
-        while True:
+        val = p.poll()
+        while (val is None):
+            time.sleep (0.5)
+            val = p.poll()
             message = p.stdout.readline()
-            if not message:
-                break
-            if (bSuccess == False):
-                if (message.find('100 - done.') >= 0):
-                    bSuccess = True
-            messages.append(message.strip())
-        if (bSuccess == True):
-            self.message('messages:')
+            if (message):
+                messages.append(message.strip())
+        if (messages):
+            self.message ('messages:')
             for m in messages:
-                    self.message(m)
-
+                    self.message (m)
         warnings = p.stderr.readlines()
-        if (len(warnings) > 0):
-            self.message('warnings:')
+        if (warnings):
+            self.message ('warnings/errors:')
+            is_error = False
             for w in warnings:
+                if (not is_error):
+                    if (w.find('ERROR') >= 0):
+                        is_error = True
                 self.message(w.strip())
-        else:
-            bSuccess = True
-
-        return bSuccess
-
+            if (is_error):
+                return False
+        return True
 
 class Config:
     def __init__(self):
@@ -1422,7 +1416,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v4.0e'
+__program_ver__ = 'v4.1a'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1856,7 +1850,7 @@ if (isinput_s3 == True):
     cfg.setValue('iss3', True);
 
     in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
-    if (args.input_path is not None):        # this will never be (None)
+    if (args.input_path):        # this will never be (None)
         in_s3_parent = args.input_path       # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
         cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
 
@@ -2048,8 +2042,8 @@ if (is_caching == True and
                 cache_output = os.path.dirname(output_file)
                 if (args.cache_output_path is not None):
                     cache_output = args.cache_output_path
-
-                rep_data_file = rep_indx_file = os.path.join(cache_output, '%s.mrf_cache' % (f)).replace('\\', '/')
+                (_fldr, _title) =  os.path.split(input_file.replace(args.input_path, ''))
+                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, _fldr), '%s.mrf_cache' % (f)).replace('\\', '/')
                 if (not comp_val is None):
                     f, e =  os.path.splitext(input_file)
                     if (comp_val in extensions_lup):
