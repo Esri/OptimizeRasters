@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: Logger.py
 # Description: Class to log status from components to log files.
-# Version: 20150723
+# Version: 20150917
 # Requirements: ArcGIS 10.1 SP1
 # Author: Esri Imagery Workflows team
 #------------------------------------------------------------------------------
@@ -24,7 +24,6 @@ from xml.dom.minidom import Document
 from datetime import datetime
 
 import os,sys
-import arcpy
 
 const_start_time_node = 'StartTime'
 const_end_time_node = 'EndTime'
@@ -137,7 +136,11 @@ class Logger:
             _message = 'log-' + errorTypeText + ': ' + message     #print out error message to console while logging.
 
             if (self.isGPRun == True):
-                arcpy.AddMessage(_message)
+                try:
+                    import arcpy
+                    arcpy.AddMessage(_message)
+                except:
+                    pass
             else:
                 print (_message)
 
