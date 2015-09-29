@@ -1716,11 +1716,11 @@ cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else ge
 
 
 # deal with cfg extensions (rasters/exclude list)
-rasters_ext_ = cfg.getValue(CCFG_RASTERS_NODE)
+rasters_ext_ = cfg.getValue(CCFG_RASTERS_NODE, False)
 if (rasters_ext_ is None):
     rasters_ext_ = 'tif,mrf'        # defaults: in-code if defaults are missing in cfg file.
 
-exclude_ext_ = cfg.getValue(CCFG_EXCLUDE_NODE)
+exclude_ext_ = cfg.getValue(CCFG_EXCLUDE_NODE, False)
 if (exclude_ext_ is None):
     exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp' # defaults: in-code if defaults are missing in cfg file.
 
