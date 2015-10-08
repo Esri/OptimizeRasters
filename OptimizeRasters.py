@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20150917
+# Version: 20151008
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -519,7 +519,7 @@ class S3Storage:
         if (self.m_user_config is None):     # shouldn't happen
             Message ('Err. Intenal/User config not initialized.', const_critical_text)
             return False
-        input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT) + S3_path
+        input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + S3_path
         if ((self.m_user_config.getValue('istempoutput')) == True):
             input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -s3input=true
         is_raster = False
@@ -1313,7 +1313,11 @@ def S3Upl(input_file, user_args, *args):
                 user_args[USR_ARG_DEL] == True):
                 for f in ret_buff:
                     try:
-                        os.remove(f)
+                        try:
+                            os.remove(f)
+                        except:
+                            time.sleep(20)
+                            os.remove(f)
                         Message ('[Del] %s' % (f))
                     except Exception as exp:
                         Message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
@@ -1399,7 +1403,7 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
                     t = args[0]['cfg'].getValue('tempoutput', False).replace('\\', '/')    # safety check
                     if (t.endswith('/') == False): # making sure, replace will work fine.
                         t += '/'
-                    o = args[0]['cfg'].getValue(CCFG_PRIVATE_OUTPUT).replace('\\', '/') # safety check
+                    o = args[0]['cfg'].getValue(CCFG_PRIVATE_OUTPUT, False).replace('\\', '/') # safety check
                     if (o.endswith('/') == False):
                         o += '/'
                     dst = (p.replace(t, o))
@@ -2084,7 +2088,11 @@ if (is_cloud_upload):
                 for r in ret:
                     try:
                         Message ('[Del] {}'.format(r))
-                        os.remove(r)
+                        try:
+                            os.remove(r)
+                        except:
+                            time.sleep(20)
+                            os.remove(r)
                     except Exception as e:
                         Message ('[Del] {} ({})'.format(r, str(e)))
             if (_fptr):
@@ -2119,5 +2127,4 @@ if (len(raster_buff) == 0):
 Message ('\nDone..')
 
 terminate(eOK)
-
 
