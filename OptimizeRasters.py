@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20151008
+# Version: 20151018
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -57,6 +57,10 @@ USR_ARG_UPLOAD = 'upload'
 USR_ARG_DEL = 'del'
 # ends
 
+# Del delay
+CDEL_DELAY_SECS = 20
+# ends
+
 # const node-names in the config file
 
 CCLOUD_AMAZON = 'amazon'
@@ -84,6 +88,10 @@ CCFG_FILE = 'OptimizeRasters.xml'
 CCFG_GDAL_PATH = 'GDALPATH'
 # ends
 
+# til related
+CTIL_EXTENSION_ = '.til'
+# ends
+
 # global dbg flags
 CS3_MSG_DETAIL = False
 CS3_UPLOAD_RETRIES = 3
@@ -94,8 +102,117 @@ CS3STORAGE_IN = 0
 CS3STORAGE_OUT = 1
 # ends
 
-# classes of S3Upload module to merge as a single source.
+# class to read/gather info on til files.
+class TIL:
+    CRELATED_FILE_COUNT = 'related_file_count'
+    CPROCESSED_FILE_COUNT = 'processed_file_count'
+    CKEY_FILES = 'files'
+    def __init__(self):
+        self._rasters = []
+        self._tils = []
+        self._tils_info = {}
+        self._output_path = {}
+    @property
+    def TILCount(self):
+        return len(self._tils)
+    def addTIL(self, input):        # add (til) files to process later via (fnc: process).
+                                    # This when the (til) files are found before the associated (files) could be not found at the (til) location because they may not have been downloaded yet.
+        _input = input.replace('\\', '/')
+        self._tils.append(_input)
+        if (not input in self._tils_info):
+            self._tils_info[_input.lower()] = {
+            self.CRELATED_FILE_COUNT : 0,
+            self.CPROCESSED_FILE_COUNT : 0,
+            self.CKEY_FILES : []
+            }
+        return True
 
+    def fileTILRelated(self, input):
+        idx = input.split('.')
+        f = idx[0]
+        f = f.replace('\\', '/').split('/')
+        f = f[len(f) -1]
+        for t in self._tils:
+            if (t.find(f) >= 0):
+                return True
+        for t in self._rasters:
+            if (t.startswith(f)):
+                return True
+        return False
+
+    def addFileToProcessed(self, input):
+        for t in self._tils:
+            _key_til_info = t.lower()
+            if (_key_til_info in self._tils_info):
+                if (input in self._tils_info[_key_til_info][self.CKEY_FILES]):
+                    self._tils_info[_key_til_info][self.CPROCESSED_FILE_COUNT] += 1
+                    return True
+        return False
+
+    def isAllFilesProcessed(self, input):
+        if (not input):
+            return False
+        if (not input.lower() in self._tils_info):
+            return False
+        _key_til_info = input.lower()
+        if (self._tils_info[_key_til_info][self.CRELATED_FILE_COUNT] ==
+            self._tils_info[_key_til_info][self.CPROCESSED_FILE_COUNT]):
+            return True
+        return False
+
+    def process(self, input):
+        if (not input or
+            len(input) == 0):
+            return False
+        if (not os.path.exists(input)):
+            return False
+        with open(input, 'r') as _fp:
+            _line = _fp.readline()
+            while (_line):
+                ln = _line.strip()
+                CBREAK = 'filename ='
+                if (ln.find(CBREAK) != -1):
+                    splt = ln.replace('"', '').replace(';', '').split(CBREAK)
+                    if (len(splt) == 2):
+                        file_name = splt[1].strip()
+                        if (not file_name in self._rasters):
+                            self._rasters.append(file_name)
+                            _key_til_info = input.lower()
+                            if (_key_til_info in self._tils_info):
+                                self._tils_info[_key_til_info][self.CRELATED_FILE_COUNT] += 1
+                                self._tils_info[_key_til_info][self.CKEY_FILES].append(file_name)
+                            print ('{}'.format(file_name))
+                _line = _fp.readline()
+##        self._tils.append (input)
+        return True
+
+    def setOutputPath(self, input, output):
+        if (not input in self._output_path):
+            self._output_path[input] = output
+
+    def getOutputPath(self, input):
+        if (not input in self._output_path):
+            return None
+        return self._output_path[input]
+##    @property
+##    def destinationPath(self):
+##        return self._destination_path
+##
+##    def destinationPath(self, value):
+##        self._destination_path = value
+
+    def find(self, input):
+        for _t in self._tils_info:
+            if (input in self._tils_info[_t][self.CKEY_FILES]):
+                if (self._tils_info[_t][self.CRELATED_FILE_COUNT] <= 1):
+                    return False
+                return True
+        return False
+    def __iter__(self):
+        return iter(self._tils)
+
+
+# classes of S3Upload module to merge as a single source.
 class S3Upload:
     def __init__(self):
         pass;
@@ -491,6 +608,17 @@ class S3Storage:
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
             if (root_only_ is not None):    # if there's a value, take it else defaults to (True)
                 root_only = getBooleanValue(root_only_)
+
+        # get the til files first
+        if (til):
+            for key in keys:
+                if (key.name.endswith('/') == False):
+                    if (not root_only == True):
+                        if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
+                            continue
+                    if (key.name.lower().endswith(CTIL_EXTENSION_)):
+                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
+        # ends
         try:
             for key in keys:
                 if (key.name.endswith('/') == False):
@@ -502,10 +630,19 @@ class S3Storage:
                             if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath) == True):     # if raster/exclude list, do not proceed.
                                 if (getBooleanValue(self.m_user_config.getValue('istempinput')) == False):
                                     continue
+                        if (til):
+                            if (key.name.lower().endswith(CTIL_EXTENSION_)):
+                                continue
                         cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
         except Exception as e:
             Message (e.message, const_critical_text)
             return False
+
+        # Process (til) files once all the associate files have been copied from (cloud) to (local)
+        if (til):
+            for _til in til:
+                til.process(_til)
+        # ends
         return True
     # ends
 
@@ -561,6 +698,13 @@ class S3Storage:
                 fout.close()
             if (S3_key):
                 S3_key.close()
+        # ends
+
+        # take care of (til) inputs.
+        if (til):
+            if (mk_path.lower().endswith(CTIL_EXTENSION_)):
+                if (til.addTIL(mk_path)):
+                    til.setOutputPath(mk_path, mk_path)
         # ends
 
         # Handle any post-processing, if the final destination is to S3, upload right away.
@@ -750,7 +894,7 @@ def args_Callback(args, user_data = None):
         args.append ('-co')
         args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_compression == _LERC2 else ''))
     args.append ('-co')
-    args.append ('BLOCKSIZE=%s' % (m_bsize))
+    args.append ('{}={}'.format('BLOCKXSIZE' if m_mode.lower() == 'gtiff' else 'BLOCKSIZE', m_bsize))
     return args
 
 
@@ -863,6 +1007,22 @@ class Copy:
             log.CreateCategory('Copy')
         Message('Copying non rasters/aux files (%s=>%s)..' % (self.src, self.dst))
 
+        # init - TIL files
+        if (til):
+            for r,d,f in os.walk(self.src):
+                for file in f:
+                    if (self.__m_include_subs == False):
+                        if ((r[:-1] if r[-1:] == '/' else r) != os.path.dirname(self.src)):     # note: first arg to walk (self.src) has a trailing '/'
+                            continue
+                    if (file.lower().endswith(CTIL_EXTENSION_)):
+                        _til_filename = os.path.join(r, file)
+                        print (_til_filename)
+                        if (til):
+                            til.addTIL(_til_filename)
+            for _til in til:
+                til.process(_til)
+        # ends
+
         for r,d,f in os.walk(self.src):
             for file in f:
                 if (self.__m_include_subs == False):
@@ -903,7 +1063,7 @@ class Copy:
                     src_file = os.path.join(r, file)
                     do_post_processing_cb = do_copy = True
                     if (os.path.dirname(src_file.replace('\\','/')) != os.path.dirname(dst_path.replace('\\', '/'))):
-                        if (pre_processing_callback is not None):
+                        if (pre_processing_callback):
                             do_post_processing_cb = do_copy = pre_processing_callback(src_file, dst_file, self.m_user_config)
                         if (do_copy == True):
                              shutil.copyfile(src_file, dst_file)
@@ -1045,7 +1205,7 @@ class compression:
         return self.__call_external(args)
 
 
-    def compress(self, input_file, output_file, args_callback = None, post_processing_callback = None, post_processing_callback_args = None):
+    def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
         # let's try to make the output dir-tree else GDAL would fail
         out_dir_path = os.path.dirname(output_file)
         if (os.path.exists(out_dir_path) == False):
@@ -1081,39 +1241,42 @@ class compression:
                 return ret
 
         post_process_output = output_file
-        if (do_pyramids == 'true' or
-            do_pyramids == CCMD_PYRAMIDS_ONLY):
-            iss3 = self.m_user_config.getValue('iss3')
-            if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
-                if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
-                    input_file = output_file
-                output_file = output_file + '.__vrt__'
-                self.message ('BuildVrt (%s=>%s)' % (input_file, output_file))
-                ret = self.buildMultibandVRT([input_file], output_file)
+
+        if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
+            if (do_pyramids == 'true' or
+                do_pyramids == CCMD_PYRAMIDS_ONLY):
+                iss3 = self.m_user_config.getValue('iss3')
+                if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
+                    if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
+                        input_file = output_file
+                    output_file = output_file + '.__vrt__'
+                    self.message ('BuildVrt (%s=>%s)' % (input_file, output_file))
+                    ret = self.buildMultibandVRT([input_file], output_file)
+                    self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
+                    if (ret == False):
+                        return ret  # we can't proceed if vrt couldn't be built successfully.
+
+                ret = self.createaOverview(output_file)
                 self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
                 if (ret == False):
-                    return ret  # we can't proceed if vrt couldn't be built successfully.
-
-            ret = self.createaOverview(output_file)
-            self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
-            if (ret == False):
-                return False
-
-            if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
-                try:
-                    os.remove(output_file)      #*.ext__or__ temp vrt file.
-                    in_  = output_file + '.ovr'
-                    out_ = in_.replace('.__vrt__' + '.ovr', '.ovr')
-                    if (os.path.exists(out_) == True):
-                        os.remove(out_)         # probably leftover from a previous instance.
-                    self.message ('rename (%s=>%s)' % (in_, out_))
-                    os.rename(in_, out_)
-                except:
-                    self.message ('Warning: Unable to rename/remove (%s)' % (output_file))
                     return False
 
+                if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
+                    try:
+                        os.remove(output_file)      #*.ext__or__ temp vrt file.
+                        in_  = output_file + '.ovr'
+                        out_ = in_.replace('.__vrt__' + '.ovr', '.ovr')
+                        if (os.path.exists(out_) == True):
+                            os.remove(out_)         # probably leftover from a previous instance.
+                        self.message ('rename (%s=>%s)' % (in_, out_))
+                        os.rename(in_, out_)
+                    except:
+                        self.message ('Warning: Unable to rename/remove (%s)' % (output_file))
+                        return False
+
+
         # call any user-defined fnc for any post-processings.
-        if (post_processing_callback is not None):
+        if (post_processing_callback):
             if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD)) == True):
                 self.message ('[S3-Push]..');
             ret = post_processing_callback(post_process_output, post_processing_callback_args, {'f' : post_process_output, 'cfg' : self.m_user_config})
@@ -1133,6 +1296,13 @@ class compression:
                 get_mode == 'clonemrf' or
                 get_mode == 'splitmrf'):
                     return True
+
+        # skip pyramid creation on (tiffs) related to (til) files.
+        if (til):
+            (p, n) = os.path.split(input_file)
+            if (til.find(n)):
+                return True
+        # ends
 
         self.message('Creating pyramid (%s)' % (input_file))
         # let's input cfg values..
@@ -1309,16 +1479,21 @@ def S3Upl(input_file, user_args, *args):
 
     if (user_args != None):
         if (USR_ARG_DEL in user_args):
-            if (user_args[USR_ARG_DEL] is not None and
+            if (user_args[USR_ARG_DEL] and
                 user_args[USR_ARG_DEL] == True):
                 for f in ret_buff:
                     try:
-                        try:
-                            os.remove(f)
-                        except:
-                            time.sleep(20)
-                            os.remove(f)
-                        Message ('[Del] %s' % (f))
+                        _is_remove = True
+                        if (til):
+                            if (til.fileTILRelated(f)):
+                                _is_remove = False
+                        if (_is_remove):
+                            try:
+                                os.remove(f)
+                            except:
+                                time.sleep(CDEL_DELAY_SECS)
+                                os.remove(f)
+                            Message ('[Del] %s' % (f))
                     except Exception as exp:
                         Message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
     return (len(ret_buff) > 0)
@@ -1381,10 +1556,17 @@ def terminate(exit_code, log_category = False):
     sys.exit(exit_code)
 # ends
 
+def fn_pre_process_copy_default (src, dst, arg):
+    if (not src):
+        return False
+    if (til):
+        if (src.lower().endswith(CTIL_EXTENSION_)):
+            til.setOutputPath(src, dst)
+    return True
+
 def fn_pre_process_copy(src, dst, arg):
     g_pre_cpy_list.append({'src' : src, 'dst' : dst})
-    return True     # continue with default logic/copying within caller.
-
+    return fn_pre_process_copy_default(src, dst, arg)   # continue with default logic/copying within caller.
 
 def fn_copy_temp_dst(input_source, cb_args, *args):
     fn_cpy_ = Copy()
@@ -1420,7 +1602,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v4.1b'
+__program_ver__ = 'v4.2a'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1796,10 +1978,21 @@ if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
 user_args_Callback = {
 USR_ARG_UPLOAD : getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)),
 USR_ARG_DEL : getBooleanValue(cfg.getValue('Out_S3_DeleteAfterUpload'))
+##'til' : {'del' : False,
+##         'extensions' : ['til', 'imd', 'idx', 'tif', 'tif.aux.xml', 'lrc']
+##        }
 }
 # ends
 
 cpy = Copy()
+til = None      # by (default) til extensions or its associated files aren't processed differently.
+
+# do we need to process (til) files?
+for x in cfg.getValue(CCFG_RASTERS_NODE):
+    if (x.lower() == 'til'):
+        til = TIL()
+        break
+# ends
 
 list = {
 'copy' : {'*'},
@@ -1894,7 +2087,7 @@ if (is_caching == False):
         if  (ret == False):
             Message(CONST_CPY_ERR_0, const_critical_text);
             terminate(eFAIL)
-        ret = cpy.processs(S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy if is_input_temp == True else None)
+        ret = cpy.processs(S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy if is_input_temp == True else fn_pre_process_copy_default)
         if (ret == False):
             Message(CONST_CPY_ERR_1, const_critical_text);
             terminate(eFAIL)
@@ -1932,29 +2125,87 @@ if (is_caching == False):
             m =  files_len
 
         threads = []
-
         for i in range(s, m):
             req = files[i]
             (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+
             f, e = os.path.splitext(output_file)
             if (cfg_keep_original_ext == False):
                 output_file = output_file.replace(e, CONST_OUTPUT_EXT)
-            t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
+            _build_pyramids = True
+            if (til):
+                if (til.find(req['f'])):
+                    til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
+                    _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
+            t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
             t.daemon = True
             t.start()
             threads.append(t)
 
         for t in threads:
             t.join()
+
+        # process til file if all the associate files have been processed
+        if (til):
+            for _til in til:
+                if (not til.isAllFilesProcessed(_til)):
+                    print ('** not yet completed for ({})'.format(_til));
+                if (til.isAllFilesProcessed(_til)):
+                    til_output_path = til.getOutputPath(_til)
+                    if (not til_output_path):
+                        Message ('Warning. TIL output-path returned empty/Internal error');
+                        continue
+                    ret = comp.createaOverview(til_output_path)
+                    if (not ret):
+                        Message ('Warning. Unable to build pyramids on ({})'.format(til_output_path));
+                        continue
+                    ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path))
+                    if (not ret):
+                        Message ('Warning. Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path))
+                        continue
+                    # let's rename (.mrf) => (.ovr)
+                    try:
+                        os.remove('{}.ovr'.format(til_output_path))
+                        os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
+                    except Exception as e:
+                        Message ('Warning. ({})'.format(str(e)))
+                        continue
+
+                    # upload (til) related files (.idx, .ovr, .lrc)
+                    if (is_cloud_upload):
+                        ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
+                        retry_failed_lst  = []
+                        failed_upl_lst = S3_storage.getFailedUploadList()
+                        if (failed_upl_lst):
+                            [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
+                        # let's delete all the associate files related to (TIL) files.
+                        (p, n) = os.path.split(til_output_path)
+                        for r,d,f in os.walk(p):
+                            for file in f:
+                                if (r != p):
+                                    continue
+                                mk_filename = os.path.join(r, file).replace('\\', '/')
+                                if (til.fileTILRelated(mk_filename)):
+                                    if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
+                                        print ('**{} in failed upload list'.format(mk_filename))
+                                        continue
+                                    try:
+                                        Message ('[Del] {}'.format(mk_filename))
+                                        os.remove(mk_filename)
+                                    except Exception as e:
+                                        Message ('[Del] Err. {} ({})'.format(mk_filename, str(e)))
+                        # ends
+                    # ends
+        # ends
+
         s = m
         if s == files_len or s == 0:
             break
-
     # let's clean up the input-temp if has been used.
-
     # ends
 # ends
 
+#terminate(eOK);     # debug
 
 # block to deal with meta-data ops.
 if (is_caching == True and
@@ -2063,6 +2314,7 @@ if (is_caching == True and
 
 # do we have failed upload files on list?
 if (is_cloud_upload):
+    retry_failed_lst  = []       # holds the file names that failed the (final) retry. These files will not be deleted.
     if (cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON):
         failed_upl_lst = S3_storage.getFailedUploadList()
         if (failed_upl_lst):
@@ -2084,6 +2336,7 @@ if (is_cloud_upload):
                 # the following files will be logged as unsuccessful uploads to output cloud
                 if (not ret):
                     if (_fptr): _fptr.write('{}\n'.format(v['local']))
+                    retry_failed_lst.append (v['local'].lower())
                 # ends
                 for r in ret:
                     try:
@@ -2091,7 +2344,7 @@ if (is_cloud_upload):
                         try:
                             os.remove(r)
                         except:
-                            time.sleep(20)
+                            time.sleep(CDEL_DELAY_SECS)
                             os.remove(r)
                     except Exception as e:
                         Message ('[Del] {} ({})'.format(r, str(e)))
@@ -2099,7 +2352,6 @@ if (is_cloud_upload):
                 _fptr.close()
                 _fptr = None
 # ends
-
 
 # let's clean-up rasters @ temp input path
 dbg_delete = True
@@ -2118,7 +2370,6 @@ if (dbg_delete == True):
             Message ('Done.')
 # ends
 
-
 if (len(raster_buff) == 0):
     Message ('Err. No input rasters to process..', const_warning_text);
 # ends
@@ -2127,4 +2378,5 @@ if (len(raster_buff) == 0):
 Message ('\nDone..')
 
 terminate(eOK)
+
 
