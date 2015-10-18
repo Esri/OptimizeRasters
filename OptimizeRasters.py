@@ -927,7 +927,7 @@ def args_Callback_for_meta(args, user_data = None):
             if (m_interleave is not None):
                 m_interleave = m_interleave.upper()
             lerc_prec = user_data[CIDX_USER_CONFIG].getValue('LERCPrecision')
-            if (lerc_prec is not None):
+            if (lerc_prec):
                 m_lerc_prec = lerc_prec
         except:     # could throw if index isn't found
             pass    # ingnore with defaults.
@@ -936,7 +936,7 @@ def args_Callback_for_meta(args, user_data = None):
     args.append ('MRF')
     args.append ('-co')
     args.append ('COMPRESS=%s' % ('lerc' if m_comp == _LERC2 else m_comp))
-    if (m_comp == 'lerc'):
+    if (m_comp.startswith('lerc')):
         args.append ('-co')
         args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_comp == _LERC2 else ''))
     elif(m_comp == 'jpeg'):
