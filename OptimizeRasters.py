@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20151018
+# Version: 20151021
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -1602,7 +1602,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v4.2a'
+__program_ver__ = 'v4.2b'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -2295,10 +2295,10 @@ if (is_caching == True and
             if (pos != -1):
                 pos += len(key)
                 cache_output = os.path.dirname(output_file)
-                if (args.cache_output_path is not None):
+                if (args.cache_output_path):
                     cache_output = args.cache_output_path
                 (_fldr, _title) =  os.path.split(input_file.replace(cfg.getValue('In_S3_Prefix') if isinput_s3 else args.input_path, ''))
-                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, _fldr), '%s.mrf_cache' % (f)).replace('\\', '/')
+                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, os.path.basename(_fldr)), '%s.mrf_cache' % (f)).replace('\\', '/')
                 if (not comp_val is None):
                     f, e =  os.path.splitext(input_file)
                     if (comp_val in extensions_lup):
