@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20151021
+# Version: 20151101
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -59,6 +59,14 @@ USR_ARG_DEL = 'del'
 
 # Del delay
 CDEL_DELAY_SECS = 20
+# ends
+
+# utility const
+CSIN_UPL = 'SIN_UPL'
+CINC_SUB = 'INC_SUB'
+
+COP_UPL = 'upload'
+COP_DNL = 'download'
 # ends
 
 # const node-names in the config file
@@ -606,7 +614,7 @@ class S3Storage:
         root_only = True
         if (self.m_user_config is not None):
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
-            if (root_only_ is not None):    # if there's a value, take it else defaults to (True)
+            if (root_only_):    # if there's a value, take it else defaults to (True)
                 root_only = getBooleanValue(root_only_)
 
         # get the til files first
@@ -745,14 +753,13 @@ class S3Storage:
         return True
 
 
-    def upload_group(self, input_source, single_upload = False):
+    def upload_group(self, input_source, single_upload = False, include_subs = False):
         m_input_source = input_source.replace('\\', '/')
         input_path = os.path.dirname(m_input_source)
         upload_buff = []
 
         (p, e) = os.path.splitext(m_input_source)
         for r,d,f in os.walk(input_path):
-
             for file in f:
                 mk_path = os.path.join(r, file).replace('\\', '/')
                 if (mk_path.startswith(p)):
@@ -804,8 +811,9 @@ class S3Storage:
                     upload_buff.append(mk_path);    # successful entries to return.
                     if (single_upload == True):
                         return upload_buff
-
-            return upload_buff       # this could be empty.
+            if (not include_subs):
+                return upload_buff
+        return upload_buff       # this could be empty.
 # ends
 
 
@@ -997,7 +1005,7 @@ class Copy:
         if (user_config != None):
             self.m_user_config = user_config
             include_subs = self.m_user_config.getValue('IncludeSubdirectories')
-            if (include_subs is not None):    # if there's a value, take it else defaults to (True)
+            if (include_subs):    # if there's a value, take it else defaults to (True)
                 self.__m_include_subs = getBooleanValue(include_subs)
 
         return True
@@ -1428,7 +1436,13 @@ def S3Upl(input_file, user_args, *args):
         if (S3_storage is None):    # globally declared: S3_storage
             Message (internal_err_msg, const_critical_text)
             return False
-        ret_buff = S3_storage.upload_group(input_file)
+        _single_upload = _include_subs = False    # def
+        if (user_args):
+            if (CSIN_UPL in user_args):
+                _single_upload = getBooleanValue(user_args[CSIN_UPL])
+            if (CINC_SUB in user_args):
+                _include_subs = getBooleanValue(user_args[CINC_SUB])
+        ret_buff = S3_storage.upload_group(input_file, single_upload = _single_upload, include_subs = _include_subs)
         if (len(ret_buff) == 0):
             return False
     elif (upload_cloud_type == CCLOUD_AZURE):
@@ -1602,7 +1616,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-__program_ver__ = 'v4.2b'
+__program_ver__ = 'v4.2d'
 __program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
 
 parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
@@ -1626,6 +1640,7 @@ parser.add_argument('-tempoutput', help='Path to output converted rasters before
 parser.add_argument('-cloudupload', help='Upload output to Cloud? [true/false]', dest='cloudupload');
 parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype');
 parser.add_argument('-s3output', help='Is -output path on S3? [true/false]. Please note, this flag is depreciated but will continue to work for backward compatibilily. Please use (-cloudupload) instead.', dest='s3output');
+parser.add_argument('-op', help='Utility operation mode [upload]', dest='utility');
 
 
 log  = None
@@ -1648,6 +1663,20 @@ if (ret == False):
     terminate(eFAIL)
 # ends
 
+# valid (op/utility) commands
+_utility = {
+COP_UPL : None,
+COP_DNL : None
+}
+
+if (args.utility):
+    args.utility = args.utility.lower()
+    if (not args.utility in _utility):
+        Message ('Err. Invalid utility operation mode ({})'.format(args.utility), const_critical_text)
+        terminate(eFAIL)
+    if (args.utility == COP_UPL):
+        args.cloudupload = 'true'
+        args.tempoutput = args.input_path if os.path.isdir(args.input_path) else os.path.dirname(args.input_path)
 
 # fix the slashes to force a convention
 if (args.input_path):
@@ -1707,7 +1736,10 @@ if (args.tempoutput):
     if (os.path.isdir(args.tempoutput) == False):
         # attempt to create the temp-output path
         try:
-            os.makedirs(args.tempoutput)
+            if (not args.utility or
+                (args.utility and
+                 args.utility != COP_UPL)):
+                os.makedirs(args.tempoutput)
         except Exception as exp:
             Message ('Unable to create the temp-output-path (%s)\n[%s]' % (args.tempoutput, str(exp)), const_critical_text)
             terminate(eFAIL)
@@ -1794,16 +1826,18 @@ if (isinput_s3 == True or
 
 # take care of missing -input and -output if -s3input==True
 if (isinput_s3 == True):
-    if (args.input_path is None):
+    if (not args.input_path):
         args.input_path = cfg.getValue(CIN_S3_PARENTFOLDER, False);
-        if (args.input_path is not None):
+        if (args.input_path):
             args.input_path = args.input_path.strip().replace('\\', '/')
         cfg.setValue(CIN_S3_PARENTFOLDER, args.input_path)
 
 if (is_cloud_upload):
     if (not is_output_temp):
-        Message ('-tempoutput must be specified if -cloudupload=true', const_critical_text)
-        terminate(eFAIL)
+        if ((args.utility and args.utility != COP_UPL) or
+            not args.utility):
+            Message ('-tempoutput must be specified if -cloudupload=true', const_critical_text)
+            terminate(eFAIL)
     _access = cfg.getValue(COUT_AZURE_ACCESS)
     if (_access):
         if (not _access in ('private', 'blob', 'container')):
@@ -1826,15 +1860,21 @@ if (is_cloud_upload):
         cfg.setValue(COUT_S3_PARENTFOLDER, args.output_path)
 # ends
 
-if (args.output_path is None or
-    args.input_path is None):
-    Message ('-input/-ouput is not specified!', const_critical_text)
-    terminate(eFAIL)
+if (not args.output_path or
+    not args.input_path):
+    if ((not args.utility and
+        not args.input_path) or
+        (args.utility and
+        not args.input_path)):
+        Message ('-input/-ouput is not specified!', const_critical_text)
+        terminate(eFAIL)
 
 # set output in cfg.
 dst_ = args.output_path
-if (dst_[-1:] != '/'):
+if (dst_ and
+    dst_[-1:] != '/'):
     dst_ += '/'
+
 cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_)
 # ends
 
@@ -1949,9 +1989,9 @@ if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
                 terminate(eFAIL)
         # instance of upload storage.
         S3_storage = S3Storage()
-        if (args.output_path is not None):
+        if (args.output_path):
             s3_output = args.output_path
-            cfg.getValue(COUT_S3_PARENTFOLDER, s3_output)
+            cfg.setValue(COUT_S3_PARENTFOLDER, s3_output)
         ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT, cfg)
         if (ret == False):
             Message (err_init_msg.format('S3'), const_critical_text);
@@ -1984,8 +2024,54 @@ USR_ARG_DEL : getBooleanValue(cfg.getValue('Out_S3_DeleteAfterUpload'))
 }
 # ends
 
-cpy = Copy()
 til = None      # by (default) til extensions or its associated files aren't processed differently.
+
+# handle utility operations
+if (args.utility):      # debug
+    if (args.utility == COP_UPL):
+        if (S3_storage):
+            if (os.path.isfile(args.input_path)):
+                try:
+                    with open(args.input_path, 'r') as _fptr:
+                        _rd = _fptr.readline()
+                        user_args_Callback[CSIN_UPL] = True         # setup config property
+                        while (_rd):
+                            _rd = _rd.strip()
+                            S3Upl(_rd, user_args_Callback)
+                            _rd = _fptr.readline()
+                except Exception as e:
+                    Message ('Err. {}'.format(str(e)))
+            elif (os.path.isdir (args.input_path)):
+                user_args_Callback[CINC_SUB] = getBooleanValue(cfg.getValue('IncludeSubdirectories'))   # setup config property
+                S3Upl('{}/'.format(args.input_path), user_args_Callback)
+            else:
+                Message ('Err. Invalid -input. ({})'.format(args.input_path))
+                terminate (eFAIL);
+            retry_failed_lst  = []
+            failed_upl_lst = S3_storage.getFailedUploadList()
+            if (failed_upl_lst):
+                [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
+                # write out the upl_err_file
+                _fptr = None
+                if (log_output_folder):
+                    try:
+                        if (not os.path.isdir(log_output_folder)):
+                            os.makedirs(log_output_folder)
+                        ousr_date =  datetime.datetime.now()
+                        err_upl_file = os.path.join(log_output_folder,
+                        'OR_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (ousr_date.year, ousr_date.month, ousr_date.day,
+                        ousr_date.hour, ousr_date.minute, ousr_date.second))
+                        with open(err_upl_file, 'w+') as _fptr:
+                            for _wl in retry_failed_lst:
+                                _fptr.write ('{}\n'.format(_wl))
+                    except Exception as e:
+                        Message ('Err. Writing the failed upload file list.\n{}'.format(str(e)))
+                # ends
+    terminate(eOK)
+# ends
+
+
+cpy = Copy()
 
 # do we need to process (til) files?
 for x in cfg.getValue(CCFG_RASTERS_NODE):
@@ -2297,8 +2383,7 @@ if (is_caching == True and
                 cache_output = os.path.dirname(output_file)
                 if (args.cache_output_path):
                     cache_output = args.cache_output_path
-                (_fldr, _title) =  os.path.split(input_file.replace(cfg.getValue('In_S3_Prefix') if isinput_s3 else args.input_path, ''))
-                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, os.path.basename(_fldr)), '%s.mrf_cache' % (f)).replace('\\', '/')
+                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, ''), '%s.mrf_cache' % (f)).replace('\\', '/')
                 if (not comp_val is None):
                     f, e =  os.path.splitext(input_file)
                     if (comp_val in extensions_lup):
