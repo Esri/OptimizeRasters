@@ -14,11 +14,11 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20151101
+# Version: 20151206
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
-# -tempinput -tempoutput -subs
+# -tempinput -tempoutput -subs -cloudupload/-s3output -clouduploadtype -op -job
 # Usage: python.exe OptimizeRasters.py <arguments>
 # Notes: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
@@ -52,6 +52,17 @@ eOK = 0
 eFAIL = 1
 # ends
 
+# const related to (Reporter) class
+CRPT_SOURCE = 'SOURCE'
+CRPT_COPIED = 'COPIED'
+CRPT_PROCESSED = 'PROCESSED'
+CRPT_UPLOADED = 'UPLOADED'
+
+CRPT_YES = 'yes'
+CRPT_NO = 'no'
+CRPT_UNDEFINED = ''
+# ends
+
 # user hsh const
 USR_ARG_UPLOAD = 'upload'
 USR_ARG_DEL = 'del'
@@ -61,12 +72,22 @@ USR_ARG_DEL = 'del'
 CDEL_DELAY_SECS = 20
 # ends
 
+CPRJ_NAME = 'ProjectName'
+CLOAD_RESTORE_POINT = '__LOAD_RESTORE_POINT__'
+
 # utility const
 CSIN_UPL = 'SIN_UPL'
 CINC_SUB = 'INC_SUB'
 
 COP_UPL = 'upload'
 COP_DNL = 'download'
+COP_RPT = 'report'
+# ends
+
+# resume constants
+CRESUME = '_RESUME_'
+CRESUME_MSG_PREFIX = '[Resume]'
+CRESUME_ARG = 'resume'
 # ends
 
 # const node-names in the config file
@@ -89,6 +110,7 @@ COUT_CLOUD_TYPE = 'Out_Cloud_Type'
 COUT_S3_PARENTFOLDER = 'Out_S3_ParentFolder'
 COUT_S3_ACL = 'Out_S3_ACL'
 CIN_S3_PARENTFOLDER = 'In_S3_ParentFolder'
+CIN_S3_PREFIX = 'In_S3_Prefix'
 # ends
 
 # const
@@ -109,6 +131,331 @@ CS3_UPLOAD_RETRIES = 3
 CS3STORAGE_IN = 0
 CS3STORAGE_OUT = 1
 # ends
+
+
+class Base(object):
+    # log status types enums
+    const_general_text = 0
+    const_warning_text = 1
+    const_critical_text = 2
+    const_status_text = 3
+    # ends
+    def __init__(self, msgHandler = None, msgCallback = None):
+        self._m_log  = msgHandler
+        self._m_msg_callback = msgCallback
+        if (self._m_msg_callback):
+            if (self._m_log):
+                self._m_log.isPrint = False
+    def init(self):
+        return True
+    def message(self, msg, status = const_general_text):
+        if (self._m_log):
+            self._m_log.Message(msg, status)
+        if (self._m_msg_callback):
+            self._m_msg_callback(msg, status)
+            return
+        #sys.stdout.flush()      # for any paprent process to receive the stdout realtime.
+
+    def getBooleanValue(self, value):        # helper function
+        if (value is None):
+            return False
+        if (isinstance(value, bool) == True):
+            return value
+        val = value.lower()
+        if (val == 'true' or
+            val == 'yes' or
+            val == 't' or
+            val == '1' or
+            val == 'y'):
+                return True
+        return False
+    @property
+    def getMessageHandler(self):
+        return self._m_log
+    @property
+    def getMessageCallback(self):
+        return self._m_msg_callback
+    def close(self):
+        if (self._m_log):
+            self._m_log.WriteLog('#all')   #persist information/errors collected.
+    def S3Upl(self, input_file, user_args, *args):
+        global _rpt
+        if (_rpt):
+            _source_path = getSourcePathUsingTempOutput(input_file)
+            if (_source_path):
+                _ret_val = _rpt.getRecordStatus(_source_path, CRPT_UPLOADED)
+                if (_ret_val == CRPT_YES):
+                    return True
+
+        ret_buff = []
+        internal_err_msg = 'Internal error at [S3Upl]'
+        upload_cloud_type = cfg.getValue(COUT_CLOUD_TYPE, True)
+        if (upload_cloud_type == CCLOUD_AMAZON):
+            if (S3_storage is None):    # globally declared: S3_storage
+                self.message (internal_err_msg, const_critical_text)
+                return False
+            _single_upload = _include_subs = False    # def
+            if (user_args):
+                if (CSIN_UPL in user_args):
+                    _single_upload = getBooleanValue(user_args[CSIN_UPL])
+                if (CINC_SUB in user_args):
+                    _include_subs = getBooleanValue(user_args[CINC_SUB])
+            ret_buff = S3_storage.upload_group(input_file, single_upload = _single_upload, include_subs = _include_subs)
+            if (len(ret_buff) == 0):
+                return False
+        elif (upload_cloud_type == CCLOUD_AZURE):
+            if(azure_storage is None):
+                self.message (internal_err_msg, const_critical_text)
+                return False
+
+            properties = {
+            'tempoutput' : cfg.getValue('tempoutput', False),
+            'access' : cfg.getValue(COUT_AZURE_ACCESS, True)
+            }
+
+            if (True in [input_file.endswith(x) for x in cfg.getValue(CCFG_RASTERS_NODE)]):
+                _input_file = input_file.replace('\\', '/')
+                (p, n) = os.path.split(_input_file)
+                indx = n.find('.')
+                file_name_prefix = n
+                if (indx >= 0): file_name_prefix = file_name_prefix[:indx]
+                input_folder = os.path.dirname(_input_file)
+                for r,d,f in os.walk(input_folder):
+                    r = r.replace('\\', '/')
+                    if (r == input_folder):
+                        for _file in f:
+    ##                        if (_file.endswith('.lrc')):
+    ##                            continue
+                            if (_file.startswith(file_name_prefix)):
+                                file_to_upload = os.path.join(r, _file)
+                                if (azure_storage.upload(
+                                file_to_upload,
+                                cfg.getValue (COUT_AZURE_CONTAINER, False),
+                                cfg.getValue (CCFG_PRIVATE_OUTPUT, False),
+                                properties
+                                )):
+                                    ret_buff.append(file_to_upload)
+                        break
+            else:
+                if (azure_storage.upload(
+                input_file,
+                cfg.getValue (COUT_AZURE_CONTAINER, False),
+                cfg.getValue (CCFG_PRIVATE_OUTPUT, False),
+                properties
+                )):
+                    ret_buff.append(input_file)
+
+        if (CS3_MSG_DETAIL == True):
+            self.message ('Following file(s) uploaded to ({})'.format(CCLOUD_AMAZON if upload_cloud_type == CCLOUD_AMAZON else CCLOUD_AZURE))
+            [self.message ('{}'.format(f)) for f in ret_buff]
+
+        if (user_args != None):
+            if (USR_ARG_DEL in user_args):
+                if (user_args[USR_ARG_DEL] and
+                    user_args[USR_ARG_DEL] == True):
+                    for f in ret_buff:
+                        try:
+                            _is_remove = True
+                            if (til):
+                                if (til.fileTILRelated(f)):
+                                    _is_remove = False
+                            if (_is_remove):
+                                try:
+                                    os.remove(f)
+                                except:
+                                    time.sleep(CDEL_DELAY_SECS)
+                                    os.remove(f)
+                                self.message ('[Del] %s' % (f))
+                        except Exception as exp:
+                            self.message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
+
+        if (ret_buff):
+            setUploadRecordStatus (input_file, CRPT_YES)
+
+        return (len(ret_buff) > 0)
+
+
+class Report:
+    CHEADER_PREFIX = '#'
+    CJOB_EXT = '.csv'
+    def __init__(self):
+        self._input_list = []
+        self._input_list_info = {}
+        self._header = {}
+    def init(self, report_file, root = None):
+        if (not report_file):
+            return False
+        self._report_file = report_file
+        if (root):
+            _root = root.replace('\\', '/')
+            if (_root[-1:] != '/'):
+                _root += '/'
+            self._input_list.append(_root)          # first element in the report is the -input path to source
+        return True
+    def getRecordStatus(self, input, type):         # returns (true or false)
+        if (input is None or
+            type is None):
+            return CRPT_UNDEFINED
+        try:
+            return (self._input_list_info[input][type.upper()])
+        except:
+            pass
+        return CRPT_UNDEFINED
+    @staticmethod
+    def getUniqueFileName():
+        from datetime import datetime
+        _dt =  datetime.now()
+        _prefix = 'OR'
+        _jobName  = _prefix + "_%04d%02d%02dT%02d%02d%02d%06d" % (_dt.year, _dt.month, _dt.day, \
+        _dt.hour, _dt.minute, _dt.second, _dt.microsecond)
+        return _jobName
+
+    def updateRecordStatus(self, input, type, value):  # input is the (src) path name which is case sensitive.
+        if (input is None or
+            type is None or
+            value is None):
+            return False
+        _input = input.strip()
+        if (not _input in self._input_list_info):
+            Message ('Err. Invalid input ({}) at (Reporter)'.format (_input), const_critical_text)
+            return False        # possible internal flow err.
+        _type = type.upper()
+        if (not _type in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
+            Message ('Err. Invalid type ({}) at (Reporter)'.format(type), const_critical_text)
+            return False
+        _value = value.lower()
+        if (not _value in [CRPT_YES, CRPT_NO]):
+            Message ('Err. Invalid value ({}) at (Reporter)'.format(_value), const_critical_text)
+            return False
+
+        self._input_list_info[input][_type] = _value
+        return True
+    def addHeader(self, key, value):
+        if (not key or
+            not value):
+            return False
+        self._header[key.lower()] = value
+        return True
+    def removeHeader(self, key):
+        if (not key):
+            return False
+        if (not key.lower() in self._header):
+            return False
+        del self._header[key.lower()]
+        return True
+    def addFile(self, file):
+        if (not file):
+            return False
+        _file = file.replace('\\', '/')
+        _get_store =  self.findWith(_file)
+        if (not _get_store and
+             _get_store == _file):
+            return False        # no duplicate entires allowed.
+        self._input_list.append(_file)
+        return True
+    @property
+    def root(self):
+        if (not self._input_list):
+            return ''
+        return self._input_list[0]      # first element is the (root) input/source folder.
+    def read(self, readCallback = None):
+        try:
+            with open(self._report_file , 'r') as _fptr:
+                ln = _fptr.readline()
+                hdr_skipped = False
+                while(ln):
+                    if (not ln.strip()):        # ignore empty-lines.
+                        ln = _fptr.readline()
+                        continue
+                    if (readCallback):      # client side callback support.
+                        readCallback(ln)
+                    lns = ln.strip().split(',')
+                    _fname = lns[0].strip().replace('\\', '/')
+                    if (_fname.startswith(self.CHEADER_PREFIX)):
+                        _hdr = _fname.replace(self.CHEADER_PREFIX, '').split('=')
+                        if (len(_hdr) > 1):
+                            self.addHeader(_hdr[0].strip(), _hdr[1].strip())
+                            ln = _fptr.readline()
+                            continue
+                    if (not _fname or
+                        not hdr_skipped):        # do not accept empty lines.
+                        ln = _fptr.readline()
+                        if (_fname):
+                            hdr_skipped = True
+                        continue
+                    _copied = '' if len(lns) <= 1 else lns[1].strip()       # for now, previously stored status values aren't used.
+                    _processed  = '' if len(lns) <= 2 else lns[2].strip()
+                    _uploaded = '' if len(lns) <= 3 else lns[3].strip()
+
+                    self._input_list.append(_fname)
+                    if (not _fname in self._input_list_info):
+                        self._input_list_info[_fname] = {
+                            CRPT_COPIED : _copied,
+                            CRPT_PROCESSED : _processed,
+                            CRPT_UPLOADED : _uploaded
+                            }
+                    ln = _fptr.readline()
+        except Exception as exp:
+            Message ('Err. {}'.format(str(exp)), const_critical_text)
+            return False
+        return True
+
+    def findWith(self, input):
+        if (not self._input_list):
+            return None
+        for f in self._input_list:
+            if (f.find(input) != -1):
+                return f
+        return None
+    def moveJobFileToPath(self, path):  # successful job files can be moved over to a given folder.
+        if (not path):
+            return False
+        try:
+            get_tile = os.path.basename(self._report_file)
+            mk_path = os.path.join(path, get_tile)
+            Message ('[MV] {}'.format(mk_path))
+            shutil.move(self._report_file, mk_path)
+        except Exception as e:
+            Message ('Err. ({})'.format(str(e)), const_critical_text)
+            return False
+        return True
+
+    def hasFailures(self):
+        if (not self._input_list):
+            return False
+        for f in self:
+            if (self._input_list_info[f][CRPT_COPIED] == CRPT_NO or
+                self._input_list_info[f][CRPT_PROCESSED] == CRPT_NO or
+                self._input_list_info[f][CRPT_UPLOADED] == CRPT_NO):
+                    return True
+        return False
+
+    def write(self):
+        try:
+            CCSV_HEADER_ = 'csv_header'
+            _frmt = '{},{},{},{}\n'
+            with open(self._report_file , 'w+') as _fptr:
+                for key in self._header:
+                    _fptr.write('{} {}={}\n'.format(self.CHEADER_PREFIX, key, self._header[key]))
+                _fptr.write(_frmt.format(CRPT_SOURCE, CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED))
+                for f in self._input_list:
+                    _fptr.write(_frmt.format(f,
+                    self._input_list_info[f][CRPT_COPIED] if f in self._input_list_info else '',
+                    self._input_list_info[f][CRPT_PROCESSED] if f in self._input_list_info else '',
+                    self._input_list_info[f][CRPT_UPLOADED] if f in self._input_list_info else ''
+                    ));
+        except Exception as exp:
+            Message ('Err. {}'.format(str(exp)), const_critical_text)
+            return False
+        return True
+    def walk(self):
+        walk_tree = []
+        for f in self:
+            (d, f) = os.path.split (f)
+            walk_tree.append (('{}/'.format(d), (), (f.strip(),)))
+        return walk_tree
+    def __iter__(self):
+        return iter(self._input_list)
 
 # class to read/gather info on til files.
 class TIL:
@@ -147,7 +494,6 @@ class TIL:
             if (t.startswith(f)):
                 return True
         return False
-
     def addFileToProcessed(self, input):
         for t in self._tils:
             _key_til_info = t.lower()
@@ -156,7 +502,6 @@ class TIL:
                     self._tils_info[_key_til_info][self.CPROCESSED_FILE_COUNT] += 1
                     return True
         return False
-
     def isAllFilesProcessed(self, input):
         if (not input):
             return False
@@ -167,7 +512,6 @@ class TIL:
             self._tils_info[_key_til_info][self.CPROCESSED_FILE_COUNT]):
             return True
         return False
-
     def process(self, input):
         if (not input or
             len(input) == 0):
@@ -193,22 +537,13 @@ class TIL:
                 _line = _fp.readline()
 ##        self._tils.append (input)
         return True
-
     def setOutputPath(self, input, output):
         if (not input in self._output_path):
             self._output_path[input] = output
-
     def getOutputPath(self, input):
         if (not input in self._output_path):
             return None
         return self._output_path[input]
-##    @property
-##    def destinationPath(self):
-##        return self._destination_path
-##
-##    def destinationPath(self, value):
-##        self._destination_path = value
-
     def find(self, input):
         for _t in self._tils_info:
             if (input in self._tils_info[_t][self.CKEY_FILES]):
@@ -222,21 +557,22 @@ class TIL:
 
 # classes of S3Upload module to merge as a single source.
 class S3Upload:
-    def __init__(self):
-        pass;
+    def __init__(self, base):
+        self._base = base
 
     def run(self, bobj, fobj, id, tot_ids):
         fobj.seek(0)
         msg_frmt = '[Push] block'
-        Message ('{} ({}/{})'.format(msg_frmt, id, tot_ids));
+        self._base.message ('{} ({}/{})'.format(msg_frmt, id, tot_ids));
         bobj.upload_part_from_file(fobj, id)
-        Message ('{} ({}/{}) - Done'.format(msg_frmt, id, tot_ids));
+        self._base.message ('{} ({}/{}) - Done'.format(msg_frmt, id, tot_ids));
         fobj.close()
         del fobj
 
 
 class S3Upload_:
-    def __init__(self, s3_bucket, s3_path, local_file, acl_policy = 'private'):
+    def __init__(self, base, s3_bucket, s3_path, local_file, acl_policy = 'private'):
+        self._base = base       # base
         self.m_s3_path =  s3_path
         self.m_local_file = local_file
         self.m_s3_bucket = s3_bucket
@@ -259,11 +595,11 @@ class S3Upload_:
         CHUNK_MIN_SIZE = 5242880
 ##        if (self.m_local_file.endswith('.lrc')):
 ##            return False
-        Message('[S3-Push] {}..'.format(self.m_local_file))
+        self._base.message('[S3-Push] {}..'.format(self.m_local_file))
+        #return True
+        self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
 
-        Message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
-
-        s3upl = S3Upload();
+        s3upl = S3Upload(self._base);
         idx = 1
 
         f = None
@@ -281,7 +617,7 @@ class S3Upload_:
                     self.mp.cancel_upload()
                     raise
         except Exception as e:
-            Message ('Err. File open/Upload: ({})'.format(str(e)))
+            self._base.message ('Err. File open/Upload: ({})'.format(str(e)), self._base.const_critical_text)
             if (f):
                 f.close()
             return False
@@ -294,7 +630,7 @@ class S3Upload_:
         tot_blocks = (f_size / CHUNK_MIN_SIZE) + 1
         upl_blocks = 0
 
-        Message ('Total blocks to upload ({})'.format(tot_blocks))
+        self._base.message ('Total blocks to upload ({})'.format(tot_blocks))
 
         while(1):
             len_threads = len(threads)
@@ -329,14 +665,14 @@ class S3Upload_:
                     threads.append(t)
                     idx += 1
                 except Exception as e:
-                    Message ('Err. {}'.format(str(e)));
+                    self._base.message ('Err. {}'.format(str(e)), self._base.const_critical_text);
                     if (f):
                         f.close()
                     return False
         try:
             self.mp.complete_upload()
-        except Exception as exp:
-            Message ('Err. {}'.format(str(exp)))
+        except Exception as e:
+            self._base.message ('Err. {}'.format(str(e)), self._base.const_critical_text)
             self.mp.cancel_upload()
             return False
         finally:
@@ -473,10 +809,10 @@ class Azure(Store):
                         break
                 t1 = datetime.datetime.now() - t0
                 if (t1.seconds > max_time_to_wait):
-                    Message  ('Err. Timed out to create container.')
+                    Message  ('Err. Timed out to create container.', const_critical_text)
                     break
         if (not isContainerCreated):
-            Message ('Err. Unable to create the container ({})'.format(self._upl_container_name))
+            Message ('Err. Unable to create the container ({})'.format(self._upl_container_name), const_critical_text)
             exit(1)
         Message ('Done.')
 
@@ -485,7 +821,7 @@ class Azure(Store):
             f = open (blob_path, 'rb')
             f_size = os.path.getsize(blob_path)
         except Exception as e:
-            Message ('Err. File open/Upload: ({})'.format(str(e)))
+            Message ('Err. File open/Upload: ({})'.format(str(e)), const_critical_text)
             if (f):
                 f.close()
             return False
@@ -539,15 +875,15 @@ class Azure(Store):
                     block_ids.append(block_id)
                     idx += 1
                 except Exception as e:
-                    Message ('Err. {}'.format(str(e)));
+                    Message ('Err. {}'.format(str(e)), const_critical_text);
                     if (f):
                         f.close()
                     return False
         try:
             Message ('Finalizing uploads..');
             ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, block_ids)
-        except Exception as exp:
-            Message ('Err. {}'.format(str(exp)))
+        except Exception as e:
+            Message ('Err. {}'.format(str(e)), const_critical_text)
             return False
         finally:
             if (f):
@@ -560,11 +896,12 @@ class Azure(Store):
 
 
 class S3Storage:
-    def __init__(self):
-        pass
+    def __init__(self, base):
+        self._base = base
 
     def init(self, remote_path, s3_key, s3_secret, direction, user_config = None):
         self.m_user_config = None
+        self._input_flist = None
         self.__m_failed_upl_lst = {}
 
         if (user_config != None):
@@ -587,12 +924,22 @@ class S3Storage:
                     profile_name = _profile_name if _profile_name else None, calling_format = _calling_format,
                     anon = True if is_bucket_public else False)
                 except Exception as e:
-                    Message(format(str(e)), const_critical_text)
+                    self._base.message (format(str(e)), const_critical_text)
                     return False
                 self.bucketupload = con.get_bucket(self.m_bucketname, False, None)
             # ends
 
-        self.remote_path = remote_path.replace("\\","/")
+        _remote_path = remote_path
+        if (os.path.isfile(_remote_path)):      # are we reading a file list?
+            self._input_flist = _remote_path
+            try:
+                global _rpt
+                _remote_path = _rpt.root
+            except Exception as e:
+                self._base.message ('Err. Report ({})'.format(str(e)), const_critical_text)
+                return False
+
+        self.remote_path = _remote_path.replace("\\","/")
         if (self.remote_path[-1:] != '/'):
             self.remote_path += '/'
         return True
@@ -610,16 +957,20 @@ class S3Storage:
 
     # code to iterate a S3 bucket/folder
     def getS3Content(self, prefix, cb = None, precb = None):
-        keys =  self.bucketupload.list(prefix)
+        is_link = not self._input_flist is None;
+        keys = self.bucketupload.list(prefix) if not is_link else _rpt
         root_only = True
-        if (self.m_user_config is not None):
+        if (self.m_user_config):
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
-            if (root_only_):    # if there's a value, take it else defaults to (True)
+            if (root_only_ is not None):    # if there's a value, take it else defaults to (True)
                 root_only = getBooleanValue(root_only_)
 
         # get the til files first
         if (til):
             for key in keys:
+                key = self.bucketupload.get_key(key) if is_link else key
+                if (not key):
+                    continue
                 if (key.name.endswith('/') == False):
                     if (not root_only == True):
                         if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
@@ -629,21 +980,24 @@ class S3Storage:
         # ends
         try:
             for key in keys:
+                key = self.bucketupload.get_key(key) if is_link else key
+                if (not key):
+                    continue
                 if (key.name.endswith('/') == False):
                     if (not root_only == True):
                         if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
                             continue
-                    if (cb is not None):
-                        if (precb is not None):
+                    if (cb):
+                        if (precb):
                             if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath) == True):     # if raster/exclude list, do not proceed.
                                 if (getBooleanValue(self.m_user_config.getValue('istempinput')) == False):
                                     continue
                         if (til):
                             if (key.name.lower().endswith(CTIL_EXTENSION_)):
                                 continue
-                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
+                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side. Note. return value not checked.
         except Exception as e:
-            Message (e.message, const_critical_text)
+            self._base.message (e.message, const_critical_text)
             return False
 
         # Process (til) files once all the associate files have been copied from (cloud) to (local)
@@ -658,18 +1012,25 @@ class S3Storage:
     def S3_copy_to_local(self, S3_key, S3_path):
         err_msg_0 = 'S3/Local path is invalid'
         if (S3_key is None):   # get rid of invalid args.
-                Message(err_msg_0)
+                self._base.message (err_msg_0)
                 return False
+        # what does the restore point say about the (S3_key) status?
+        if (_rpt):
+            _get_rstr_val = _rpt.getRecordStatus(S3_key.name, CRPT_COPIED)
+            if (_get_rstr_val == CRPT_YES):
+                self._base.message ('{} {}'.format(CRESUME_MSG_PREFIX, S3_key.name))
+                return True
+        # ends
 
         if (self.m_user_config is None):     # shouldn't happen
-            Message ('Err. Intenal/User config not initialized.', const_critical_text)
+            self._base.message ('Err. Intenal/User config not initialized.', const_critical_text)
             return False
         input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + S3_path
         if ((self.m_user_config.getValue('istempoutput')) == True):
             input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -s3input=true
         is_raster = False
 
-        is_tmp_input = getBooleanValue(cfg.getValue('istempinput'))
+        is_tmp_input = getBooleanValue(self.m_user_config.getValue('istempinput'))
         if (True in [S3_path.endswith(x) for x in self.m_user_config.getValue('ExcludeFilter')]):
             return False
         elif (True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
@@ -679,16 +1040,24 @@ class S3Storage:
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
 
-        is_cpy_to_s3 = getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))
+
+        # collect input file names.
+        if (fn_collect_input_files(S3_key)):
+            return False
+        # ends
+
+        is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
         mk_path = input_path    # input_path.replace('\\', '/').replace(self.remote_path, '')
-        Message ('[S3-Pull] %s' % (mk_path))
+        self._base.message ('[S3-Pull] %s' % (mk_path))
 
         flr = os.path.dirname(mk_path)
         if (os.path.exists(flr) == False):
             try:
                 os.makedirs(flr)
             except Exception as exp:
-                Message ('Err. (%s)' % (str(exp)), const_critical_text)
+                self._base.message ('Err. (%s)' % (str(exp)), const_critical_text)
+                if (_rpt):
+                    _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
                 return False
         #if (is_raster):
         #    return True
@@ -699,7 +1068,9 @@ class S3Storage:
             fout.write(S3_key.read())
             fout.flush()
         except Exception as exp:
-            Message ('({})'.format(str(exp)), const_critical_text);
+            self._base.message ('({})'.format(str(exp)), const_critical_text);
+            if (_rpt):
+                _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
             return False
         finally:
             if (fout):
@@ -715,12 +1086,18 @@ class S3Storage:
                     til.setOutputPath(mk_path, mk_path)
         # ends
 
+        # mark donwload/copy status
+        if (_rpt):
+            _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_YES)
+        # ends
+
         # Handle any post-processing, if the final destination is to S3, upload right away.
         if (is_cpy_to_s3 == True):
-            if (getBooleanValue(cfg.getValue('istempinput')) == True):
+            if (getBooleanValue(self.m_user_config.getValue('istempinput')) == True):
                 if (is_raster == True):
                     return True
-            if (S3Upl(mk_path, user_args_Callback) == False):
+            _is_success = self._base.S3Upl(mk_path, user_args_Callback)
+            if (not _is_success):
                 return False
         # ends
         return True
@@ -728,25 +1105,25 @@ class S3Storage:
 
 
     def upload(self):
-        Message ('[S3-Push]..');
+        self._base.message ('[S3-Push]..');
         for r,d,f in os.walk(self.inputPath):
 
             for file in f:
                 lcl_file = os.path.join(r, file).replace('\\', '/')
                 upl_file = lcl_file.replace(self.inputPath, self.remote_path)
-                Message (upl_file)
+                self._base.message (upl_file)
                 # ends
                 try:
                     S3 = S3Upload_(self.bucketupload, upl_file, lcl_file, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                     if (S3.init() == False):
-                        Message ('Unable to initialize [S3-Push] for (%s=%s)' % (lcl_file, upl_file), const_warning_text)
+                        self._base.message ('Unable to initialize [S3-Push] for (%s=%s)' % (lcl_file, upl_file), const_warning_text)
                         continue
                     ret = S3.upload()
                     if (ret == False):
-                        Message ('[S3-Push] (%s)' % (upl_file), const_warning_text)
+                        self._base.message ('[S3-Push] (%s)' % (upl_file), const_warning_text)
                         continue
                 except Exception as inf:
-                    Message ('(%s)' % (str(inf)), const_warning_text)
+                    self._base.message ('(%s)' % (str(inf)), const_warning_text)
                 finally:
                     if (S3 is not None):
                         del S3
@@ -775,10 +1152,10 @@ class S3Storage:
                                 rep += '/'
                             if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
                                 rep = self.m_user_config.getValue('tempoutput')
-                            upl_file = mk_path.replace(rep, self.remote_path if cfg.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
-                        S3 = S3Upload_(self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
+                            upl_file = mk_path.replace(rep, self.remote_path if self.m_user_config.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
+                        S3 = S3Upload_(self._base, self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
-                            Message ('Err. Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), const_warning_text)
+                            self._base.message ('Err. Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), const_warning_text)
                             continue
                         upl_retries = CS3_UPLOAD_RETRIES
                         ret  = False
@@ -787,7 +1164,7 @@ class S3Storage:
                             if (ret == False):
                                 time.sleep(10)   # let's sleep for a while until s3 kick-starts
                                 upl_retries -= 1
-                                Message ('Err. [S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), const_warning_text)
+                                self._base.message ('Err. [S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), const_warning_text)
                         if (ret == False):
                             if (not 'upl' in  self.__m_failed_upl_lst):
                                 self.__m_failed_upl_lst['upl'] = []
@@ -803,7 +1180,7 @@ class S3Storage:
                                 S3 = None
                             continue
                     except Exception as inf:
-                        Message ('Err. (%s)' % (str(inf)), const_critical_text)
+                        self._base.message ('Err. (%s)' % (str(inf)), const_critical_text)
                     finally:
                         if (S3 is not None):
                             del S3
@@ -827,8 +1204,6 @@ CCFG_PRIVATE_INC_BOTO = '__inc_boto__'
 CCFG_PRIVATE_OUTPUT = '__output__'
 CCFG_INTERLEAVE = 'Interleave'
 
-raster_buff = []
-
 # log status
 const_general_text = 0
 const_warning_text = 1
@@ -836,16 +1211,21 @@ const_critical_text = 2
 const_status_text = 3
 # ends
 
+
+def messageDebug(msg, status):
+    print ('*{}'.format(msg))
+
 def Message(msg, status=0):
-    if (log is not None):
-        log.Message(msg, status)
-    else:
-        print (msg)
-    sys.stdout.flush()      # for any paprent processes to receive the stdout realtime.
+    #if (log):
+    #    log.Message(msg, status)
+    #else:
+    print (msg)
+    #sys.stdout.flush()      # for any paprent processes to receive the stdout realtime.
 
 
 def args_Callback(args, user_data = None):
     _LERC2 = 'lerc2'
+    _JPEG = 'jpeg'
     m_compression = 'lerc'  # default if external config is faulty
     m_lerc_prec = 0.5
     m_compression_quality = 85
@@ -879,7 +1259,10 @@ def args_Callback(args, user_data = None):
             if (m_mode == 'tif' or
                 m_mode == 'tiff'):
                     m_mode = 'GTiff'   # so that gdal_translate'd understand.
-
+                    if (m_interleave == 'PIXEL' and
+                        m_compression == _JPEG):
+                        args.append ('-co')
+                        args.append ('PHOTOMETRIC=YCBCR')
         except: # could throw if index isn't found
             pass    # ingnore with defaults.
 
@@ -890,7 +1273,7 @@ def args_Callback(args, user_data = None):
     if (m_nodata_value is not None):
         args.append ('-a_nodata')
         args.append (str(m_nodata_value))
-    if (m_compression == 'jpeg'):
+    if (m_compression == _JPEG):
         args.append ('-co')
         if (m_mode == 'mrf'):   # if the output is (mrf)
             args.append ('QUALITY=%s' % (m_compression_quality))
@@ -983,15 +1366,55 @@ def exclude_callback(file, src, dst):
 def exclude_callback_for_meta(file, src, dst):
     exclude_callback (file, src, dst)
 
+def getSourcePathUsingTempOutput(input):
+    # cfg, _rpt are global vars.
+    # rpt_status must be (CRPT_YES, CRPT_NO)
+    if (not _rpt or
+        not getBooleanValue(cfg.getValue('istempoutput'))):
+        return None
+    _tempoutput = cfg.getValue('tempoutput', False)
+    _mk_path = input.replace(_tempoutput, '')
+    _indx  = -1
+    if (True in [_mk_path.lower().endswith(i) for i in ['.idx', '.lrc', '.aux.xml']]):        # if any one of these extensions fails,
+        _indx = _mk_path.rfind('.')                                                          # the main (raster) file upload entry in (Reporter) would be set to (no) denoting a failure in one of its associated files.
+    if (_indx == -1):
+        return (_rpt.findWith(_mk_path))
+    for i in _rpt:
+        if (i.find(_mk_path[:_indx + 1]) != -1):
+            if (True in [i.endswith(x) for x in cfg.getValue(CCFG_RASTERS_NODE)]):
+                return i
+    return None
+
+def setUploadRecordStatus (input, rpt_status):
+    _rpt_src = getSourcePathUsingTempOutput(input)
+    if (_rpt_src and
+        _rpt.updateRecordStatus(_rpt_src, CRPT_UPLOADED, rpt_status)):
+        return True
+    return False
 
 class Copy:
-    def __init__(self):
-        pass
+    def __init__(self, base = None):
+        self._base = base
 
     def init(self, src, dst, copy_list, cb_list, user_config = None):
+        if (not dst or
+            not src):
+            return False
         self.src= src.replace('\\', '/')
+        self._input_flist = None
+        if (not os.path.isdir(self.src)):
+            if (not os.path.exists(self.src)):
+                self.message ('Err. Invalid -input report file ({})'.format(self.src), const_critical_text)
+                return False
+            self._input_flist = self.src
+            try:
+                global _rpt
+                self.src = _rpt.root;
+            except Exception as e:
+                self.message ('Err. Report ({})'.format(str(e)), const_critical_text)
+                return False
         if (self.src[-1:] != '/'):
-            self.src += '/'
+                self.src += '/'
 
         self.dst = dst.replace('\\', '/')
         if (self.dst[-1:] != '/'):
@@ -1005,20 +1428,31 @@ class Copy:
         if (user_config != None):
             self.m_user_config = user_config
             include_subs = self.m_user_config.getValue('IncludeSubdirectories')
-            if (include_subs):    # if there's a value, take it else defaults to (True)
+            if (include_subs is not None):    # if there's a value either (!None), take it else defaults to (True)
                 self.__m_include_subs = getBooleanValue(include_subs)
 
         return True
 
+    def message(self, msg, msgType = None):
+        if (self._base):
+            return (self._base.message(msg, msgType))
+        print (msg)
+
     def processs(self, post_processing_callback = None, post_processing_callback_args = None, pre_processing_callback = None):
+        log = None
+        if (self._base):
+           log = self._base.getMessageHandler
         if (log):
             log.CreateCategory('Copy')
-        Message('Copying non rasters/aux files (%s=>%s)..' % (self.src, self.dst))
 
+        self.message ('Copying non rasters/aux files (%s=>%s)..' % (self.src, self.dst))
         # init - TIL files
+        is_link = not self._input_flist is None;
         if (til):
-            for r,d,f in os.walk(self.src):
+            for r,d,f in _rpt.walk() if is_link else os.walk(self.src):
                 for file in f:
+                    if (not file):
+                        continue
                     if (self.__m_include_subs == False):
                         if ((r[:-1] if r[-1:] == '/' else r) != os.path.dirname(self.src)):     # note: first arg to walk (self.src) has a trailing '/'
                             continue
@@ -1030,14 +1464,14 @@ class Copy:
             for _til in til:
                 til.process(_til)
         # ends
-
-        for r,d,f in os.walk(self.src):
+        for r,d,f in _rpt.walk() if is_link else os.walk(self.src):
             for file in f:
+                if (not file):
+                    continue
                 if (self.__m_include_subs == False):
                     if ((r[:-1] if r[-1:] == '/' else r) != os.path.dirname(self.src)):     # note: first arg to walk (self.src) has a trailing '/'
                         continue
                 free_pass = False
-
                 dst_path = r.replace(self.src, self.dst)
 
                 if (('*' in self.format['copy']) == True):
@@ -1050,7 +1484,7 @@ class Copy:
                             break
                     if (not _isCpy):
                         continue
-                if (True in [file.endswith(x) for x in self.format['exclude']]):       # skip 'exclude' list items.
+                if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']]):       # skip 'exclude' list items.
                     if (('exclude' in self.cb_list) == True):
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
@@ -1064,8 +1498,10 @@ class Copy:
                         if (self.cb_list['copy'] is not None):
                             if (self.cb_list['copy'](file, r, dst_path) == False):       # skip fruther processing if 'false' returned
                                 continue
-                    if (os.path.exists(dst_path) == False):
-                        os.makedirs(dst_path)
+
+                    if (not g_is_generate_report):              # do not create folders for op==reporting only.
+                        if (os.path.exists(dst_path) == False):
+                            os.makedirs(dst_path)
 
                     dst_file = os.path.join(dst_path, file)
                     src_file = os.path.join(r, file)
@@ -1074,19 +1510,31 @@ class Copy:
                         if (pre_processing_callback):
                             do_post_processing_cb = do_copy = pre_processing_callback(src_file, dst_file, self.m_user_config)
                         if (do_copy == True):
-                             shutil.copyfile(src_file, dst_file)
-                             Message ('[CPY] %s' % (src_file.replace(self.src, '')))
+                             _get_rstr_val  = ''
+                             if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
+                                _get_rstr_val = _rpt.getRecordStatus(src_file, CRPT_COPIED)
+                                if (_get_rstr_val == CRPT_YES):
+                                    do_copy = False
+                                if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
+                                    do_copy = not _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES
+                             if (do_copy):
+                                shutil.copyfile(src_file, dst_file)
+                             if (self._input_flist):
+                                _rpt.updateRecordStatus (src_file, CRPT_COPIED, CRPT_YES)
+                             self.message ('{} {}'.format(CRESUME_MSG_PREFIX if not do_copy else 'CPY', src_file.replace(self.src, '')))
                     # copy post-processing
-                    if (do_post_processing_cb == True):
-                        if (post_processing_callback is not None):
+                    if (do_post_processing_cb):
+                        if (post_processing_callback):
                             ret = post_processing_callback(dst_file, post_processing_callback_args)    # ignore errors from the callback
                     # ends
                 except Exception as info:
-                    Message ('Err. (%s)' % (str(info)), const_critical_text)
+                    if (self._input_flist):
+                        _rpt.updateRecordStatus (os.path.join(r, file), CRPT_COPIED, CRPT_NO)
+                    self.message ('Err. (%s)' % (str(info)), const_critical_text)
                     continue
 
-        Message('Done.')
-        if (log is not None):
+        self.message ('Done.')
+        if (log):
             log.CloseCategory()
 
         return True
@@ -1117,7 +1565,7 @@ class Copy:
 
             for i in range(s, m):
                 req = file_lst[i]
-                (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], getBooleanValue(cfg.getValue('iss3')))
                 dst_path = os.path.dirname(output_file)
                 if (os.path.exists(dst_path) == False):
                     os.makedirs(dst_path)
@@ -1130,10 +1578,10 @@ class Copy:
                             if (args['mode'].lower() == 'move'):
                                 mode_ = CMOVE
                 if (mode_ == CCOPY):
-                    Message ('[CPY] %s' % (output_file))
+                    self.message ('[CPY] %s' % (output_file))
                     shutil.copyfile(input_file, output_file)
                 elif (mode_ == CMOVE):
-                    Message ('[MV] %s' % (output_file))
+                    self.message ('[MV] %s' % (output_file))
                     shutil.move(input_file, output_file)
             s = m
             if s == files_len or s == 0:
@@ -1169,10 +1617,10 @@ class compression:
         if (not self.m_gdal_path or
             os.path.isdir(self.m_gdal_path) == False):
             if (self.m_gdal_path):
-                self.message('Warning: Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path))
+                self.message('Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path), const_warning_text)
             self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'tools/bin')
             if (not os.path.isdir(self.m_gdal_path)):
-                self.message('Err. GDAL not found at ({}).'.format(self.m_gdal_path))
+                self.message('Err. GDAL not found at ({}).'.format(self.m_gdal_path), const_critical_text)
                 return False
         # ends
         # set gdal_data enviornment path
@@ -1189,12 +1637,12 @@ class compression:
 
         return True
 
-    def message(self, msg):
+    def message(self, msg, status = const_general_text):
         if (self.m_user_callback == True):
             write = msg
             if (self.m_id != None):
-                write = '[%s] %s' % (threading.current_thread().name, msg)
-            self.m_callback(write)
+                write = '[{}] {}'.format(threading.current_thread().name, msg)
+            self.m_callback(write, status)
         return True
 
     def buildMultibandVRT(self, input_files, output_file):
@@ -1214,73 +1662,94 @@ class compression:
 
 
     def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
-        # let's try to make the output dir-tree else GDAL would fail
-        out_dir_path = os.path.dirname(output_file)
-        if (os.path.exists(out_dir_path) == False):
-            try:
-                os.makedirs(os.path.dirname(output_file))
-            except Exception as exp:
-                time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
-                if (os.path.exists(out_dir_path) == False):
-                    Message ('Err. (%s)' % str(exp), const_critical_text)
-                    return False
+        _vsicurl_input = cfg.getValue(CIN_S3_PREFIX)
+        _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
+        if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
+            if (_rpt):
+                _input_file = _input_file.replace(self.m_user_config.getValue('tempinput', False), _rpt.root)
+        _do_process = ret = True
+        # get restore point snapshot
+        if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
+            _get_rstr_val = _rpt.getRecordStatus(_input_file, CRPT_PROCESSED)
+            if (_get_rstr_val == CRPT_YES):
+                self.message ('{} {}'.format(CRESUME_MSG_PREFIX, _input_file))
+                _do_process = False
         # ends
-
-        do_pyramids = self.m_user_config.getValue('Pyramids')
-        if (do_pyramids != CCMD_PYRAMIDS_ONLY):
-            args = [os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)]
-            if (args_callback is None):      # defaults
-                args.append ('-of')
-                args.append ('MRF')
-                args.append ('-co')
-                args.append ('COMPRESS=LERC')
-                args.append ('-co')
-                args.append ('BLOCKSIZE=512')
-            else:
-                args = args_callback(args, [input_file, output_file, self.m_user_config])      # callback user function to get arguments.
-
-            args.append (input_file)
-            args.append (output_file)
-
-            self.message('Applying compression (%s)' % (input_file))
-            ret = self.__call_external(args)
-            self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
-            if (ret == False):
-                return ret
-
         post_process_output = output_file
+        if (_do_process):
+            out_dir_path = os.path.dirname(output_file)
+            if (os.path.exists(out_dir_path) == False):
+                try:
+                    os.makedirs(os.path.dirname(output_file))   # let's try to make the output dir-tree else GDAL would fail
+                except Exception as exp:
+                    time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
+                    if (os.path.exists(out_dir_path) == False):
+                        self.message ('Err. (%s)' % str(exp), const_critical_text)
+                        if (_rpt):
+                            _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
+                        return False
+            # ends
+            do_pyramids = self.m_user_config.getValue('Pyramids')
 
-        if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
-            if (do_pyramids == 'true' or
-                do_pyramids == CCMD_PYRAMIDS_ONLY):
-                iss3 = self.m_user_config.getValue('iss3')
-                if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
-                    if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
-                        input_file = output_file
-                    output_file = output_file + '.__vrt__'
-                    self.message ('BuildVrt (%s=>%s)' % (input_file, output_file))
-                    ret = self.buildMultibandVRT([input_file], output_file)
-                    self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
-                    if (ret == False):
-                        return ret  # we can't proceed if vrt couldn't be built successfully.
+            if (do_pyramids != CCMD_PYRAMIDS_ONLY):
+                args = [os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)]
+                if (args_callback is None):      # defaults
+                    args.append ('-of')
+                    args.append ('MRF')
+                    args.append ('-co')
+                    args.append ('COMPRESS=LERC')
+                    args.append ('-co')
+                    args.append ('BLOCKSIZE=512')
+                else:
+                    args = args_callback(args, [input_file, output_file, self.m_user_config])      # callback user function to get arguments.
 
-                ret = self.createaOverview(output_file)
+                args.append (input_file)
+                args.append (output_file)
+
+                self.message('Applying compression (%s)' % (input_file))
+                ret = self.__call_external(args)
                 self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
                 if (ret == False):
-                    return False
+                    if (_rpt):
+                        _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
+                    return ret
 
-                if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
-                    try:
-                        os.remove(output_file)      #*.ext__or__ temp vrt file.
-                        in_  = output_file + '.ovr'
-                        out_ = in_.replace('.__vrt__' + '.ovr', '.ovr')
-                        if (os.path.exists(out_) == True):
-                            os.remove(out_)         # probably leftover from a previous instance.
-                        self.message ('rename (%s=>%s)' % (in_, out_))
-                        os.rename(in_, out_)
-                    except:
-                        self.message ('Warning: Unable to rename/remove (%s)' % (output_file))
+            if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
+                if (do_pyramids == 'true' or
+                    do_pyramids == CCMD_PYRAMIDS_ONLY):
+                    iss3 = self.m_user_config.getValue('iss3')
+                    if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
+                        if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
+                            input_file = output_file
+                        output_file = output_file + '.__vrt__'
+                        self.message ('BuildVrt (%s=>%s)' % (input_file, output_file))
+                        ret = self.buildMultibandVRT([input_file], output_file)
+                        self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
+                        if (ret == False):
+                            if (_rpt):
+                                _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
+                            return ret  # we can't proceed if vrt couldn't be built successfully.
+                    ret = self.createaOverview(output_file)
+                    self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'), const_general_text if ret == True else const_critical_text)
+                    if (ret == False):
+                        if (_rpt):
+                            _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
+                    if (iss3 == True and
+                        do_pyramids == CCMD_PYRAMIDS_ONLY):
+                        try:
+                            os.remove(output_file)      #*.ext__or__ temp vrt file.
+                            in_  = output_file + '.ovr'
+                            out_ = in_.replace('.__vrt__' + '.ovr', '.ovr')
+                            if (os.path.exists(out_) == True):
+                                os.remove(out_)         # probably leftover from a previous instance.
+                            self.message ('rename (%s=>%s)' % (in_, out_))
+                            os.rename(in_, out_)
+                        except:
+                            self.message ('Warning: Unable to rename/remove (%s)' % (output_file), const_warning_text)
+                            if (_rpt):
+                                _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
+                            return False
 
 
         # call any user-defined fnc for any post-processings.
@@ -1289,9 +1758,9 @@ class compression:
                 self.message ('[S3-Push]..');
             ret = post_processing_callback(post_process_output, post_processing_callback_args, {'f' : post_process_output, 'cfg' : self.m_user_config})
             self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
-            if (ret == False):
-                return ret
         # ends
+        if (_rpt):
+            _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
 
 
@@ -1332,6 +1801,12 @@ class compression:
             m_py_compression == 'png'):
             if (get_mode.startswith('mrf') == False):
                 args.append ('-ro')
+                if (get_mode.startswith('tif') and
+                    m_py_compression == 'jpeg' and
+                    m_py_interleave == 'pixel'):
+                    args.append ('--config')
+                    args.append ('PHOTOMETRIC_OVERVIEW')
+                    args.append ('YCBCR')
             args.append ('--config')
             args.append ('COMPRESS_OVERVIEW')
             args.append (m_py_compression)
@@ -1386,13 +1861,11 @@ class Config:
     def init(self, config, root):
         try:
             self.m_doc = minidom.parse(config)
-        except Exception as exp:
-            Message ('Err. (%s)' % str(exp), const_critical_text)
+        except:
             return False
 
         nodes = self.m_doc.getElementsByTagName(root)
         if (len(nodes) == 0):
-            Message ('Warning: search results empty')
             return False
 
         node = nodes[0].firstChild
@@ -1428,96 +1901,11 @@ class Config:
         self.m_cfgs[key] = value
 
 
-def S3Upl(input_file, user_args, *args):
-    ret_buff = []
-    internal_err_msg = 'Internal error at [S3Upl]'
-    upload_cloud_type = cfg.getValue(COUT_CLOUD_TYPE, True)
-    if (upload_cloud_type == CCLOUD_AMAZON):
-        if (S3_storage is None):    # globally declared: S3_storage
-            Message (internal_err_msg, const_critical_text)
-            return False
-        _single_upload = _include_subs = False    # def
-        if (user_args):
-            if (CSIN_UPL in user_args):
-                _single_upload = getBooleanValue(user_args[CSIN_UPL])
-            if (CINC_SUB in user_args):
-                _include_subs = getBooleanValue(user_args[CINC_SUB])
-        ret_buff = S3_storage.upload_group(input_file, single_upload = _single_upload, include_subs = _include_subs)
-        if (len(ret_buff) == 0):
-            return False
-    elif (upload_cloud_type == CCLOUD_AZURE):
-        if(azure_storage is None):
-            Message (internal_err_msg, const_critical_text)
-            return False
-
-        properties = {
-        'tempoutput' : cfg.getValue('tempoutput', False),
-        'access' : cfg.getValue(COUT_AZURE_ACCESS, True)
-        }
-
-        if (True in [input_file.endswith(x) for x in cfg.getValue(CCFG_RASTERS_NODE)]):
-            _input_file = input_file.replace('\\', '/')
-            (p, n) = os.path.split(_input_file)
-            indx = n.find('.')
-            file_name_prefix = n
-            if (indx >= 0): file_name_prefix = file_name_prefix[:indx]
-            input_folder = os.path.dirname(_input_file)
-            for r,d,f in os.walk(input_folder):
-                r = r.replace('\\', '/')
-                if (r == input_folder):
-                    for _file in f:
-##                        if (_file.endswith('.lrc')):
-##                            continue
-                        if (_file.startswith(file_name_prefix)):
-                            file_to_upload = os.path.join(r, _file)
-                            if (azure_storage.upload(
-                            file_to_upload,
-                            cfg.getValue (COUT_AZURE_CONTAINER, False),
-                            cfg.getValue (CCFG_PRIVATE_OUTPUT, False),
-                            properties
-                            )):
-                                ret_buff.append(file_to_upload)
-                    break
-        else:
-            if (azure_storage.upload(
-            input_file,
-            cfg.getValue (COUT_AZURE_CONTAINER, False),
-            cfg.getValue (CCFG_PRIVATE_OUTPUT, False),
-            properties
-            )):
-                ret_buff.append(input_file)
-
-    if (CS3_MSG_DETAIL == True):
-        Message ('Following file(s) uploaded to ({})'.format(CCLOUD_AMAZON if upload_cloud_type == CCLOUD_AMAZON else CCLOUD_AZURE))
-        [Message ('{}'.format(f)) for f in ret_buff]
-
-    if (user_args != None):
-        if (USR_ARG_DEL in user_args):
-            if (user_args[USR_ARG_DEL] and
-                user_args[USR_ARG_DEL] == True):
-                for f in ret_buff:
-                    try:
-                        _is_remove = True
-                        if (til):
-                            if (til.fileTILRelated(f)):
-                                _is_remove = False
-                        if (_is_remove):
-                            try:
-                                os.remove(f)
-                            except:
-                                time.sleep(CDEL_DELAY_SECS)
-                                os.remove(f)
-                            Message ('[Del] %s' % (f))
-                    except Exception as exp:
-                        Message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
-    return (len(ret_buff) > 0)
-
-
 def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     input_file = os.path.join(inputfldr, file)
     output_file = os.path.join(outputfldr, file)
     if (isinput_s3):
-        input_file = cfg.getValue('In_S3_Prefix') + input_file
+        input_file = cfg.getValue(CIN_S3_PREFIX) + input_file
         output_file = outputfldr #  + '/' + inputfldr
         if (getBooleanValue(cfg.getValue('istempinput')) == True or
             getBooleanValue(cfg.getValue('istempoutput')) == True):
@@ -1554,23 +1942,41 @@ def formatExtensions (value):
         frmts[i] = frmts[i].strip()
     return frmts
 
-
 # custom exit code block to write out logs
-def terminate(exit_code, log_category = False):
-
-    if (log != None):
+def terminate(objBase, exit_code, log_category = False):
+    if (objBase):
         success = 'OK'
         if (exit_code != 0):
             success = 'Failed!'
-        log.Message(success, log.const_status_text)
+        objBase.message('[{}]'.format(success), objBase.const_status_text)
         if (log_category == True):
             log.CloseCategory()
-        log.WriteLog('#all')   #persist information/errors collected.
-
-    sys.exit(exit_code)
+        objBase.close() #persist information/errors collected.
+    return (exit_code)
 # ends
 
+def fn_collect_input_files(src):    # collect input files to support (resume) support.
+    if (not src):
+        return False
+    if (not g_is_generate_report or
+        not g_rpt):
+        return False
+    try:
+        _type = 'local'
+        _src = str(src)     # input (src) could be an object
+        if (_src.startswith('<Key')):
+            _type = 'cloud'
+            _brk = _src.split(',')
+            _src = _brk[1].replace('>', '')
+        g_rpt.addFile(_src);
+        return True
+    except:
+        pass
+    return False
+
 def fn_pre_process_copy_default (src, dst, arg):
+    if (fn_collect_input_files(src)):
+        return False             # just gathering information for the report either (op=report). Do not proceed with (Copying/e.t.c)
     if (not src):
         return False
     if (til):
@@ -1610,858 +2016,1080 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
     return True
 
 
-def main():
-    pass
-
-if __name__ == '__main__':
-    main()
-
-__program_ver__ = 'v4.2d'
-__program_name__ = 'RasterOptimize/RO.py %s' % __program_ver__
-
-parser = argparse.ArgumentParser(description='Convert raster formats to a valid output format through GDAL_Translate.\n' +
-'\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' +
-'file are case-sensitive and the program will fail if the correct paths/case are not ' +
-'entered at the cmd-line or in the config file.\n'
-)
-
-parser.add_argument('-mode', help='Processing mode/output format', dest='mode');
-parser.add_argument('-input', help='Input raster files directory', dest='input_path');
-parser.add_argument('-output', help='Output directory', dest='output_path');
-parser.add_argument('-cache', help='cache output directory', dest='cache_output_path');
-parser.add_argument('-config', help='Configuration file with default settings', dest='input_config');
-parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality_jpeg');
-parser.add_argument('-prec', help='LERC precision', dest='precision_lerc');
-parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only]', dest='pyramids');
-parser.add_argument('-s3input', help='Is -input path on S3? [true/false: default:false]', dest='iss3');
-parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='issubs');
-parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest='tempinput');
-parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest='tempoutput');
-parser.add_argument('-cloudupload', help='Upload output to Cloud? [true/false]', dest='cloudupload');
-parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype');
-parser.add_argument('-s3output', help='Is -output path on S3? [true/false]. Please note, this flag is depreciated but will continue to work for backward compatibilily. Please use (-cloudupload) instead.', dest='s3output');
-parser.add_argument('-op', help='Utility operation mode [upload]', dest='utility');
-
-
-log  = None
-g_pre_cpy_list = []
-
-Message (__program_name__)
-Message (parser.description)
-
-args = parser.parse_args()
-
-# read in the config file.
-if (args.input_config is None):
-    args.input_config = os.path.join(os.path.dirname(__file__), CCFG_FILE)
-
-config_ = args.input_config
-cfg  = Config()
-ret = cfg.init(config_, 'Defaults')
-if (ret == False):
-    Message ('Unable to read-in settings from (%s)' % (config_), const_critical_text)
-    terminate(eFAIL)
-# ends
-
-# valid (op/utility) commands
-_utility = {
-COP_UPL : None,
-COP_DNL : None
-}
-
-if (args.utility):
-    args.utility = args.utility.lower()
-    if (not args.utility in _utility):
-        Message ('Err. Invalid utility operation mode ({})'.format(args.utility), const_critical_text)
-        terminate(eFAIL)
-    if (args.utility == COP_UPL):
-        args.cloudupload = 'true'
-        args.tempoutput = args.input_path if os.path.isdir(args.input_path) else os.path.dirname(args.input_path)
-
-# fix the slashes to force a convention
-if (args.input_path):
-    args.input_path = args.input_path.replace('\\', '/')
-if (args.output_path):
-    args.output_path = args.output_path.replace('\\', '/')
-# ends
-
-# read in (interleave)
-if (cfg.getValue(CCFG_INTERLEAVE) is None):
-    cfg.setValue(CCFG_INTERLEAVE, 'BAND');
-# ends
-
-# overwrite (Out_CloudUpload, IncludeSubdirectories) with cmd-line args if defined.
-if (args.cloudupload or args.s3output):
-    cfg.setValue(CCLOUD_UPLOAD, getBooleanValue(args.cloudupload) if args.cloudupload else getBooleanValue(args.s3output))
-    cfg.setValue(CCLOUD_UPLOAD_OLD_KEY, cfg.getValue(CCLOUD_UPLOAD))
-    if (args.clouduploadtype):
-        args.clouduploadtype = args.clouduploadtype.lower()
-        cfg.setValue(COUT_CLOUD_TYPE, args.clouduploadtype)
-
-is_cloud_upload = getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) if cfg.getValue(CCLOUD_UPLOAD) else getBooleanValue(cfg.getValue(CCLOUD_UPLOAD_OLD_KEY))
-# for backward compatibility (-s3output)
-if (not cfg.getValue(CCLOUD_UPLOAD)):
-    cfg.setValue(CCLOUD_UPLOAD, is_cloud_upload)
-if (not cfg.getValue(COUT_CLOUD_TYPE)):
-    cfg.setValue(COUT_CLOUD_TYPE, CCLOUD_AMAZON)
-# ends
-
-if (args.issubs):
-    cfg.setValue('IncludeSubdirectories', getBooleanValue(args.issubs))
-# ends
-
-# do we have temp-input-path to copy rasters first before conversion.
-is_input_temp = False
-if (args.tempinput is not None):
-    args.tempinput = args.tempinput.strip().replace('\\', '/')
-    if (args.tempinput.endswith('/') == False):
-        args.tempinput += '/'
-    if (os.path.isdir(args.tempinput) == False):
+class Args:
+    def __init__(self):
+        pass
+    def __setattr__(self, name, value):
+        self.__dict__[name] = value
+    def __getattr__(self, name):
         try:
-            os.makedirs(args.tempinput)
-        except Exception as exp:
-            Message('Unable to create the temp-input-path (%s) [%s]' % (args.tempinput, str(exp)), const_critical_text)
-            terminate(eFAIL)
-    is_input_temp = True         # flag flows to deal with temp-input-path
-    cfg.setValue('istempinput', is_input_temp)
-    cfg.setValue('tempinput', args.tempinput)
-# ends
+            return self.__dict__[name]
+        except KeyError:
+            return None
+    def __str__(self):
+        _return_str = ''
+        for k in self.__dict__:
+            _return_str += '{}={},'.format(k, self.__getattr__(k))
+        if (_return_str[-1:] == ','):
+            _return_str = _return_str[:len(_return_str) -1]
+        return _return_str
 
-# let's setup output temp path.
-is_output_temp = False
-if (args.tempoutput):
-    args.tempoutput = args.tempoutput.strip().lower().replace('\\', '/')
-    if (args.tempoutput.endswith('/') == False):
-        args.tempoutput += '/'
-    if (os.path.isdir(args.tempoutput) == False):
-        # attempt to create the temp-output path
-        try:
-            if (not args.utility or
-                (args.utility and
-                 args.utility != COP_UPL)):
-                os.makedirs(args.tempoutput)
-        except Exception as exp:
-            Message ('Unable to create the temp-output-path (%s)\n[%s]' % (args.tempoutput, str(exp)), const_critical_text)
-            terminate(eFAIL)
+
+class Application:
+    __program_ver__ = 'v1.5'
+    __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
+    __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
+    '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
+    'file are case-sensitive and the program will fail if the correct path/case is not ' + \
+    'entered at the cmd-line or in the config file.\n'
+
+    def __init__(self, args):
+        self._usr_args = args
+        self._msg_callback = None
+        self._log_path = None
+        self._base = None
+
+    def __load_config__ (self, config):
+        global cfg
+        if (self._args is None):
+            return False
+        # read in the config file.
+        if (not self._args.config):
+            self._args.config = os.path.abspath(os.path.join(os.path.dirname(__file__), CCFG_FILE))
+        config_ = self._args.config
+        cfg  = Config()
+        ret = cfg.init(config_, 'Defaults')
+        if (not ret):
+            msg = 'Err. Unable to read-in settings from ({})'.format(config_)
+            self.writeToConsole(msg, const_critical_text)   # log file is not up yet, write to (console)
+            return False
         # ends
-    is_output_temp = True
-    cfg.setValue('istempoutput', is_output_temp)
-    cfg.setValue('tempoutput', args.tempoutput)
-# ends
+        # deal with cfg extensions (rasters/exclude list)
+        rasters_ext_ = cfg.getValue(CCFG_RASTERS_NODE, False)
+        if (rasters_ext_ is None):
+            rasters_ext_ = 'tif,mrf'        # defaults: in-code if defaults are missing in cfg file.
 
+        exclude_ext_ = cfg.getValue(CCFG_EXCLUDE_NODE, False)
+        if (exclude_ext_ is None):
+            exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp' # defaults: in-code if defaults are missing in cfg file.
 
-#log module
-log_output_folder = None
-try:
-    solutionLib_path = os.path.realpath(__file__)
-    if (os.path.isdir(solutionLib_path) == False):
-        solutionLib_path = os.path.dirname(solutionLib_path)
-    _CLOG_FOLDER = 'logs'
-    log_output_folder  = os.path.join(solutionLib_path, _CLOG_FOLDER)
-
-    sys.path.append(os.path.join(solutionLib_path, 'solutionsLog'))
-    import logger
-    log = logger.Logger();
-
-    log.Project ('OptimizeRasters')
-    log.LogNamePrefix('OR')
-    log.StartLog()
-
-    cfg_log_path = cfg.getValue('LogPath')
-    if (cfg_log_path):
-        if (os.path.isdir(cfg_log_path) == False):
-            Message ('Invalid log-path (%s). Resetting to (%s)' % (cfg_log_path, log_output_folder));
-            cfg_log_path = None
-    if (cfg_log_path):
-        log_output_folder = os.path.join(cfg_log_path, _CLOG_FOLDER)
-
-    log.SetLogFolder(log_output_folder)
-    Message ('Log-path set to (%s)' % (log_output_folder))
-
-except Exception as e:
-    Message ('Warning: External logging support disabled! ({})'.format(str(e)));
-# ends
-
-# let's write to log (input config file content plus all cmd-line args)
-if (log):
-    # inject cmd-line
-    log.CreateCategory('Cmd-line')
-    cmd_line  = []
-    for arg in str(args).lower().replace('namespace(', '')[:-1].replace('\\\\', '/').split(','):
-        try:
-            (k, v) = arg.split('=')
-        except:
-            log.Message('Invalid arg at cmd-line (%s)' % (arg.strip()), const_critical_text)
-            continue
-        if (v != 'none'):
-            cmd_line.append(arg)
-
-    log.Message(' '.join(cmd_line), const_general_text);
-    log.CloseCategory()
-    # ends
-
-    # inject cfg content
-    log.CreateCategory('Input-config-values')
-    for v in cfg.m_cfgs:
-        log.Message('%s=%s' % (v, cfg.m_cfgs[v]), const_general_text)
-    log.CloseCategory()
-    # ends
-# ends
-
-# are we doing input from S3?
-isinput_s3 = getBooleanValue(args.iss3);
-
-# import boto modules only when required. This allows users to run the program for only local file operations.
-if (isinput_s3 == True or
-    getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
-    cfg.setValue(CCFG_PRIVATE_INC_BOTO, True)
-    try:
-        import boto
-        from boto.s3.key import Key
-        from boto.s3.connection import OrdinaryCallingFormat
-    except Exception as exp:
-        Message ('\n%s requires the (boto) module to run its S3 specific operations. Please install (boto) for python.' % (__program_name__), const_critical_text)
-        terminate(eFAIL)
-# ends
-
-# take care of missing -input and -output if -s3input==True
-if (isinput_s3 == True):
-    if (not args.input_path):
-        args.input_path = cfg.getValue(CIN_S3_PARENTFOLDER, False);
-        if (args.input_path):
-            args.input_path = args.input_path.strip().replace('\\', '/')
-        cfg.setValue(CIN_S3_PARENTFOLDER, args.input_path)
-
-if (is_cloud_upload):
-    if (not is_output_temp):
-        if ((args.utility and args.utility != COP_UPL) or
-            not args.utility):
-            Message ('-tempoutput must be specified if -cloudupload=true', const_critical_text)
-            terminate(eFAIL)
-    _access = cfg.getValue(COUT_AZURE_ACCESS)
-    if (_access):
-        if (not _access in ('private', 'blob', 'container')):
-                Message ('Invalid value for ({})'.format(COUT_AZURE_ACCESS), const_critical_text);
-                terminate(eFAIL)
-        if (_access == 'private'):      # private is not recognized by Azure, used internally only for clarity
-            cfg.setValue(COUT_AZURE_ACCESS, None)       # None == private container
-
-    if (args.output_path is None):
-        _cloud_upload_type = cfg.getValue(COUT_CLOUD_TYPE, True)
-        if (_cloud_upload_type == CCLOUD_AMAZON):
-            args.output_path = cfg.getValue(COUT_S3_PARENTFOLDER, False);
-        elif (_cloud_upload_type == CCLOUD_AZURE):
-            args.output_path = cfg.getValue(COUT_AZURE_PARENTFOLDER, False);
-        else:
-            Message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
-            terminate (eFAIL);
-        if (args.output_path):
-            args.output_path = args.output_path.strip().replace('\\', '/')
-        cfg.setValue(COUT_S3_PARENTFOLDER, args.output_path)
-# ends
-
-if (not args.output_path or
-    not args.input_path):
-    if ((not args.utility and
-        not args.input_path) or
-        (args.utility and
-        not args.input_path)):
-        Message ('-input/-ouput is not specified!', const_critical_text)
-        terminate(eFAIL)
-
-# set output in cfg.
-dst_ = args.output_path
-if (dst_ and
-    dst_[-1:] != '/'):
-    dst_ += '/'
-
-cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_)
-# ends
-
-# cfg-init-valid modes
-cfg_modes = {
-'tif',
-'tif_lzw',
-'tif_jpeg',
-'tif_mix',
-'tif_dg',
-'tiff_landsat',
-'mrf',
-'mrf_jpeg',
-'mrf_mix',
-'mrf_dg',
-'mrf_landsat',
-'cachingmrf',
-'clonemrf',
-'splitmrf'
-}
-# ends
-
-# read-in (mode)
-cfg_mode = args.mode     # cmd-line -mode overrides the cfg value.
-if (cfg_mode is None):
-    cfg_mode = cfg.getValue('Mode')
-if (cfg_mode is None or
-    (cfg_mode in cfg_modes) == False):
-    Message('<Mode> value not set/illegal', const_critical_text);
-    terminate(eFAIL)
-cfg.setValue('Mode', cfg_mode)
-# ends
-
-# read in build pyramids value
-do_pyramids = 'true'
-if (args.pyramids is None):
-    args.pyramids = cfg.getValue('BuildPyramids')
-if (args.pyramids is not None):
-    do_pyramids = args.pyramids = args.pyramids.lower()
-# ends
-
-# set jpeg_quality from cmd to override cfg value. Must be set before compression->init()
-if (args.quality_jpeg is not None):
-    cfg.setValue('Quality', args.quality_jpeg)
-if (args.precision_lerc is not None):
-    cfg.setValue('LERCPrecision', args.precision_lerc)
-if (args.pyramids is not None):
-    if (args.pyramids == CCMD_PYRAMIDS_ONLY):
-        if (args.input_path != args.output_path):
-            if (isinput_s3 == True):    # in case of input s3, output is used as a temp folder locally.
-                if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
-                    if (cfg.getValue(COUT_S3_PARENTFOLDER) != cfg.getValue(CIN_S3_PARENTFOLDER)):
-                        Message ('<%s> and <%s> must be the same if the -pyramids=only' % (CIN_S3_PARENTFOLDER, COUT_S3_PARENTFOLDER), const_critical_text)
-                        terminate(eFAIL)
-            else:
-                Message ('-input and -output paths must be the same if the -pyramids=only', const_critical_text);
-                terminate(eFAIL)
-
-if (getBooleanValue(do_pyramids) == False and
-    do_pyramids != CCMD_PYRAMIDS_ONLY):
-        do_pyramids = 'false'
-cfg.setValue('Pyramids', do_pyramids)
-cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids))
-# ends
-
-
-# deal with cfg extensions (rasters/exclude list)
-rasters_ext_ = cfg.getValue(CCFG_RASTERS_NODE, False)
-if (rasters_ext_ is None):
-    rasters_ext_ = 'tif,mrf'        # defaults: in-code if defaults are missing in cfg file.
-
-exclude_ext_ = cfg.getValue(CCFG_EXCLUDE_NODE, False)
-if (exclude_ext_ is None):
-    exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp' # defaults: in-code if defaults are missing in cfg file.
-
-cfg.setValue(CCFG_RASTERS_NODE, formatExtensions(rasters_ext_))
-cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
-# ends
-
-
-# read in the gdal_path from config.
-gdal_path = cfg.getValue(CCFG_GDAL_PATH)      # note: validity is checked within (compression-mod)
-# ends
-
-comp = compression(gdal_path)
-ret = comp.init(Message, 0, user_config = cfg)      # warning/error messages get printed within .init()
-if (ret == False):
-    Message('Unable to initialize/compression module', const_critical_text);
-    terminate(eFAIL)
-
-
-# s3 upload settings.
-out_s3_profile_name = cfg.getValue('Out_S3_AWS_ProfileName', False)
-if (out_s3_profile_name):
-    cfg.setValue ('Out_S3_AWS_ProfileName', out_s3_profile_name)
-
-s3_output = cfg.getValue(COUT_S3_PARENTFOLDER, False)
-s3_id = cfg.getValue('Out_S3_ID', False)
-s3_secret = cfg.getValue('Out_S3_Secret', False)
-
-
-S3_storage = None        # acts global
-azure_storage = None     # acts global
-
-if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
-    err_init_msg = 'Unable to initialize the ({}) upload module!. Quitting..'
-    if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
-        if (s3_output is None or
-            (s3_id is None and out_s3_profile_name is None) or
-            (s3_secret is None and out_s3_profile_name is None)):
-                Message ('Empty/Invalid values detected for keys in the (%s) beginning with (Out_S3)' % (config_), const_critical_text)
-                terminate(eFAIL)
-        # instance of upload storage.
-        S3_storage = S3Storage()
-        if (args.output_path):
-            s3_output = args.output_path
-            cfg.setValue(COUT_S3_PARENTFOLDER, s3_output)
-        ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT, cfg)
-        if (ret == False):
-            Message (err_init_msg.format('S3'), const_critical_text);
-            terminate(eFAIL)
-        S3_storage.inputPath = args.output_path
+        cfg.setValue(CCFG_RASTERS_NODE, formatExtensions(rasters_ext_))
+        cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
         # ends
-    elif (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE):
-        _account_name = cfg.getValue(COUT_AZURE_ACCOUNTNAME, False);
-        _account_key = cfg.getValue(COUT_AZURE_ACCOUNTKEY, False);
-        _container = cfg.getValue(COUT_AZURE_CONTAINER, False);
-        if (not _account_name or
-            not _account_key or
-            not _container):
-                Message ('Empty/Invalid values detected for keys ({}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER), const_critical_text);
-                terminate (eFAIL);
-        azure_storage = Azure(_account_name, _account_key);
-        if (not azure_storage.init()):
-            Message (err_init_msg.format('Azure'), const_critical_text);
-            terminate(eFAIL)
-    else:
-        Message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
-        terminate(eFAIL)
+        return True
 
-user_args_Callback = {
-USR_ARG_UPLOAD : getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)),
-USR_ARG_DEL : getBooleanValue(cfg.getValue('Out_S3_DeleteAfterUpload'))
-##'til' : {'del' : False,
-##         'extensions' : ['til', 'imd', 'idx', 'tif', 'tif.aux.xml', 'lrc']
-##        }
-}
-# ends
+    def __setup_log_support(self):
+        log = None
+        try:
+            solutionLib_path = os.path.realpath(__file__)
+            if (os.path.isdir(solutionLib_path) == False):
+                solutionLib_path = os.path.dirname(solutionLib_path)
+            _CLOG_FOLDER = 'logs'
+            self._log_path  = os.path.join(solutionLib_path, _CLOG_FOLDER)
 
-til = None      # by (default) til extensions or its associated files aren't processed differently.
+            sys.path.append(os.path.join(solutionLib_path, 'solutionsLog'))
+            import logger
+            log = logger.Logger();
+            log.Project ('OptimizeRasters')
+            log.LogNamePrefix('OR')
+            log.StartLog()
 
-# handle utility operations
-if (args.utility):      # debug
-    if (args.utility == COP_UPL):
-        if (S3_storage):
-            if (os.path.isfile(args.input_path)):
+            cfg_log_path = cfg.getValue('LogPath')
+            if (cfg_log_path):
+                if (os.path.isdir(cfg_log_path) == False):
+                    Message ('Invalid log-path (%s). Resetting to (%s)' % (cfg_log_path, self._log_path));
+                    cfg_log_path = None
+            if (cfg_log_path):
+                self._log_path = os.path.join(cfg_log_path, _CLOG_FOLDER)
+
+            log.SetLogFolder(self._log_path)
+            print ('Log-path set to ({})'.format(self._log_path))
+
+        except Exception as e:
+            print ('Warning: External logging support disabled! ({})'.format(str(e)));
+        # ends
+
+        # let's write to log (input config file content plus all cmd-line args)
+        if (log):
+            # inject cmd-line
+            log.CreateCategory('Cmd-line')
+            cmd_line  = []
+            _args_text = str(self._args).lower().replace('namespace(', '').replace('\\\\', '/')
+            _args_text_len = len(_args_text)
+            _args = _args_text[:_args_text_len - 1 if _args_text[-1:] == ')' else _args_text_len].split(',')
+            for arg in _args:
                 try:
-                    with open(args.input_path, 'r') as _fptr:
-                        _rd = _fptr.readline()
-                        user_args_Callback[CSIN_UPL] = True         # setup config property
-                        while (_rd):
-                            _rd = _rd.strip()
-                            S3Upl(_rd, user_args_Callback)
-                            _rd = _fptr.readline()
-                except Exception as e:
-                    Message ('Err. {}'.format(str(e)))
-            elif (os.path.isdir (args.input_path)):
-                user_args_Callback[CINC_SUB] = getBooleanValue(cfg.getValue('IncludeSubdirectories'))   # setup config property
-                S3Upl('{}/'.format(args.input_path), user_args_Callback)
-            else:
-                Message ('Err. Invalid -input. ({})'.format(args.input_path))
-                terminate (eFAIL);
-            retry_failed_lst  = []
-            failed_upl_lst = S3_storage.getFailedUploadList()
-            if (failed_upl_lst):
-                [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
-                # write out the upl_err_file
-                _fptr = None
-                if (log_output_folder):
-                    try:
-                        if (not os.path.isdir(log_output_folder)):
-                            os.makedirs(log_output_folder)
-                        ousr_date =  datetime.datetime.now()
-                        err_upl_file = os.path.join(log_output_folder,
-                        'OR_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (ousr_date.year, ousr_date.month, ousr_date.day,
-                        ousr_date.hour, ousr_date.minute, ousr_date.second))
-                        with open(err_upl_file, 'w+') as _fptr:
-                            for _wl in retry_failed_lst:
-                                _fptr.write ('{}\n'.format(_wl))
-                    except Exception as e:
-                        Message ('Err. Writing the failed upload file list.\n{}'.format(str(e)))
-                # ends
-    terminate(eOK)
-# ends
+                    (k, v) = arg.split('=')
+                except:
+                    log.Message('Invalid arg at cmd-line (%s)' % (arg.strip()), const_critical_text)
+                    continue
+                if (v != 'none'):
+                    cmd_line.append(arg)
 
+            log.Message(' '.join(cmd_line), const_general_text);
+            log.CloseCategory()
+            # ends
 
-cpy = Copy()
+            # inject cfg content
+            log.CreateCategory('Input-config-values')
+            for v in cfg.m_cfgs:
+                log.Message('%s=%s' % (v, cfg.m_cfgs[v]), const_general_text)
+            log.CloseCategory()
+            # ends
+        return Base(log, self._msg_callback)
 
-# do we need to process (til) files?
-for x in cfg.getValue(CCFG_RASTERS_NODE):
-    if (x.lower() == 'til'):
-        til = TIL()
-        break
-# ends
+    def writeToConsole(self, msg, status = const_general_text):
+        if (self._msg_callback):
+            return (self._msg_callback(msg, const_critical_text))
+        print (msg)          # log file is not up yet, write to (console)
+        return True
 
-list = {
-'copy' : {'*'},
-'exclude' : {}
-}
-
-for i in cfg.getValue(CCFG_RASTERS_NODE) + cfg.getValue(CCFG_EXCLUDE_NODE):
-    list['exclude'][i] = ''
-
-is_caching = False
-if (cfg_mode == 'clonemrf' or
-    cfg_mode == 'splitmrf' or
-    cfg_mode == 'cachingmrf'):
-    is_caching = True
-
-if (is_caching == True):
-    cfg.setValue('istempinput', False)
-    cfg.setValue('Pyramids', False)
-
-callbacks = {
-#'copy' : copy_callback,
-'exclude'  : exclude_callback
-}
-
-callbacks_for_meta = {
-'exclude'  : exclude_callback_for_meta
-}
-
-
-CONST_CPY_ERR_0 = 'Err. Unable to initialize (Copy) module!'
-CONST_CPY_ERR_1 = 'Err. Unable to process input data/(Copy) module!'
-
-CONST_OUTPUT_EXT = '.%s' % ('mrf')
-
-# keep original-source-ext
-cfg_keep_original_ext = getBooleanValue(cfg.getValue('KeepExtension'))
-cfg_threads = cfg.getValue('Threads')
-msg_threads = 'Warning: Thread-count invalid/undefined, resetting to default'
-try:
-    cfg_threads = int(cfg_threads)   # (None) value is expected
-except:
-    cfg_threads = -1
-if (cfg_threads <= 0 or
-    cfg_threads > CCFG_THREADS):
-    cfg_threads = CCFG_THREADS
-    Message('%s(%s)' % (msg_threads, CCFG_THREADS))
-# ends
-
-
-# let's deal with copying when -input is on s3
-if (isinput_s3 == True):
-    cfg.setValue('iss3', True);
-
-    in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
-    if (args.input_path):        # this will never be (None)
-        in_s3_parent = args.input_path       # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
-        cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
-
-    in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName', False)
-    if (in_s3_profile_name):
-        cfg.setValue ('In_S3_AWS_ProfileName', in_s3_profile_name)
-    in_s3_id = cfg.getValue('In_S3_ID', False)
-    in_s3_secret = cfg.getValue('In_S3_Secret', False)
-    in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
-
-    if (in_s3_parent is None or
-        in_s3_bucket is None):
-            Message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', const_critical_text)
-            terminate(eFAIL)
-
-    in_s3_parent = in_s3_parent.replace('\\', '/')
-    if (in_s3_parent[:1] == '/'):
-        in_s3_parent = in_s3_parent[1:]
-        cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
-
-    o_S3_storage = S3Storage()
-    ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN, cfg)
-    if (ret == False):
-        Message ('Unable to initialize S3-storage module!. Quitting..', const_critical_text);
-        terminate(eFAIL)
-    cfg.setValue('In_S3_Prefix', '/vsicurl/http://{}.s3.amazonaws.com/'.format(in_s3_bucket)) # [pre_s3_in_public_bucket_sup] + o_S3_storage.bucketupload.generate_url(0, force_http=True).split('?')[0])
-    o_S3_storage.inputPath = args.output_path
-    if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
-        Message ('Err. Unable to read S3-Content', const_critical_text);
-        terminate(eFAIL)
-# =/vsicurl/http://esridatasets.s3.amazonaws.com/
-# ends
-# control flow if conversions required.
-if (is_caching == False):
-    if (isinput_s3 == False):
-        ret = cpy.init(args.input_path, args.tempoutput if is_output_temp and getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else args.output_path, list, callbacks, cfg)
-        if  (ret == False):
-            Message(CONST_CPY_ERR_0, const_critical_text);
-            terminate(eFAIL)
-        ret = cpy.processs(S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy if is_input_temp == True else fn_pre_process_copy_default)
-        if (ret == False):
-            Message(CONST_CPY_ERR_1, const_critical_text);
-            terminate(eFAIL)
-        if (is_input_temp == True):
-            pass        # no post custom code yet for non-rasters
-    files = raster_buff
-    files_len = len(files)
-    if (files_len):
-        if (is_input_temp == True and
-            isinput_s3 == False):
-            # if the temp-input path is define, we first copy rasters from the source path to temp-input before any conversion.
-            Message ('Copying files to temp-input-path (%s)' % (cfg.getValue('tempinput', False)))
-            cpy_files_ = []
-            for i in range(0, len(files)):
-                get_dst_path = cfg.getValue('tempinput', False)
-                cpy_files_.append(
-                {
-                'src' : files[i]['src'],
-                'dst' : get_dst_path,
-                'f' : files[i]['f']
-                })
-                files[i]['src'] = get_dst_path
-            cpy.batch(cpy_files_, None)
-
-        Message('Converting..');
-
-    a = []
-    threads = []
-
-    batch = cfg_threads
-    s = 0
-    while 1:
-        m = s + batch
-        if (m >= files_len):
-            m =  files_len
-
-        threads = []
-        for i in range(s, m):
-            req = files[i]
-            (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
-
-            f, e = os.path.splitext(output_file)
-            if (cfg_keep_original_ext == False):
-                output_file = output_file.replace(e, CONST_OUTPUT_EXT)
-            _build_pyramids = True
-            if (til):
-                if (til.find(req['f'])):
-                    til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
-                    _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
-            t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
-            t.daemon = True
-            t.start()
-            threads.append(t)
-
-        for t in threads:
-            t.join()
-
-        # process til file if all the associate files have been processed
-        if (til):
-            for _til in til:
-                if (not til.isAllFilesProcessed(_til)):
-                    print ('** not yet completed for ({})'.format(_til));
-                if (til.isAllFilesProcessed(_til)):
-                    til_output_path = til.getOutputPath(_til)
-                    if (not til_output_path):
-                        Message ('Warning. TIL output-path returned empty/Internal error');
-                        continue
-                    ret = comp.createaOverview(til_output_path)
-                    if (not ret):
-                        Message ('Warning. Unable to build pyramids on ({})'.format(til_output_path));
-                        continue
-                    ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path))
-                    if (not ret):
-                        Message ('Warning. Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path))
-                        continue
-                    # let's rename (.mrf) => (.ovr)
-                    try:
-                        os.remove('{}.ovr'.format(til_output_path))
-                        os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
-                    except Exception as e:
-                        Message ('Warning. ({})'.format(str(e)))
-                        continue
-
-                    # upload (til) related files (.idx, .ovr, .lrc)
-                    if (is_cloud_upload):
-                        ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
-                        retry_failed_lst  = []
-                        failed_upl_lst = S3_storage.getFailedUploadList()
-                        if (failed_upl_lst):
-                            [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
-                        # let's delete all the associate files related to (TIL) files.
-                        (p, n) = os.path.split(til_output_path)
-                        for r,d,f in os.walk(p):
-                            for file in f:
-                                if (r != p):
-                                    continue
-                                mk_filename = os.path.join(r, file).replace('\\', '/')
-                                if (til.fileTILRelated(mk_filename)):
-                                    if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
-                                        print ('**{} in failed upload list'.format(mk_filename))
-                                        continue
-                                    try:
-                                        Message ('[Del] {}'.format(mk_filename))
-                                        os.remove(mk_filename)
-                                    except Exception as e:
-                                        Message ('[Del] Err. {} ({})'.format(mk_filename, str(e)))
-                        # ends
-                    # ends
-        # ends
-
-        s = m
-        if s == files_len or s == 0:
-            break
-    # let's clean up the input-temp if has been used.
-    # ends
-# ends
-
-#terminate(eOK);     # debug
-
-# block to deal with meta-data ops.
-if (is_caching == True and
-    do_pyramids != CCMD_PYRAMIDS_ONLY):
-    Message ('\nProcessing caching operations...')
-
-    # set data, index extension lookup
-    extensions_lup = {
-    'lerc' : {'data' : 'lrc', 'index' : 'idx' }
-    }
-    # ends
-
-    if (isinput_s3 == False):
-        raster_buff = []
-        if (cfg_mode == 'splitmrf'):        # set explicit (exclude list) for mode (splitmrf)
-            list['exclude']['idx'] = ''
-        ret = cpy.init(args.input_path, args.output_path, list, callbacks_for_meta, cfg)
-        if  (ret == False):
-            Message(CONST_CPY_ERR_0, const_critical_text);
-            terminate(eFAIL)
-        ret = cpy.processs()
-        if (ret == False):
-            Message(CONST_CPY_ERR_1, const_critical_text);
-            terminate(eFAIL)
-
-    for req in raster_buff:
-        (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
-        (f, ext) = os.path.splitext(req['f'])
-        ext = ext.lower()
-        if (cfg_keep_original_ext == False):
-            output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
-
-        # does the input (mrf) have the required associate(s) e.g. (idx) file?
-        # This is a simple check to make sure, we're only dealilng with valid (mrf) formats.
-        # Note: Below code has been commented until later stage (20150329).
-##        idx_file = input_file
-##        is_idx_file = False
-##        s3_prefix = cfg.getValue('In_S3_Prefix')
-##        if (s3_prefix and
-##            o_S3_storage and
-##            idx_file.startswith(s3_prefix)):
-##            idx_file = '%s.idx' % (os.path.splitext(input_file[len(s3_prefix):])[0])
-##            for k in o_S3_storage.bucketupload.list(idx_file):
-##                is_idx_file = not is_idx_file
-##                break
-##        else:
-##            try:
-##                is_idx_file = os.path.exists('%s.idx' % (os.path.splitext(input_file)[0]))
-##            except:
-##                pass
-##        if (not is_idx_file):
-##            Message ('%s looks like an invalid/incomplete (MRF) file. Skipping.' % (input_file), const_warning_text)
-##            continue
-        # ends
-        if (cfg_mode != 'splitmrf'):     # uses GDAL utilities
-            ret = comp.compress(input_file, output_file, args_Callback_for_meta)
+    def init(self):
+        global _rpt, \
+        cfg
+        self.writeToConsole(self.__program_name__)
+        self.writeToConsole(self.__program_desc__)
+        _rpt = cfg = None
+        if (not self._usr_args):
+            return False
+        if (isinstance(self._usr_args, argparse.Namespace)):
+            self._args = self._usr_args
         else:
-            try:
-                shutil.copyfile(input_file, output_file)
-            except Exception as exp:
-                Message ('[CPY] %s (%s)' % (input_file, str(exp)))
-                continue
-
-        # let's deal with ops if the (cache) folder is defined at the cmd-line
-        input_ = output_file.replace('\\', '/').split('/')
-        f, e = os.path.splitext(input_[len(input_) - 1])
-        if (os.path.exists(output_file) == False):
-            continue
-        # update .mrf.
-        try:
-            comp_val =  None         # for (splitmrf)
-            with open(output_file, "r") as c:
-                content = c.read()
-                if (cfg_mode == 'clonemrf'):
-                    if (ext != '.tif'):
-                        content = content.replace('<Source>', '<Source clone="true">')
-                        with open (output_file, "w") as c:
-                            c.write(content)
-                elif(cfg_mode == 'splitmrf'):
-                    CONST_LBL_COMP = '<Compression>'
-                    comp_indx = content.find(CONST_LBL_COMP)
-                    if (comp_indx != -1):
-                        comp_val = content[comp_indx + len(CONST_LBL_COMP): content.find(CONST_LBL_COMP.replace('<', '</'))].lower()
-
-            key = '<Raster>'
-            pos = content.find(key)
-            if (pos != -1):
-                pos += len(key)
-                cache_output = os.path.dirname(output_file)
-                if (args.cache_output_path):
-                    cache_output = args.cache_output_path
-                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, ''), '%s.mrf_cache' % (f)).replace('\\', '/')
-                if (not comp_val is None):
-                    f, e =  os.path.splitext(input_file)
-                    if (comp_val in extensions_lup):
-                        rep_data_file = '%s.%s' % (f, extensions_lup[comp_val]['data'])
-                        rep_indx_file = '%s.%s' % (f, extensions_lup[comp_val]['index'])
-                content = content[:pos] + '<DataFile>%s</DataFile>\n<IndexFile>%s</IndexFile>' % (rep_data_file, rep_indx_file) + content[pos:]
-                with open (output_file, "w") as c:
-                    c.write(content)
-
-        except Exception as exp:
-            Message ('Error: Updating (%s) was not successful!\n%s' % (output_file, str(exp)));
-        # ends
-
-# do we have failed upload files on list?
-if (is_cloud_upload):
-    retry_failed_lst  = []       # holds the file names that failed the (final) retry. These files will not be deleted.
-    if (cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON):
-        failed_upl_lst = S3_storage.getFailedUploadList()
-        if (failed_upl_lst):
-            Message ('Retry - Failed upload list.', const_general_text);
-            _fptr = None
-            if (log_output_folder):
+            self._args = Args()
+            for i in self._usr_args:
                 try:
-                    if (not os.path.isdir(log_output_folder)):
-                        os.makedirs(log_output_folder)
-                    ousr_date =  datetime.datetime.now()
-                    err_upl_file = os.path.join(log_output_folder, 'OR_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (ousr_date.year, ousr_date.month, ousr_date.day, \
-                    ousr_date.hour, ousr_date.minute, ousr_date.second))
-                    _fptr = open(err_upl_file, 'w+')
+                    self._args.__setattr__(i, self._usr_args[i])
                 except:
                     pass
-            for v in failed_upl_lst['upl']:
-                Message ('%s' % (v['local']), const_general_text)
-                ret = S3_storage.upload_group(v['local'])
-                # the following files will be logged as unsuccessful uploads to output cloud
-                if (not ret):
-                    if (_fptr): _fptr.write('{}\n'.format(v['local']))
-                    retry_failed_lst.append (v['local'].lower())
-                # ends
-                for r in ret:
-                    try:
-                        Message ('[Del] {}'.format(r))
-                        try:
-                            os.remove(r)
-                        except:
-                            time.sleep(CDEL_DELAY_SECS)
-                            os.remove(r)
-                    except Exception as e:
-                        Message ('[Del] {} ({})'.format(r, str(e)))
-            if (_fptr):
-                _fptr.close()
-                _fptr = None
-# ends
+            if (self._args.__getattr__(CRESUME_ARG) is None):
+                self._args.__setattr__(CRESUME_ARG, True)
+        if (self._args.input and
+            os.path.isfile (self._args.input)):
+            _rpt = Report();
+            if (not _rpt.init(self._args.input)):        # not checked for return.
+                print ('Err. Unable to init (Report/job)')
+                return False
+            for arg in vars(self._args):
+                if (arg == 'input'):
+                    continue
+                setattr(self._args, arg, None)      # any other cmd-line args will be ignored/nullified.
+            if (not _rpt.read(self.__jobContentCallback)):
+                print ('Err. Unable to read the -input job file.')
+                return False
+        # ends
+        if (not self.__load_config__(self._args)):
+            return False
+        self._base = self.__setup_log_support()          # initialize log support.
+        if (not self._base.init()):
+            self._base.message ('Unable to initialize the (Base) module', base.const_critical_text)
+            return CRET_ERROR
+        # ends
+        return True
 
-# let's clean-up rasters @ temp input path
-dbg_delete = True
-if (dbg_delete == True):
-    if (is_input_temp == True and
-        is_caching == False):        # if caching is (True), -tempinput is ignored and no deletion of source @ -input takes place.
-        if (len(raster_buff) != 0):
-            Message ('Removing input rasters at (%s)' % (cfg.getValue('tempinput', False)))
-            for req in raster_buff:
-                (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+    def registerMessageCallback(self, fnptr):
+        if (not fnptr):
+            return False
+        self._msg_callback = fnptr
+
+    def __jobContentCallback(self, line):
+        if (cfg):
+            if (cfg.getValue(CLOAD_RESTORE_POINT)):      # ignore if not called from main()
+                return True
+        lns = line.strip().split(',')
+        _fname = lns[0].strip().replace('\\', '/')
+        if (_fname.startswith(Report.CHEADER_PREFIX)):
+            _hdr = _fname.replace(Report.CHEADER_PREFIX, '').split('=')
+            if (len(_hdr) > 1):
+                _key = _hdr[0].strip()
+                if (_key == 'input'):
+                    return True
+                setattr (self._args, _key, _hdr[1].strip())
+        return True
+
+    def run(self):
+        global raster_buff, \
+        til, \
+        cfg, \
+        _rpt, \
+        g_rpt, \
+        g_pre_cpy_list, \
+        g_is_generate_report, \
+        user_args_Callback, \
+        S3_storage, \
+        azure_storage
+
+        S3_storage = None
+        azure_storage = None
+
+        g_rpt = None
+        g_pre_cpy_list = []
+        raster_buff = []
+        g_is_generate_report = False
+
+        CRESUME_CREATE_JOB_TEXT = '[Resume] Creating job ({})'
+
+        # is resume?
+        if (self._args.input and
+            os.path.isfile (self._args.input)):
+            _rpt = Report();
+            if (not _rpt.init(self._args.input)):        # not checked for return.
+                self._base.message ('Err. Unable to init (Reporter/obj)', self._base.const_critical_text)
+                return(terminate(self._base, eFAIL))
+            if (not _rpt.read()):
+                self._base.message ('Err. Unable to read the -input report file ({})'.format(self._args.input), self._base.const_critical_text)
+                return(terminate(self._base, eFAIL))
+            self._args.job = os.path.basename(self._args.input)
+        # ends
+
+        # Get the default (project name)
+        project_name = self._args.job
+        if (project_name and
+            project_name.lower().endswith(Report.CJOB_EXT)):
+            project_name = project_name[:len(project_name) - len(Report.CJOB_EXT)]
+        if (not project_name):
+            project_name = cfg.getValue(CPRJ_NAME, False)
+        if (not project_name):      # is the project still null?
+            project_name = Report.getUniqueFileName();     #'OptimizeRasters'
+        if (self._base.getMessageHandler):
+            self._base.getMessageHandler.LogNamePrefix(project_name)           # update (log) file name prefix.
+        cfg.setValue(CPRJ_NAME, project_name)
+        _project_path = '{}{}'.format(os.path.join(os.path.dirname(self._args.input if self._args.input and self._args.input.lower().endswith(Report.CJOB_EXT) else __file__), project_name), Report.CJOB_EXT)
+        if (not cfg.getValue(CLOAD_RESTORE_POINT)):
+            if (os.path.exists(_project_path)):
+                self._args.op = None
+                self._args.input = _project_path
+                cfg.setValue(CLOAD_RESTORE_POINT, True)
+                self._base.message ('{} Using job ({})'.format (CRESUME_MSG_PREFIX, _project_path))
+                _status = self.run()
+                return
+        # ends
+
+        # let's create a restore point
+        if (not self._args.input or        # assume it's a folder from s3/azure
+            (self._args.input and
+            not os.path.isfile(self._args.input))):
+            self._args.op = COP_RPT
+
+        # valid (op/utility) commands
+        _utility = {
+        COP_UPL : None,
+        COP_DNL : None,
+        COP_RPT : None
+        }
+
+        if (self._args.op):
+            self._args.op = self._args.op.lower()
+            if (not self._args.op in _utility):
+                self._base.message ('Err. Invalid utility operation mode ({})'.format(self._args.op), const_critical_text)
+                return(terminate(self._base, eFAIL))
+            if (self._args.op == COP_UPL):
+                self._args.cloudupload = 'true'
+                self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
+            elif(self._args.op == COP_RPT):
+                g_rpt = Report();
+                if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER))):
+                    self._base.message ('Err. Unable to init (Report)', const_critical_text)
+                    return(terminate(self._base, eFAIL))
+                g_is_generate_report = True
+
+        # fix the slashes to force a convention
+        if (self._args.input):
+            self._args.input = self._args.input.replace('\\', '/')
+        if (self._args.output):
+            self._args.output = self._args.output.replace('\\', '/')
+        # ends
+
+        # read in (interleave)
+        if (cfg.getValue(CCFG_INTERLEAVE) is None):
+            cfg.setValue(CCFG_INTERLEAVE, 'BAND');
+        # ends
+
+        # overwrite (Out_CloudUpload, IncludeSubdirectories) with cmd-line args if defined.
+        if (self._args.cloudupload or self._args.s3output):
+            cfg.setValue(CCLOUD_UPLOAD, getBooleanValue(self._args.cloudupload) if self._args.cloudupload else getBooleanValue(self._args.s3output))
+            cfg.setValue(CCLOUD_UPLOAD_OLD_KEY, cfg.getValue(CCLOUD_UPLOAD))
+            if (self._args.clouduploadtype):
+                self._args.clouduploadtype = self._args.clouduploadtype.lower()
+                cfg.setValue(COUT_CLOUD_TYPE, self._args.clouduploadtype)
+
+        is_cloud_upload = getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) if cfg.getValue(CCLOUD_UPLOAD) else getBooleanValue(cfg.getValue(CCLOUD_UPLOAD_OLD_KEY))
+        # for backward compatibility (-s3output)
+        if (not cfg.getValue(CCLOUD_UPLOAD)):
+            cfg.setValue(CCLOUD_UPLOAD, is_cloud_upload)
+        if (not cfg.getValue(COUT_CLOUD_TYPE)):
+            cfg.setValue(COUT_CLOUD_TYPE, CCLOUD_AMAZON)
+        # ends
+
+        if (self._args.subs):
+            cfg.setValue('IncludeSubdirectories', getBooleanValue(self._args.subs))
+        # ends
+
+        # do we have temp-input-path to copy rasters first before conversion.
+        is_input_temp = False
+        if (self._args.tempinput is not None):
+            self._args.tempinput = self._args.tempinput.strip().replace('\\', '/')
+            if (self._args.tempinput.endswith('/') == False):
+                self._args.tempinput += '/'
+            if (os.path.isdir(self._args.tempinput) == False):
                 try:
-                    Message ('[Del] %s' % (input_file))
-                    os.remove(input_file )
+                    os.makedirs(self._args.tempinput)
                 except Exception as exp:
-                    Message ('[Del] %s (%s)' % (input_file, str(exp)))
-            Message ('Done.')
-# ends
+                    self._base.message('Unable to create the temp-input-path (%s) [%s]' % (self._args.tempinput, str(exp)), const_critical_text)
+                    return(terminate(self._base, eFAIL))
+            is_input_temp = True         # flag flows to deal with temp-input-path
+            cfg.setValue('istempinput', is_input_temp)
+            cfg.setValue('tempinput', self._args.tempinput)
+        # ends
 
-if (len(raster_buff) == 0):
-    Message ('Err. No input rasters to process..', const_warning_text);
-# ends
+        # let's setup output temp path.
+        is_output_temp = False
+        if (self._args.tempoutput):
+            self._args.tempoutput = self._args.tempoutput.strip().lower().replace('\\', '/')
+            if (self._args.tempoutput.endswith('/') == False):
+                self._args.tempoutput += '/'
+            if (os.path.isdir(self._args.tempoutput) == False):
+                # attempt to create the temp-output path
+                try:
+                    if (not self._args.op or
+                        (self._args.op and
+                         self._args.op != COP_UPL)):
+                        os.makedirs(self._args.tempoutput)
+                except Exception as exp:
+                    self._base.message ('Unable to create the temp-output-path (%s)\n[%s]' % (self._args.tempoutput, str(exp)), const_critical_text)
+                    return(terminate(self._base, eFAIL))
+                # ends
+            is_output_temp = True
+            cfg.setValue('istempoutput', is_output_temp)
+            cfg.setValue('tempoutput', self._args.tempoutput)
+        # ends
+
+        # are we doing input from S3?
+        isinput_s3 = getBooleanValue(self._args.s3input);
+
+        # import boto modules only when required. This allows users to run the program for only local file operations.
+        if (isinput_s3 == True or
+            getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
+            cfg.setValue(CCFG_PRIVATE_INC_BOTO, True)
+            try:
+                global boto
+                import boto
+                from boto.s3.key import Key
+                from boto.s3.connection import OrdinaryCallingFormat
+            except Exception as exp:
+                self._base.message ('\n%s requires the (boto) module to run its S3 specific operations. Please install (boto) for python.' % (__program_name__), const_critical_text)
+                return(terminate(self._base, eFAIL))
+        # ends
+
+        # take care of missing -input and -output if -s3input==True
+        if (isinput_s3 == True):
+            if (not self._args.input):
+                self._args.input = cfg.getValue(CIN_S3_PARENTFOLDER, False);
+                if (self._args.input):
+                    self._args.input = self._args.input.strip().replace('\\', '/')
+                cfg.setValue(CIN_S3_PARENTFOLDER, self._args.input)
+
+        if (is_cloud_upload):
+            if (not is_output_temp):
+                if ((self._args.op and self._args.op != COP_UPL) or
+                    not self._args.op):
+                    self._base.message ('-tempoutput must be specified if -cloudupload=true', const_critical_text)
+                    return(terminate(self._base, eFAIL))
+            _access = cfg.getValue(COUT_AZURE_ACCESS)
+            if (_access):
+                if (not _access in ('private', 'blob', 'container')):
+                        self._base.message ('Invalid value for ({})'.format(COUT_AZURE_ACCESS), const_critical_text);
+                        return(terminate(self._base, eFAIL))
+                if (_access == 'private'):      # private is not recognized by Azure, used internally only for clarity
+                    cfg.setValue(COUT_AZURE_ACCESS, None)       # None == private container
+
+            if (self._args.output is None):
+                _cloud_upload_type = cfg.getValue(COUT_CLOUD_TYPE, True)
+                if (_cloud_upload_type == CCLOUD_AMAZON):
+                    self._args.output = cfg.getValue(COUT_S3_PARENTFOLDER, False);
+                elif (_cloud_upload_type == CCLOUD_AZURE):
+                    self._args.output = cfg.getValue(COUT_AZURE_PARENTFOLDER, False);
+                else:
+                    self._base.message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
+                    return(terminate (self._base, eFAIL))
+                if (self._args.output):
+                    self._args.output = self._args.output.strip().replace('\\', '/')
+                cfg.setValue(COUT_S3_PARENTFOLDER, self._args.output)
+        # ends
+
+        if (not self._args.output or
+            not self._args.input):
+            if ((not self._args.op and
+                not self._args.input) or
+                (self._args.op and
+                not self._args.input)):
+                self._base.message ('-input/-ouput is not specified!', const_critical_text)
+                return(terminate(self._base, eFAIL))
+
+        # set output in cfg.
+        dst_ = self._args.output
+        if (dst_ and
+            dst_[-1:] != '/'):
+            dst_ += '/'
+
+        cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_)
+        # ends
+
+        # cfg-init-valid modes
+        cfg_modes = {
+        'tif',
+        'tif_lzw',
+        'tif_jpeg',
+        'tif_mix',
+        'tif_dg',
+        'tiff_landsat',
+        'mrf',
+        'mrf_jpeg',
+        'mrf_mix',
+        'mrf_dg',
+        'mrf_landsat',
+        'cachingmrf',
+        'clonemrf',
+        'splitmrf'
+        }
+        # ends
+
+        # read-in (mode)
+        cfg_mode = self._args.mode     # cmd-line -mode overrides the cfg value.
+        if (cfg_mode is None):
+            cfg_mode = cfg.getValue('Mode')
+        if (cfg_mode is None or
+            (cfg_mode in cfg_modes) == False):
+            self._base.message('<Mode> value not set/illegal', const_critical_text);
+            return(terminate(self._base, eFAIL))
+        cfg.setValue('Mode', cfg_mode)
+        # ends
+
+        # read in build pyramids value
+        do_pyramids = 'true'
+        if (self._args.pyramids is None):
+            self._args.pyramids = cfg.getValue('BuildPyramids')
+        if (self._args.pyramids is not None):
+            do_pyramids = self._args.pyramids = str(self._args.pyramids).lower()
+        # ends
+
+        # set jpeg_quality from cmd to override cfg value. Must be set before compression->init()
+        if (self._args.quality is not None):
+            cfg.setValue('Quality', self._args.quality)
+        if (self._args.prec is not None):
+            cfg.setValue('LERCPrecision', self._args.prec)
+        if (self._args.pyramids is not None):
+            if (self._args.pyramids == CCMD_PYRAMIDS_ONLY):
+                if (not cfg.getValue(CLOAD_RESTORE_POINT)):     # -input, -output path check isn't done if -input points to a job (.csv) file
+                    if (self._args.input != self._args.output):
+                        if (isinput_s3 == True):    # in case of input s3, output is used as a temp folder locally.
+                            if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
+                                if (cfg.getValue(COUT_S3_PARENTFOLDER) != cfg.getValue(CIN_S3_PARENTFOLDER)):
+                                    self._base.message ('<%s> and <%s> must be the same if the -pyramids=only' % (CIN_S3_PARENTFOLDER, COUT_S3_PARENTFOLDER), const_critical_text)
+                                    return(terminate(self._base, eFAIL))
+                        else:
+                            self._base.message ('-input and -output paths must be the same if the -pyramids=only', const_critical_text);
+                            return(terminate(self._base, eFAIL))
+        if (getBooleanValue(do_pyramids) == False and
+            do_pyramids != CCMD_PYRAMIDS_ONLY):
+                do_pyramids = 'false'
+        cfg.setValue('Pyramids', do_pyramids)
+        cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids))
+        # ends
+
+        # read in the gdal_path from config.
+        gdal_path = cfg.getValue(CCFG_GDAL_PATH)      # note: validity is checked within (compression-mod)
+        # ends
+
+        comp = compression(gdal_path)
+        ret = comp.init(self._base.message, 0, user_config = cfg)      # warning/error messages get printed within .init()
+        if (ret == False):
+            self._base.message('Unable to initialize/compression module', const_critical_text);
+            return(terminate(self._base, eFAIL))
+
+        # s3 upload settings.
+        out_s3_profile_name = cfg.getValue('Out_S3_AWS_ProfileName', False)
+        if (out_s3_profile_name):
+            cfg.setValue ('Out_S3_AWS_ProfileName', out_s3_profile_name)
+
+        s3_output = cfg.getValue(COUT_S3_PARENTFOLDER, False)
+        s3_id = cfg.getValue('Out_S3_ID', False)
+        s3_secret = cfg.getValue('Out_S3_Secret', False)
+
+        if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
+            err_init_msg = 'Unable to initialize the ({}) upload module!. Quitting..'
+            if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
+                if (s3_output is None or
+                    (s3_id is None and out_s3_profile_name is None) or
+                    (s3_secret is None and out_s3_profile_name is None)):
+                        self._base.message ('Empty/Invalid values detected for keys in the (%s) beginning with (Out_S3)' % (config_), const_critical_text)
+                        return(terminate(self._base, eFAIL))
+                # instance of upload storage.
+                S3_storage = S3Storage(self._base)
+                if (self._args.output):
+                    s3_output = self._args.output
+                    cfg.setValue(COUT_S3_PARENTFOLDER, s3_output)
+                ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT, cfg)
+                if (ret == False):
+                    self._base.message (err_init_msg.format('S3'), const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                S3_storage.inputPath = self._args.output
+                # ends
+            elif (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE):
+                _account_name = cfg.getValue(COUT_AZURE_ACCOUNTNAME, False);
+                _account_key = cfg.getValue(COUT_AZURE_ACCOUNTKEY, False);
+                _container = cfg.getValue(COUT_AZURE_CONTAINER, False);
+                if (not _account_name or
+                    not _account_key or
+                    not _container):
+                        self._base.message ('Empty/Invalid values detected for keys ({}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER), const_critical_text);
+                        return(terminate (self._base, eFAIL));
+                azure_storage = Azure(_account_name, _account_key);
+                if (not azure_storage.init()):
+                    self._base.message (err_init_msg.format('Azure'), const_critical_text);
+                    return(terminate(self._base, eFAIL))
+            else:
+                self._base.message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
+                return(terminate(self._base, eFAIL))
+
+        user_args_Callback = {
+        USR_ARG_UPLOAD : getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)),
+        USR_ARG_DEL : getBooleanValue(cfg.getValue('Out_S3_DeleteAfterUpload'))
+        ##'til' : {'del' : False,
+        ##         'extensions' : ['til', 'imd', 'idx', 'tif', 'tif.aux.xml', 'lrc']
+        ##        }
+        }
+        # ends
+
+        til = None      # by (default) til extensions or its associated files aren't processed differently.
+
+        # handle utility operations
+        if (self._args.op):
+            if (self._args.op == COP_UPL):
+                if (S3_storage):
+                    if (os.path.isfile(self._args.input)):
+                        try:
+                            with open(self._args.input, 'r') as _fptr:
+                                _rd = _fptr.readline()
+                                user_args_Callback[CSIN_UPL] = True         # setup config property
+                                while (_rd):
+                                    _rd = _rd.strip()
+                                    self._base.S3Upl (_rd, user_args_Callback)
+                                    _rd = _fptr.readline()
+                        except Exception as e:
+                            self._base.message ('Err. {}'.format(str(e)), self._base.const_critical_text)
+                    elif (os.path.isdir (self._args.input)):
+                        user_args_Callback[CINC_SUB] = getBooleanValue(cfg.getValue('IncludeSubdirectories'))   # setup config property
+                        self._base.S3Upl('{}/'.format(self._args.input), user_args_Callback)
+                    else:
+                        self._base.message ('Err. Invalid -input. ({})'.format(self._args.input), self._base.const_critical_text)
+                        return(terminate (self._base, eFAIL));
+                    retry_failed_lst  = []
+                    failed_upl_lst = S3_storage.getFailedUploadList()
+                    if (failed_upl_lst):
+                        [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
+                        # write out the upl_err_file
+                        _fptr = None
+                        if (self._log_path):
+                            try:
+                                if (not os.path.isdir(self._log_path)):
+                                    os.makedirs(self._log_path)
+                                ousr_date =  datetime.datetime.now()
+                                err_upl_file = os.path.join(self._log_path,
+                                '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day,
+                                ousr_date.hour, ousr_date.minute, ousr_date.second))
+                                with open(err_upl_file, 'w+') as _fptr:
+                                    for _wl in retry_failed_lst:
+                                        _fptr.write ('{}\n'.format(_wl))
+                            except Exception as e:
+                                self._base.message ('Err. Writing the failed upload file list.\n{}'.format(str(e)), self._base.const_critical_text)
+                        # ends
+        # ends
 
 
-Message ('\nDone..')
+        cpy = Copy(self._base)
+        # do we need to process (til) files?
+        for x in cfg.getValue(CCFG_RASTERS_NODE):
+            if (x.lower() == 'til'):
+                til = TIL()
+                break
+        # ends
 
-terminate(eOK)
+        list = {
+        'copy' : {'*'},
+        'exclude' : {}
+        }
+
+        for i in cfg.getValue(CCFG_RASTERS_NODE) + cfg.getValue(CCFG_EXCLUDE_NODE):
+            list['exclude'][i] = ''
+
+        is_caching = False
+        if (cfg_mode == 'clonemrf' or
+            cfg_mode == 'splitmrf' or
+            cfg_mode == 'cachingmrf'):
+            is_caching = True
+
+        if (is_caching == True):
+            cfg.setValue('istempinput', False)
+            cfg.setValue('Pyramids', False)
+
+        callbacks = {
+        #'copy' : copy_callback,
+        'exclude'  : exclude_callback
+        }
+
+        callbacks_for_meta = {
+        'exclude'  : exclude_callback_for_meta
+        }
+
+        CONST_CPY_ERR_0 = 'Err. Unable to initialize (Copy) module!'
+        CONST_CPY_ERR_1 = 'Err. Unable to process input data/(Copy) module!'
+
+        CONST_OUTPUT_EXT = '.%s' % ('mrf')
+
+        # keep original-source-ext
+        cfg_keep_original_ext = getBooleanValue(cfg.getValue('KeepExtension'))
+        cfg_threads = cfg.getValue('Threads')
+        msg_threads = 'Warning: Thread-count invalid/undefined, resetting to default'
+        try:
+            cfg_threads = int(cfg_threads)   # (None) value is expected
+        except:
+            cfg_threads = -1
+        if (cfg_threads <= 0 or
+            cfg_threads > CCFG_THREADS):
+            cfg_threads = CCFG_THREADS
+            self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS))
+        # ends
+
+        # let's deal with copying when -input is on s3
+        if (isinput_s3 == True):
+            cfg.setValue('iss3', True);
+            in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
+            if (self._args.input):        # this will never be (None)
+                in_s3_parent = self._args.input       # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
+                cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
+                if (os.path.exists(in_s3_parent)):      # are we reading from a list?
+                    try:
+                        _ln = _rpt.root
+                        if (_ln):
+                            cfg.setValue(CIN_S3_PARENTFOLDER, _remote_path)
+        ##                with open (in_s3_parent, 'r') as rpt:
+        ##                    _remote_path = rpt.readline().strip().replace('\\', '/')
+        ##                    if (_remote_path[-1:] != '/'):
+        ##                        self._base.message ('Err. First line in the -input report file must point to the (Original) input root folder', const_critical_text)
+        ##                        return(terminate(self._base, eFAIL))
+        ##                    cfg.setValue(CIN_S3_PARENTFOLDER, _remote_path)
+                    except Exception as e:
+                        pass    # assume the -input is a folder path
+                        #self._base.message ('Err. ({})'.format(str(e)), const_critical_text)
+                        #return(terminate(self._base, eFAIL))
+
+            in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName', False)
+            if (in_s3_profile_name):
+                cfg.setValue ('In_S3_AWS_ProfileName', in_s3_profile_name)
+            in_s3_id = cfg.getValue('In_S3_ID', False)
+            in_s3_secret = cfg.getValue('In_S3_Secret', False)
+            in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
+
+            if (in_s3_parent is None or
+                in_s3_bucket is None):
+                    self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', const_critical_text)
+                    return(terminate(self._base, eFAIL))
+
+            in_s3_parent = in_s3_parent.replace('\\', '/')
+            if (in_s3_parent[:1] == '/'):
+                in_s3_parent = in_s3_parent[1:]
+                cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
+
+            o_S3_storage = S3Storage(self._base)
+            ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN, cfg)
+            if (ret == False):
+                self._base.message ('Unable to initialize S3-storage module!. Quitting..', const_critical_text);
+                return(terminate(self._base, eFAIL))
+            cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.s3.amazonaws.com/'.format(in_s3_bucket)) # [pre_s3_in_public_bucket_sup] + o_S3_storage.bucketupload.generate_url(0, force_http=True).split('?')[0])
+            o_S3_storage.inputPath = self._args.output
+            if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
+                self._base.message ('Err. Unable to read S3-Content', const_critical_text);
+                return(terminate(self._base, eFAIL))
+        # =/vsicurl/http://esridatasets.s3.amazonaws.com/
+        # ends
+
+        # control flow if conversions required.
+        if (is_caching == False):
+            if (isinput_s3 == False):
+                ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
+                if  (ret == False):
+                    self._base.message(CONST_CPY_ERR_0, const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                ret = cpy.processs(self._base.S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy if is_input_temp == True else fn_pre_process_copy_default)
+                if (ret == False):
+                    self._base.message(CONST_CPY_ERR_1, const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                if (is_input_temp == True):
+                    pass        # no post custom code yet for non-rasters
+
+            files = raster_buff
+            files_len = len(files)
+            if (files_len):
+                if (is_input_temp == True and
+                    isinput_s3 == False):
+                    # if the temp-input path is define, we first copy rasters from the source path to temp-input before any conversion.
+                    self._base.message ('Copying files to temp-input-path (%s)' % (cfg.getValue('tempinput', False)))
+                    cpy_files_ = []
+                    for i in range(0, len(files)):
+                        get_dst_path = cfg.getValue('tempinput', False)
+                        cpy_files_.append(
+                        {
+                        'src' : files[i]['src'],
+                        'dst' : get_dst_path,
+                        'f' : files[i]['f']
+                        })
+                        files[i]['src'] = get_dst_path
+                    cpy.batch(cpy_files_, None)
+
+                self._base.message('Converting..');
+
+            # collect all the raster input files.
+            if (g_is_generate_report and
+                g_rpt):
+                if (not getBooleanValue(cfg.getValue('istempinput'))):
+                    for req in files:
+                        (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                        _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                        g_rpt.addFile(_src)
+                self._base.message ('{}'.format(CRESUME_CREATE_JOB_TEXT).format (_project_path))
+                for arg in vars(self._args):
+                    g_rpt.addHeader(arg, getattr(self._args, arg))
+                g_rpt.write();
+                self._args.op = None
+                self._args.input = _project_path
+                cfg.setValue(CLOAD_RESTORE_POINT, True)
+                self.run()
+                return
+            # ends
+
+            a = []
+            threads = []
+
+            batch = cfg_threads
+            s = 0
+            while 1:
+                m = s + batch
+                if (m >= files_len):
+                    m =  files_len
+
+                threads = []
+                for i in range(s, m):
+                    req = files[i]
+                    (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                    f, e = os.path.splitext(output_file)
+                    if (cfg_keep_original_ext == False):
+                        output_file = output_file.replace(e, CONST_OUTPUT_EXT)
+                    _build_pyramids = True
+                    if (til):
+                        if (til.find(req['f'])):
+                            til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
+                            _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
+                    t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
+                    t.daemon = True
+                    t.start()
+                    threads.append(t)
+
+                for t in threads:
+                    t.join()
+
+                # process til file if all the associate files have been processed
+                if (til):
+                    for _til in til:
+                        if (not til.isAllFilesProcessed(_til)):
+                            print ('** not yet completed for ({})'.format(_til));
+                        if (til.isAllFilesProcessed(_til)):
+                            til_output_path = til.getOutputPath(_til)
+                            if (not til_output_path):
+                                self._base.message ('Warning. TIL output-path returned empty/Internal error');
+                                continue
+                            ret = comp.createaOverview(til_output_path)
+                            if (not ret):
+                                self._base.message ('Warning. Unable to build pyramids on ({})'.format(til_output_path));
+                                continue
+                            ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path))
+                            if (not ret):
+                                self._base.message ('Warning. Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path))
+                                continue
+                            # let's rename (.mrf) => (.ovr)
+                            try:
+                                os.remove('{}.ovr'.format(til_output_path))
+                                os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
+                            except Exception as e:
+                                self._base.message ('Warning. ({})'.format(str(e)))
+                                continue
+
+                            # upload (til) related files (.idx, .ovr, .lrc)
+                            if (is_cloud_upload):
+                                ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
+                                retry_failed_lst  = []
+                                failed_upl_lst = S3_storage.getFailedUploadList()
+                                if (failed_upl_lst):
+                                    [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
+                                # let's delete all the associate files related to (TIL) files.
+                                (p, n) = os.path.split(til_output_path)
+                                for r,d,f in os.walk(p):
+                                    for file in f:
+                                        if (r != p):
+                                            continue
+                                        mk_filename = os.path.join(r, file).replace('\\', '/')
+                                        if (til.fileTILRelated(mk_filename)):
+                                            if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
+                                                print ('**{} in failed upload list'.format(mk_filename))
+                                                continue
+                                            try:
+                                                self._base.message ('[Del] {}'.format(mk_filename))
+                                                os.remove(mk_filename)
+                                            except Exception as e:
+                                                self._base.message ('[Del] Err. {} ({})'.format(mk_filename, str(e)), self._base.const_critical_text)
+                                # ends
+                            # ends
+                # ends
+
+                s = m
+                if s == files_len or s == 0:
+                    break
+            # let's clean up the input-temp if has been used.
+            # ends
+        # ends
+
+
+        #return(terminate(self._base, eOK));
+
+        # block to deal with meta-data ops.
+        if (is_caching == True and
+            do_pyramids != CCMD_PYRAMIDS_ONLY):
+            self._base.message ('\nProcessing caching operations...')
+
+            # set data, index extension lookup
+            extensions_lup = {
+            'lerc' : {'data' : 'lrc', 'index' : 'idx' }
+            }
+            # ends
+            if (isinput_s3 == False):
+                raster_buff = []
+                if (cfg_mode == 'splitmrf'):        # set explicit (exclude list) for mode (splitmrf)
+                    list['exclude']['idx'] = ''
+                ret = cpy.init(self._args.input, self._args.output, list, callbacks_for_meta, cfg)
+                if  (ret == False):
+                    self._base.message(CONST_CPY_ERR_0, const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                ret = cpy.processs(pre_processing_callback = fn_pre_process_copy if is_input_temp == True else fn_pre_process_copy_default)
+                if (ret == False):
+                    self._base.message(CONST_CPY_ERR_1, const_critical_text);
+                    return(terminate(self._base, eFAIL))
+
+            if (g_is_generate_report and
+                g_rpt):
+                for req in raster_buff:
+                    (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                    g_rpt.addFile(_src)
+                self._base.message ('{}'.format(CRESUME_CREATE_JOB_TEXT).format (_project_path))
+                for arg in vars(self._args):
+                    g_rpt.addHeader(arg, getattr(self._args, arg))
+                g_rpt.write();
+                self._args.op = None
+                self._args.input = _project_path
+                cfg.setValue(CLOAD_RESTORE_POINT, True)
+                self.run()
+                return
+
+            for req in raster_buff:
+                (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                (f, ext) = os.path.splitext(req['f'])
+                ext = ext.lower()
+                if (cfg_keep_original_ext == False):
+                    output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
+
+                # does the input (mrf) have the required associate(s) e.g. (idx) file?
+                # This is a simple check to make sure, we're only dealing with valid (mrf) formats.
+                # Note: Below code has been disabled until a later stage (20150329).
+        ##        idx_file = input_file
+        ##        is_idx_file = False
+        ##        s3_prefix = cfg.getValue(CIN_S3_PREFIX)
+        ##        if (s3_prefix and
+        ##            o_S3_storage and
+        ##            idx_file.startswith(s3_prefix)):
+        ##            idx_file = '%s.idx' % (os.path.splitext(input_file[len(s3_prefix):])[0])
+        ##            for k in o_S3_storage.bucketupload.list(idx_file):
+        ##                is_idx_file = not is_idx_file
+        ##                break
+        ##        else:
+        ##            try:
+        ##                is_idx_file = os.path.exists('%s.idx' % (os.path.splitext(input_file)[0]))
+        ##            except:
+        ##                pass
+        ##        if (not is_idx_file):
+        ##            self._base.message ('%s looks like an invalid/incomplete (MRF) file. Skipping.' % (input_file), const_warning_text)
+        ##            continue
+                # ends
+                if (cfg_mode != 'splitmrf'):     # uses GDAL utilities
+                    ret = comp.compress(input_file, output_file, args_Callback_for_meta)
+                else:
+                    try:
+                        shutil.copyfile(input_file, output_file)
+                    except Exception as e:
+                        self._base.message ('[CPY] %s (%s)' % (input_file, str(e)))
+                        continue
+
+                # let's deal with ops if the (cache) folder is defined at the cmd-line
+                input_ = output_file.replace('\\', '/').split('/')
+                f, e = os.path.splitext(input_[len(input_) - 1])
+                if (os.path.exists(output_file) == False):
+                    continue
+                # update .mrf.
+                try:
+                    comp_val =  None         # for (splitmrf)
+                    with open(output_file, "r") as c:
+                        content = c.read()
+                        if (cfg_mode == 'clonemrf'):
+                            if (ext != '.tif'):
+                                content = content.replace('<Source>', '<Source clone="true">')
+                                with open (output_file, "w") as c:
+                                    c.write(content)
+                        elif(cfg_mode == 'splitmrf'):
+                            CONST_LBL_COMP = '<Compression>'
+                            comp_indx = content.find(CONST_LBL_COMP)
+                            if (comp_indx != -1):
+                                comp_val = content[comp_indx + len(CONST_LBL_COMP): content.find(CONST_LBL_COMP.replace('<', '</'))].lower()
+                    key = '<Raster>'
+                    pos = content.find(key)
+                    if (pos != -1):
+                        pos += len(key)
+                        cache_output = os.path.dirname(output_file)
+                        if (self._args.cache):
+                            cache_output = self._args.cache
+                        rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, ''), '%s.mrf_cache' % (f)).replace('\\', '/')
+                        if (not comp_val is None):
+                            f, e =  os.path.splitext(input_file)
+                            if (comp_val in extensions_lup):
+                                rep_data_file = '%s.%s' % (f, extensions_lup[comp_val]['data'])
+                                rep_indx_file = '%s.%s' % (f, extensions_lup[comp_val]['index'])
+                        content = content[:pos] + '<DataFile>%s</DataFile>\n<IndexFile>%s</IndexFile>' % (rep_data_file, rep_indx_file) + content[pos:]
+                        with open (output_file, "w") as c:
+                            c.write(content)
+                except Exception as exp:
+                    self._base.message ('Error: Updating (%s) was not successful!\n%s' % (output_file, str(exp)));
+                # ends
+
+        # do we have failed upload files on list?
+        if (is_cloud_upload):
+            if (cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON):
+                failed_upl_lst = S3_storage.getFailedUploadList()
+                if (failed_upl_lst):
+                    self._base.message ('Retry - Failed upload list.', const_general_text);
+                    _fptr = None
+                    if (self._log_path):
+                        try:
+                            if (not os.path.isdir(self._log_path)):
+                                os.makedirs(self._log_path)
+                            ousr_date =  datetime.datetime.now()
+                            err_upl_file = os.path.join(self._log_path, '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day, \
+                            ousr_date.hour, ousr_date.minute, ousr_date.second))
+                            _fptr = open(err_upl_file, 'w+')
+                        except:
+                            pass
+                    for v in failed_upl_lst['upl']:
+                        self._base.message ('%s' % (v['local']), const_general_text)
+                        ret = S3_storage.upload_group(v['local'])
+                        # the following files will be logged as unsuccessful uploads to output cloud
+                        if (not ret):
+                            if (_fptr): _fptr.write('{}\n'.format(v['local']))
+
+                            if (_rpt):      # Do we have an input file list?
+                                if ('local' in v):
+                                    _local = v['local']
+                                    if (_local):
+                                        setUploadRecordStatus (_local, CRPT_NO)
+                        # ends
+                        for r in ret:
+                            try:
+                                self._base.message ('[Del] {}'.format(r))
+                                try:
+                                    os.remove(r)
+                                except:
+                                    time.sleep(CDEL_DELAY_SECS)
+                                    os.remove(r)
+                            except Exception as e:
+                                self._base.message ('[Del] {} ({})'.format(r, str(e)))
+                    if (_fptr):
+                        _fptr.close()
+                        _fptr = None
+        # ends
+
+        # let's clean-up rasters @ temp input path
+        dbg_delete = True
+        if (dbg_delete == True):
+            if (is_input_temp == True and
+                is_caching == False):        # if caching is (True), -tempinput is ignored and no deletion of source @ -input takes place.
+                if (len(raster_buff) != 0):
+                    self._base.message ('Removing input rasters at ({})'.format(cfg.getValue('tempinput', False)))
+                    for req in raster_buff:
+                        (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                        try:
+                            self._base.message ('[Del] {}'.format(input_file))
+                            os.remove(input_file )
+                        except Exception as exp:
+                            self._base.message ('[Del] {} ({})'.format(input_file, str(exp)), self._base.const_warning_text)
+                    self._base.message ('Done.')
+        # ends
+
+        if (not raster_buff):
+            self._base.message ('No input rasters to process..', const_warning_text);
+        # ends
+
+        _status = eOK
+        # write out the (job file) with updated status.
+        if (_rpt):
+            if (not _rpt.write() or
+                _rpt.hasFailures()):
+                _status = eFAIL
+            if (_status == eOK):
+                if (not _rpt.moveJobFileToPath(self._base._m_log.logFolder)):
+                    _status = eFAIL
+        # ends
+
+        self._base.message ('Done..\n')
+
+        return(terminate(self._base, _status))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-mode', help='Processing mode/output format', dest='mode');
+    parser.add_argument('-input', help='Input raster files directory', dest='input');
+    parser.add_argument('-output', help='Output directory', dest='output');
+    parser.add_argument('-cache', help='cache output directory', dest='cache');
+    parser.add_argument('-config', help='Configuration file with default settings', dest='config');
+    parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality');
+    parser.add_argument('-prec', help='LERC precision', dest='prec');
+    parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only]', dest='pyramids');
+    parser.add_argument('-s3input', help='Is -input path on S3? [true/false: default:false]', dest='s3input');
+    parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='subs');
+    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest='tempinput');
+    parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest='tempoutput');
+    parser.add_argument('-cloudupload', help='Upload output to Cloud? [true/false]', dest='cloudupload');
+    parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype');
+    parser.add_argument('-s3output', help='Is -output path on S3? [true/false]. Please note, this flag is depreciated but will continue to work for backward compatibilily. Please use (-cloudupload) instead.', dest='s3output');
+    parser.add_argument('-op', help='Utility operation mode [upload]', dest='op');
+    parser.add_argument('-job', help='job/log-prefix file name', dest='job');
+
+    args = parser.parse_args()
+    app = Application(args)
+    #app.registerMessageCallback(messageDebug)
+    if (not app.init()):
+        return eFAIL
+    return app.run()
+
+if __name__ == '__main__':
+    ret = main()
+    print ('\nDone..')
+    exit(ret)
+
 
 
