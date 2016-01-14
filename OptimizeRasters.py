@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20151206
+# Version: 20160114
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -2036,7 +2036,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5'
+    __program_ver__ = 'v1.5a'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2140,7 +2140,7 @@ class Application:
 
     def writeToConsole(self, msg, status = const_general_text):
         if (self._msg_callback):
-            return (self._msg_callback(msg, const_critical_text))
+            return (self._msg_callback(msg, status))
         print (msg)          # log file is not up yet, write to (console)
         return True
 
