@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160114
+# Version: 20160118
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -cache -config -quality -prec -pyramids -s3input
@@ -594,7 +594,7 @@ class S3Upload_:
         # read in big-file in chunk
         CHUNK_MIN_SIZE = 5242880
 ##        if (self.m_local_file.endswith('.lrc')):
-##            return False
+##            return True
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
         #return True
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
@@ -762,9 +762,9 @@ class Azure(Store):
         super(Azure, self).__init__(account_name, account_key)
     def init(self):
         try:
-            from azure.storage import BlobService
+            from azure.storage.blob import BlobService
             self._blob_service = BlobService(account_name=self._account_name, account_key=self._account_key)
-        except:
+        except Exception as e:
             return False
         return True
 
@@ -917,7 +917,7 @@ class S3Storage:
             _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
             # setup s3 connection
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
-                _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat') if len([c for c in self.m_bucketname if c.isupper()]) == 0 else OrdinaryCallingFormat()
+                _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 else 'boto.s3.connection.OrdinaryCallingFormat')
                 try:
                     is_bucket_public = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
                     con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET,
@@ -964,19 +964,22 @@ class S3Storage:
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
             if (root_only_ is not None):    # if there's a value, take it else defaults to (True)
                 root_only = getBooleanValue(root_only_)
-
         # get the til files first
         if (til):
-            for key in keys:
-                key = self.bucketupload.get_key(key) if is_link else key
-                if (not key):
-                    continue
-                if (key.name.endswith('/') == False):
-                    if (not root_only == True):
-                        if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
-                            continue
-                    if (key.name.lower().endswith(CTIL_EXTENSION_)):
-                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
+            try:
+                for key in keys:
+                    key = self.bucketupload.get_key(key) if is_link else key
+                    if (not key):
+                        continue
+                    if (key.name.endswith('/') == False):
+                        if (not root_only == True):
+                            if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
+                                continue
+                        if (key.name.lower().endswith(CTIL_EXTENSION_)):
+                            cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
+            except Exception as e:
+                self._base.message (e.message, const_critical_text)
+                return False
         # ends
         try:
             for key in keys:
@@ -1662,7 +1665,7 @@ class compression:
 
 
     def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
-        _vsicurl_input = cfg.getValue(CIN_S3_PREFIX)
+        _vsicurl_input = cfg.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
             if (_rpt):
@@ -1905,7 +1908,7 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     input_file = os.path.join(inputfldr, file)
     output_file = os.path.join(outputfldr, file)
     if (isinput_s3):
-        input_file = cfg.getValue(CIN_S3_PREFIX) + input_file
+        input_file = cfg.getValue(CIN_S3_PREFIX, False) + input_file
         output_file = outputfldr #  + '/' + inputfldr
         if (getBooleanValue(cfg.getValue('istempinput')) == True or
             getBooleanValue(cfg.getValue('istempoutput')) == True):
@@ -2036,7 +2039,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5a'
+    __program_ver__ = 'v1.5b'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2287,7 +2290,7 @@ class Application:
                 self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
             elif(self._args.op == COP_RPT):
                 g_rpt = Report();
-                if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER))):
+                if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER, False))):
                     self._base.message ('Err. Unable to init (Report)', const_critical_text)
                     return(terminate(self._base, eFAIL))
                 g_is_generate_report = True
@@ -2705,7 +2708,7 @@ class Application:
             if (ret == False):
                 self._base.message ('Unable to initialize S3-storage module!. Quitting..', const_critical_text);
                 return(terminate(self._base, eFAIL))
-            cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.s3.amazonaws.com/'.format(in_s3_bucket)) # [pre_s3_in_public_bucket_sup] + o_S3_storage.bucketupload.generate_url(0, force_http=True).split('?')[0])
+            cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http')) # vsicurl doesn't like 'https'
             o_S3_storage.inputPath = self._args.output
             if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
                 self._base.message ('Err. Unable to read S3-Content', const_critical_text);
