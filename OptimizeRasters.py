@@ -14,18 +14,19 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160118
+# Version: 20160124
 # Requirements: Python
 # Required Arguments: -input -output
-# Optional Arguments: -cache -config -quality -prec -pyramids -s3input
-# -tempinput -tempoutput -subs -cloudupload/-s3output -clouduploadtype -op -job
+# Optional Arguments: -mode -cache -config -quality -prec -pyramids -s3input
+# -tempinput -tempoutput -subs -cloudupload/-s3output -clouduploadtype
+# -inputprofile -outputprofile -op -job -inputprofile -outputprofile
+# -inputbucket -outputbucket
 # Usage: python.exe OptimizeRasters.py <arguments>
 # Notes: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
 # file are case-sensitive and the program will fail if the correct paths are not
 # entered at the cmd-line or in the config file.
 # Author: Esri Imagery Workflows team
-
 #------------------------------------------------------------------------------
 #!/usr/bin/env python
 
@@ -101,6 +102,7 @@ COUT_AZURE_ACCOUNTNAME = 'Out_Azure_AccountName'
 COUT_AZURE_ACCOUNTKEY = 'Out_Azure_AccountKey'
 COUT_AZURE_CONTAINER = 'Out_Azure_Container'
 COUT_AZURE_ACCESS = 'Out_Azure_Access'
+COUT_AZURE_PROFILENAME = 'Out_Azure_ProfileName'
 # ends
 
 CCLOUD_UPLOAD_THREADS = 20          # applies to both (azure and amazon/s3)
@@ -593,8 +595,8 @@ class S3Upload_:
     def upload(self):
         # read in big-file in chunk
         CHUNK_MIN_SIZE = 5242880
-##        if (self.m_local_file.endswith('.lrc')):
-##            return True
+##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
+##            return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
         #return True
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
@@ -743,9 +745,15 @@ class SlnTMStringIO:
 
 
 class Store(object):
-    def __init__(self, account_name, account_key):
+    const_general_text = 0
+    const_warning_text = 1
+    const_critical_text = 2
+    const_status_text = 3
+    def __init__(self, account_name, account_key, profile_name, base):
         self._account_name = account_name
         self._account_key = account_key
+        self._profile_name = profile_name
+        self._base = base
     def init(self):
         return True
     def upload(self, file_path, container_name, parent_folder, properties = None):
@@ -754,20 +762,47 @@ class Store(object):
         self._upl_parent_folder = parent_folder
         self._upl_properties = properties
         return True
-
+    def readProfile (self, account_name, account_key):
+        import ConfigParser
+        config = ConfigParser.RawConfigParser()
+        userHome = '{}/{}/{}'.format(os.path.join(os.getenv('HOMEDRIVE'),os.getenv('HOMEPATH')).replace('\\', '/'), '.optimizerasters', 'azure_credentials')
+        with open (userHome) as fptr:
+            config.readfp(fptr)
+        if (not config.has_section(self._profile_name)):
+            return (None, None)
+        azure_account_name = config.get (self._profile_name, account_name) if config.has_option (self._profile_name, account_name) else None
+        azure_account_key = config.get (self._profile_name, account_key) if config.has_option (self._profile_name, account_key) else None
+        return (azure_account_name, azure_account_key)
+    def message (self, msg, status = 0):     # type (0: general, 1: warning, 2: critical, 3: statusText)
+        if (self._base):
+            self._base.message(msg, status)
+            return
+        status_text = ''
+        if (status == 1):
+            status_text = 'Warning'
+        elif (status == 2):
+            status_text = 'Err'
+        print ('{}{}{}'.format (status_text, '. ' if status_text else '', msg))
 
 class Azure(Store):
     CHUNK_MIN_SIZE = 4 * 1024 * 1024
-    def __init__(self, account_name, account_key):
-        super(Azure, self).__init__(account_name, account_key)
+    COUT_AZURE_ACCOUNTNAME_INFILE = 'azure_account_name'
+    COUT_AZURE_ACCOUNTKEY_INFILE = 'azure_account_key'
+
+    def __init__(self, account_name, account_key, profile_name = None, base = None):
+        super(Azure, self).__init__(account_name, account_key, profile_name, base)
     def init(self):
         try:
+            if (self._profile_name):    # profile name if defined supersedes (account_name, account_key)
+                (self._account_name, self._account_key) = self.readProfile(self.COUT_AZURE_ACCOUNTNAME_INFILE, self.COUT_AZURE_ACCOUNTKEY_INFILE)
+                if (not self._account_name or
+                    not self._account_key):
+                    return False
             from azure.storage.blob import BlobService
             self._blob_service = BlobService(account_name=self._account_name, account_key=self._account_key)
         except Exception as e:
             return False
         return True
-
     def _runBlock(self, bobj, fobj, container_name, blob_name, block_id):
         fobj.seek(0)
         bobj.put_block(container_name, blob_name, fobj.read(), block_id)
@@ -783,13 +818,15 @@ class Azure(Store):
 
         blob_path = self._input_file_path
         blob_name = os.path.join(self._upl_parent_folder, os.path.basename(blob_path))
+##        if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
+##            return True                          #  "
         isContainerCreated = False
 
         t0 = datetime.datetime.now()
         time_to_wait_before_retry = 3
         max_time_to_wait = 60
 
-        Message ('Accessing container ({})..'.format(self._upl_container_name))
+        self.message ('Accessing container ({})..'.format(self._upl_container_name))
         while(True):
             try:
                 _access = properties['access'] if properties and 'access' in properties else None
@@ -809,19 +846,19 @@ class Azure(Store):
                         break
                 t1 = datetime.datetime.now() - t0
                 if (t1.seconds > max_time_to_wait):
-                    Message  ('Err. Timed out to create container.', const_critical_text)
+                    self.message ('Timed out to create container.', self.const_critical_text)
                     break
         if (not isContainerCreated):
-            Message ('Err. Unable to create the container ({})'.format(self._upl_container_name), const_critical_text)
+            self.message ('Unable to create the container ({})'.format(self._upl_container_name), self.const_critical_text)
             exit(1)
-        Message ('Done.')
+        self.message ('Done.')
 
         f = None
         try:         # see if we can open it
             f = open (blob_path, 'rb')
             f_size = os.path.getsize(blob_path)
         except Exception as e:
-            Message ('Err. File open/Upload: ({})'.format(str(e)), const_critical_text)
+            self.message ('File open/Upload: ({})'.format(str(e)), self.const_critical_text)
             if (f):
                 f.close()
             return False
@@ -836,8 +873,8 @@ class Azure(Store):
         upl_blocks = 0
         idx = 1
 
-        Message ('Uploading ({})'.format(blob_path))
-        Message ('Total blocks to upload ({})'.format(tot_blocks))
+        self.message ('Uploading ({})'.format(blob_path))
+        self.message ('Total blocks to upload ({})'.format(tot_blocks))
 
         st = datetime.datetime.now()
 
@@ -866,7 +903,7 @@ class Azure(Store):
             for e in buffer:
                 try:
                     block_id = base64.b64encode(str(idx))
-                    Message ('Adding block-id ({})'.format(idx))
+                    self.message ('Adding block-id ({})'.format(idx))
                     t = threading.Thread(target = self._runBlock,
                     args = (self._blob_service, e, self._upl_container_name, blob_name, block_id))
                     t.daemon = True
@@ -875,22 +912,22 @@ class Azure(Store):
                     block_ids.append(block_id)
                     idx += 1
                 except Exception as e:
-                    Message ('Err. {}'.format(str(e)), const_critical_text);
+                    self.message (str(e), self.const_critical_text);
                     if (f):
                         f.close()
                     return False
         try:
-            Message ('Finalizing uploads..');
+            self.message ('Finalizing uploads..');
             ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, block_ids)
         except Exception as e:
-            Message ('Err. {}'.format(str(e)), const_critical_text)
+            Message (str(e), self.const_critical_text)
             return False
         finally:
             if (f):
                 f.close()
 
-        Message ('Duration. ({} sec)'.format((datetime.datetime.now() - st).seconds))
-        Message ('Done.')
+        self.message ('Duration. ({} sec)'.format((datetime.datetime.now() - st).seconds))
+        self.message ('Done.')
 
         return True
 
@@ -1493,6 +1530,10 @@ class Copy:
                             if (self.m_user_config is not None):
                                 if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
                                     dst_path = r.replace(self.src, self.m_user_config.getValue('tempoutput', False))    # no checks on temp-output validty done here. It's assumed it has been prechecked at the time of its assignment.
+                            if (self.m_user_config):
+                                if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
+                                    if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
+                                        r = r.replace(self.src, self.m_user_config.getValue('tempinput'))
                             if (self.cb_list['exclude'](file, r, dst_path) == False):       # skip fruther processing if 'false' returned from the call-back fnc
                                 continue
                     continue
@@ -2039,7 +2080,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5b'
+    __program_ver__ = 'v1.5d'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2327,7 +2368,7 @@ class Application:
             cfg.setValue('IncludeSubdirectories', getBooleanValue(self._args.subs))
         # ends
 
-        # do we have temp-input-path to copy rasters first before conversion.
+        # do we have -tempinput path to copy rasters first before conversion.
         is_input_temp = False
         if (self._args.tempinput is not None):
             self._args.tempinput = self._args.tempinput.strip().replace('\\', '/')
@@ -2337,7 +2378,7 @@ class Application:
                 try:
                     os.makedirs(self._args.tempinput)
                 except Exception as exp:
-                    self._base.message('Unable to create the temp-input-path (%s) [%s]' % (self._args.tempinput, str(exp)), const_critical_text)
+                    self._base.message('Unable to create the -tempinput path (%s) [%s]' % (self._args.tempinput, str(exp)), const_critical_text)
                     return(terminate(self._base, eFAIL))
             is_input_temp = True         # flag flows to deal with temp-input-path
             cfg.setValue('istempinput', is_input_temp)
@@ -2510,7 +2551,9 @@ class Application:
             return(terminate(self._base, eFAIL))
 
         # s3 upload settings.
-        out_s3_profile_name = cfg.getValue('Out_S3_AWS_ProfileName', False)
+        out_s3_profile_name = self._args.outputprofile
+        if (not out_s3_profile_name):
+            out_s3_profile_name = cfg.getValue('Out_S3_AWS_ProfileName', False)
         if (out_s3_profile_name):
             cfg.setValue ('Out_S3_AWS_ProfileName', out_s3_profile_name)
 
@@ -2519,7 +2562,7 @@ class Application:
         s3_secret = cfg.getValue('Out_S3_Secret', False)
 
         if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
-            err_init_msg = 'Unable to initialize the ({}) upload module!. Quitting..'
+            err_init_msg = 'Unable to initialize the ({}) upload module!. Check module setup/credentials. Quitting..'
             if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
                 if (s3_output is None or
                     (s3_id is None and out_s3_profile_name is None) or
@@ -2531,6 +2574,10 @@ class Application:
                 if (self._args.output):
                     s3_output = self._args.output
                     cfg.setValue(COUT_S3_PARENTFOLDER, s3_output)
+                # do we overwrite the output_bucekt_name with cmd-line?
+                if (self._args.outputbucket):
+                    cfg.setValue('Out_S3_Bucket', self._args.outputbucket)
+                # end
                 ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT, cfg)
                 if (ret == False):
                     self._base.message (err_init_msg.format('S3'), const_critical_text);
@@ -2540,13 +2587,20 @@ class Application:
             elif (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE):
                 _account_name = cfg.getValue(COUT_AZURE_ACCOUNTNAME, False);
                 _account_key = cfg.getValue(COUT_AZURE_ACCOUNTKEY, False);
-                _container = cfg.getValue(COUT_AZURE_CONTAINER, False);
-                if (not _account_name or
-                    not _account_key or
+                _container = cfg.getValue(COUT_AZURE_CONTAINER);        #  Azure container names will be lowercased.
+                _out_profile = cfg.getValue(COUT_AZURE_PROFILENAME, False)
+                if (self._args.outputbucket):
+                    cfg.setValue(COUT_AZURE_CONTAINER, self._args.outputbucket.lower())     # lowercased
+                if (self._args.outputprofile):
+                    _out_profile = self._args.outputprofile
+                    cfg.setValue(COUT_AZURE_PROFILENAME, _out_profile)
+                if (((not _account_name or
+                    not _account_key) and
+                    not _out_profile) or
                     not _container):
-                        self._base.message ('Empty/Invalid values detected for keys ({}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER), const_critical_text);
-                        return(terminate (self._base, eFAIL));
-                azure_storage = Azure(_account_name, _account_key);
+                    self._base.message ('Empty/Invalid values detected for keys ({}/{}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER, COUT_AZURE_PROFILENAME), const_critical_text);
+                    return(terminate (self._base, eFAIL));
+                azure_storage = Azure(_account_name, _account_key, _out_profile, self._base);
                 if (not azure_storage.init()):
                     self._base.message (err_init_msg.format('Azure'), const_critical_text);
                     return(terminate(self._base, eFAIL))
@@ -2686,17 +2740,22 @@ class Application:
                         #self._base.message ('Err. ({})'.format(str(e)), const_critical_text)
                         #return(terminate(self._base, eFAIL))
 
-            in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName', False)
+            in_s3_profile_name = self._args.inputprofile
+            if (not in_s3_profile_name):
+                in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName', False)
             if (in_s3_profile_name):
                 cfg.setValue ('In_S3_AWS_ProfileName', in_s3_profile_name)
             in_s3_id = cfg.getValue('In_S3_ID', False)
             in_s3_secret = cfg.getValue('In_S3_Secret', False)
-            in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
+            in_s3_bucket = self._args.inputbucket
+            if (not in_s3_bucket):
+                in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
 
             if (in_s3_parent is None or
                 in_s3_bucket is None):
                     self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', const_critical_text)
                     return(terminate(self._base, eFAIL))
+            cfg.setValue('In_S3_Bucket', in_s3_bucket)          # update (in s3 bucket name in config)
 
             in_s3_parent = in_s3_parent.replace('\\', '/')
             if (in_s3_parent[:1] == '/'):
@@ -2734,12 +2793,13 @@ class Application:
             files_len = len(files)
             if (files_len):
                 if (is_input_temp == True and
-                    isinput_s3 == False):
+                    isinput_s3 == False and
+                    not cfg.getValue(CLOAD_RESTORE_POINT)):
                     # if the temp-input path is define, we first copy rasters from the source path to temp-input before any conversion.
-                    self._base.message ('Copying files to temp-input-path (%s)' % (cfg.getValue('tempinput', False)))
+                    self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue('tempinput', False)))
                     cpy_files_ = []
                     for i in range(0, len(files)):
-                        get_dst_path = cfg.getValue('tempinput', False)
+                        get_dst_path = files[0]['dst'].replace(self._args.output if cfg.getValue('tempoutput', False) is None else cfg.getValue('tempoutput', False), cfg.getValue('tempinput', False))
                         cpy_files_.append(
                         {
                         'src' : files[i]['src'],
@@ -2754,10 +2814,13 @@ class Application:
             # collect all the raster input files.
             if (g_is_generate_report and
                 g_rpt):
-                if (not getBooleanValue(cfg.getValue('istempinput'))):
-                    for req in files:
-                        (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
-                        _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                for req in files:
+                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                    if (getBooleanValue(cfg.getValue('istempinput'))):
+                        _tempinput = cfg.getValue('tempinput', False)
+                        _tempinput = _tempinput[:-1] if _tempinput.endswith('/') else _tempinput
+                        _src = _src.replace(_tempinput, self._args.input)
+                    if (not g_rpt.findWith(_src)):  #  prior to this point, rasters get added to g_rpt during the (pull/copy) process if -s3input=true && -tempinput is defined.
                         g_rpt.addFile(_src)
                 self._base.message ('{}'.format(CRESUME_CREATE_JOB_TEXT).format (_project_path))
                 for arg in vars(self._args):
@@ -3079,6 +3142,10 @@ def main():
     parser.add_argument('-cloudupload', help='Upload output to Cloud? [true/false]', dest='cloudupload');
     parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype');
     parser.add_argument('-s3output', help='Is -output path on S3? [true/false]. Please note, this flag is depreciated but will continue to work for backward compatibilily. Please use (-cloudupload) instead.', dest='s3output');
+    parser.add_argument('-inputprofile', help='Input cloud profile name with credentials', dest='inputprofile');
+    parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest='outputprofile');
+    parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket');
+    parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket');
     parser.add_argument('-op', help='Utility operation mode [upload]', dest='op');
     parser.add_argument('-job', help='job/log-prefix file name', dest='job');
 
