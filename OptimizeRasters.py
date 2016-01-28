@@ -14,13 +14,13 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160124
+# Version: 20160128
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids -s3input
 # -tempinput -tempoutput -subs -cloudupload/-s3output -clouduploadtype
 # -inputprofile -outputprofile -op -job -inputprofile -outputprofile
-# -inputbucket -outputbucket
+# -inputbucket -outputbucket -clonepath
 # Usage: python.exe OptimizeRasters.py <arguments>
 # Notes: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
@@ -85,11 +85,21 @@ COP_DNL = 'download'
 COP_RPT = 'report'
 # ends
 
+# clone specific
+CCLONE_PATH = 'clonepath'
+# ends
+
+# -cache path
+CCACHE_PATH = 'cache'
+# ends
+
 # resume constants
 CRESUME = '_RESUME_'
 CRESUME_MSG_PREFIX = '[Resume]'
 CRESUME_ARG = 'resume'
 # ends
+
+CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
 
 # const node-names in the config file
 
@@ -113,6 +123,7 @@ COUT_S3_PARENTFOLDER = 'Out_S3_ParentFolder'
 COUT_S3_ACL = 'Out_S3_ACL'
 CIN_S3_PARENTFOLDER = 'In_S3_ParentFolder'
 CIN_S3_PREFIX = 'In_S3_Prefix'
+COUT_VSICURL_PREFIX = 'Out_VSICURL_Prefix'
 # ends
 
 # const
@@ -277,9 +288,122 @@ class Base(object):
         return (len(ret_buff) > 0)
 
 
+class UpdateMRF:
+    def __init__(self):
+        self._mode = \
+        self._cachePath = \
+        self._input = \
+        self._output = \
+        self._homePath = \
+        self._outputURLPrefix = None
+    def init(self, input, output, mode = None,
+        cachePath = None, homePath = None, outputURLPrefix = None):
+        if (not input or
+            not output):
+            return False
+        if (not os.path.exists(output)):
+            return False
+        if (input.rfind('.') == -1):
+            return False
+        self._mode = mode
+        self._input = self._convertToForwardSlash(input)
+        self._output = self._convertToForwardSlash(output)
+        self._cachePath = self._convertToForwardSlash(cachePath)
+        self._homePath = self._convertToForwardSlash(homePath)
+        self._outputURLPrefix = self._convertToForwardSlash(outputURLPrefix)
+        return True
+    def _convertToForwardSlash(self, input):
+        if (not input):
+            return None
+        return input.replace('\\', '/')
+    def copyInputMRFFilesToOutput(self, doUpdate = True):
+        if (not self._input or
+            not self._output):
+                print ('Err. Not initialized!');
+                return False
+        _prefix  = self._input[:self._input.rfind('.')]
+        input_folder = os.path.dirname(self._input)
+        for r,d,f in os.walk(input_folder):
+            r = r.replace('\\', '/')
+            if (r == input_folder):
+                for _file in f:
+                    if (_file.lower().endswith('.lrc')):
+                        continue
+                    _mk_path = r + '/' + _file
+                    if (_mk_path.startswith(_prefix)):
+                        print _file
+                        try:
+                            _output_path = self._output
+                            if (self._homePath):
+                                _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath, '')))
+                            if (not os.path.exists(_output_path)):
+                                os.makedirs(_output_path)
+                            _mk_copy_path = os.path.join(_output_path, _file).replace('\\', '/')
+                            shutil.copyfile(_mk_path, _mk_copy_path)
+                            is_mrf = _mk_path.lower().endswith('.mrf')
+                            # let's load the (mrf, raster*) to edit as (xml)
+                            if (_file == os.path.basename(self._input)):
+                                if (doUpdate):
+                                    self.update(_mk_copy_path)
+                            # ends
+                        except Exception as e:
+                            print ('Err. -clonepath/{}'.format(str(e)))
+                            continue
+
+    def update(self, output):
+        try:
+            comp_val =  None         # for (splitmrf)
+            f, ext = os.path.splitext(os.path.basename(output))
+            with open(output, "r") as c:
+                content = c.read()
+                key =  '<MRF_META>'
+                pos = content.find(key)
+                if (pos == -1):
+                    raise Exception('{} not found!'.format(key))
+                pos += len(key)
+                _rasterSource = self._input
+                if (self._outputURLPrefix and
+                    self._homePath):
+                    _rasterSource  = '{}/{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
+                content = content[:pos] + '\n<CachedSource>\n<Source>{}</Source>\n</CachedSource>{}'.format(_rasterSource, content[pos:])
+                if (self._mode):
+                    if (self._mode == 'clonemrf'):
+                        if (ext != '.tif'):
+                            content = content.replace('<Source>', '<Source clone="true">')
+                            with open (output, "w") as c:
+                                c.write(content)
+                    elif(self._mode == 'splitmrf'):
+                        CONST_LBL_COMP = '<Compression>'
+                        comp_indx = content.find(CONST_LBL_COMP)
+                        if (comp_indx != -1):
+                            comp_val = content[comp_indx + len(CONST_LBL_COMP): content.find(CONST_LBL_COMP.replace('<', '</'))].lower()
+            key = '<Raster>'
+            pos = content.find(key)
+            if (pos != -1):
+                pos += len(key)
+                cache_output = os.path.dirname(output)
+                if (self._cachePath):
+                    cache_output = self._cachePath
+                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, ''), '%s.mrf_cache' % (f)).replace('\\', '/')
+                if (comp_val):
+                    extensions_lup = {
+                    'lerc' : {'data' : 'lrc', 'index' : 'idx' }
+                    }
+                    f, e =  os.path.splitext(self._input)
+                    if (comp_val in extensions_lup):
+                        rep_data_file = '%s.%s' % (f, extensions_lup[comp_val]['data'])
+                        rep_indx_file = '%s.%s' % (f, extensions_lup[comp_val]['index'])
+                content = content[:pos] + '<DataFile>%s</DataFile>\n<IndexFile>%s</IndexFile>' % (rep_data_file, rep_indx_file) + content[pos:]
+                with open (output, "w") as c:
+                    c.write(content)
+        except Exception as e:
+            print ('Err. Updating ({}) was not successful!\n{}'.format(output, str(e)));
+            return False
+        return True
+
 class Report:
     CHEADER_PREFIX = '#'
-    CJOB_EXT = '.csv'
+    CJOB_EXT = '.orjob'
     def __init__(self):
         self._input_list = []
         self._input_list_info = {}
@@ -598,7 +722,7 @@ class S3Upload_:
 ##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
 ##            return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
-        #return True
+##        return True   # debug. Must be removed before release.
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
 
         s3upl = S3Upload(self._base);
@@ -820,6 +944,7 @@ class Azure(Store):
         blob_name = os.path.join(self._upl_parent_folder, os.path.basename(blob_path))
 ##        if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
 ##            return True                          #  "
+##        return True     # debug. Must be removed before release.
         isContainerCreated = False
 
         t0 = datetime.datetime.now()
@@ -858,7 +983,7 @@ class Azure(Store):
             f = open (blob_path, 'rb')
             f_size = os.path.getsize(blob_path)
         except Exception as e:
-            self.message ('File open/Upload: ({})'.format(str(e)), self.const_critical_text)
+            self.message ('File open/upload: ({})'.format(str(e)), self.const_critical_text)
             if (f):
                 f.close()
             return False
@@ -1795,6 +1920,16 @@ class compression:
                                 _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
 
+        # Do auto generate cloneMRF?
+        if (self.m_user_config.getValue(CCLONE_PATH)):
+            updateMRF = UpdateMRF()
+            _output_home_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)
+            if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
+                _output_home_path = self.m_user_config.getValue('tempoutput', False)
+            if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH), 'clonemrf',
+                self.m_user_config.getValue(CCACHE_PATH), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
+                updateMRF.copyInputMRFFilesToOutput();
+        # ends
 
         # call any user-defined fnc for any post-processings.
         if (post_processing_callback):
@@ -2080,7 +2215,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5d'
+    __program_ver__ = 'v1.5e'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2497,15 +2632,26 @@ class Application:
         }
         # ends
 
-        # read-in (mode)
+        # read-in (-mode)
         cfg_mode = self._args.mode     # cmd-line -mode overrides the cfg value.
         if (cfg_mode is None):
             cfg_mode = cfg.getValue('Mode')
         if (cfg_mode is None or
-            (cfg_mode in cfg_modes) == False):
-            self._base.message('<Mode> value not set/illegal', const_critical_text);
+            (cfg_mode.lower() in cfg_modes) == False):
+            self._base.message('<Mode> value not set/illegal', self._base.const_critical_text);
             return(terminate(self._base, eFAIL))
+        cfg_mode = cfg_mode.lower()
         cfg.setValue('Mode', cfg_mode)
+        # ends
+        # is clonepath defined?
+        if (self._args.clonepath and
+            cfg_mode.startswith('mrf')):
+            cfg.setValue(CCLONE_PATH, self._args.clonepath)
+        # ends
+
+        # cache path
+        if (self._args.cache):
+            cfg.setValue(CCACHE_PATH, self._args.cache)
         # ends
 
         # read in build pyramids value
@@ -2527,7 +2673,7 @@ class Application:
                     if (self._args.input != self._args.output):
                         if (isinput_s3 == True):    # in case of input s3, output is used as a temp folder locally.
                             if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
-                                if (cfg.getValue(COUT_S3_PARENTFOLDER) != cfg.getValue(CIN_S3_PARENTFOLDER)):
+                                if (cfg.getValue(COUT_S3_PARENTFOLDER, False) != cfg.getValue(CIN_S3_PARENTFOLDER, False)):
                                     self._base.message ('<%s> and <%s> must be the same if the -pyramids=only' % (CIN_S3_PARENTFOLDER, COUT_S3_PARENTFOLDER), const_critical_text)
                                     return(terminate(self._base, eFAIL))
                         else:
@@ -2583,6 +2729,10 @@ class Application:
                     self._base.message (err_init_msg.format('S3'), const_critical_text);
                     return(terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
+                # chs
+                cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format(S3_storage.bucketupload.generate_url(0).split('?')[0].replace('https', 'http'),
+                cfg.getValue(COUT_S3_PARENTFOLDER, False)))
+                pass
                 # ends
             elif (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE):
                 _account_name = cfg.getValue(COUT_AZURE_ACCOUNTNAME, False);
@@ -2604,6 +2754,8 @@ class Application:
                 if (not azure_storage.init()):
                     self._base.message (err_init_msg.format('Azure'), const_critical_text);
                     return(terminate(self._base, eFAIL))
+                cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(_account_name, _container),
+                cfg.getValue(COUT_S3_PARENTFOLDER, False)))
             else:
                 self._base.message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
                 return(terminate(self._base, eFAIL))
@@ -3148,6 +3300,7 @@ def main():
     parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket');
     parser.add_argument('-op', help='Utility operation mode [upload]', dest='op');
     parser.add_argument('-job', help='job/log-prefix file name', dest='job');
+    parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath');
 
     args = parser.parse_args()
     app = Application(args)
