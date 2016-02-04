@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160128
+# Version: 20160204
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids -s3input
@@ -2215,7 +2215,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5e'
+    __program_ver__ = 'v1.5f'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2693,7 +2693,7 @@ class Application:
         comp = compression(gdal_path)
         ret = comp.init(self._base.message, 0, user_config = cfg)      # warning/error messages get printed within .init()
         if (ret == False):
-            self._base.message('Unable to initialize/compression module', const_critical_text);
+            self._base.message('Unable to initialize/compression module', self._base.const_critical_text);
             return(terminate(self._base, eFAIL))
 
         # s3 upload settings.
@@ -2710,10 +2710,10 @@ class Application:
         if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
             err_init_msg = 'Unable to initialize the ({}) upload module!. Check module setup/credentials. Quitting..'
             if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
-                if (s3_output is None or
+                if ((s3_output is None and self._args.output is None) or
                     (s3_id is None and out_s3_profile_name is None) or
                     (s3_secret is None and out_s3_profile_name is None)):
-                        self._base.message ('Empty/Invalid values detected for keys in the (%s) beginning with (Out_S3)' % (config_), const_critical_text)
+                        self._base.message ('Empty/Invalid values detected for keys in the ({}) beginning with (Out_S3|Out_S3_ID|Out_S3_Secret|Out_S3_AWS_ProfileName) or values for command-line args (-outputprofile)'.format(self._args.config), self._base.const_critical_text)
                         return(terminate(self._base, eFAIL))
                 # instance of upload storage.
                 S3_storage = S3Storage(self._base)
@@ -2748,7 +2748,7 @@ class Application:
                     not _account_key) and
                     not _out_profile) or
                     not _container):
-                    self._base.message ('Empty/Invalid values detected for keys ({}/{}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER, COUT_AZURE_PROFILENAME), const_critical_text);
+                    self._base.message ('Empty/Invalid values detected for keys ({}/{}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER, COUT_AZURE_PROFILENAME), self._base.const_critical_text);
                     return(terminate (self._base, eFAIL));
                 azure_storage = Azure(_account_name, _account_key, _out_profile, self._base);
                 if (not azure_storage.init()):
