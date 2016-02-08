@@ -14,11 +14,11 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160204
+# Version: 20160208
 # Requirements: Python
 # Required Arguments: -input -output
-# Optional Arguments: -mode -cache -config -quality -prec -pyramids -s3input
-# -tempinput -tempoutput -subs -cloudupload/-s3output -clouduploadtype
+# Optional Arguments: -mode -cache -config -quality -prec -pyramids
+# -tempinput -tempoutput -subs -clouddownload -cloudupload -clouduploadtype
 # -inputprofile -outputprofile -op -job -inputprofile -outputprofile
 # -inputbucket -outputbucket -clonepath
 # Usage: python.exe OptimizeRasters.py <arguments>
@@ -113,6 +113,7 @@ COUT_AZURE_ACCOUNTKEY = 'Out_Azure_AccountKey'
 COUT_AZURE_CONTAINER = 'Out_Azure_Container'
 COUT_AZURE_ACCESS = 'Out_Azure_Access'
 COUT_AZURE_PROFILENAME = 'Out_Azure_ProfileName'
+CIN_AZURE_PARENTFOLDER = 'In_Azure_ParentFolder'
 # ends
 
 CCLOUD_UPLOAD_THREADS = 20          # applies to both (azure and amazon/s3)
@@ -123,6 +124,7 @@ COUT_S3_PARENTFOLDER = 'Out_S3_ParentFolder'
 COUT_S3_ACL = 'Out_S3_ACL'
 CIN_S3_PARENTFOLDER = 'In_S3_ParentFolder'
 CIN_S3_PREFIX = 'In_S3_Prefix'
+CIN_CLOUD_TYPE = 'In_Cloud_Type'
 COUT_VSICURL_PREFIX = 'Out_VSICURL_Prefix'
 # ends
 
@@ -153,9 +155,10 @@ class Base(object):
     const_critical_text = 2
     const_status_text = 3
     # ends
-    def __init__(self, msgHandler = None, msgCallback = None):
+    def __init__(self, msgHandler = None, msgCallback = None, userConfig = None):
         self._m_log  = msgHandler
         self._m_msg_callback = msgCallback
+        self._m_user_config = userConfig
         if (self._m_msg_callback):
             if (self._m_log):
                 self._m_log.isPrint = False
@@ -183,6 +186,9 @@ class Base(object):
                 return True
         return False
     @property
+    def getUserConfiguration(self):
+        return self._m_user_config
+    @property
     def getMessageHandler(self):
         return self._m_log
     @property
@@ -199,7 +205,6 @@ class Base(object):
                 _ret_val = _rpt.getRecordStatus(_source_path, CRPT_UPLOADED)
                 if (_ret_val == CRPT_YES):
                     return True
-
         ret_buff = []
         internal_err_msg = 'Internal error at [S3Upl]'
         upload_cloud_type = cfg.getValue(COUT_CLOUD_TYPE, True)
@@ -327,7 +332,8 @@ class UpdateMRF:
             r = r.replace('\\', '/')
             if (r == input_folder):
                 for _file in f:
-                    if (_file.lower().endswith('.lrc')):
+                    if (_file.lower().endswith('.lrc') or
+                        _file.lower().endswith('.idx')):
                         continue
                     _mk_path = r + '/' + _file
                     if (_mk_path.startswith(_prefix)):
@@ -367,11 +373,10 @@ class UpdateMRF:
                     _rasterSource  = '{}/{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
                 content = content[:pos] + '\n<CachedSource>\n<Source>{}</Source>\n</CachedSource>{}'.format(_rasterSource, content[pos:])
                 if (self._mode):
-                    if (self._mode == 'clonemrf'):
-                        if (ext != '.tif'):
-                            content = content.replace('<Source>', '<Source clone="true">')
-                            with open (output, "w") as c:
-                                c.write(content)
+                    if (self._mode.startswith('mrf')):
+                        content = content.replace('<Source>', '<Source clone="true">')
+                        with open (output, "w") as c:
+                            c.write(content)
                     elif(self._mode == 'splitmrf'):
                         CONST_LBL_COMP = '<Compression>'
                         comp_indx = content.find(CONST_LBL_COMP)
@@ -869,15 +874,24 @@ class SlnTMStringIO:
 
 
 class Store(object):
+    # log error types
     const_general_text = 0
     const_warning_text = 1
     const_critical_text = 2
     const_status_text = 3
+    # ends
+    # class usage (Operation) modes
+    CMODE_SCAN_ONLY = 0
+    CMODE_DO_OPERATION = 1
+    # ends
     def __init__(self, account_name, account_key, profile_name, base):
         self._account_name = account_name
         self._account_key = account_key
         self._profile_name = profile_name
         self._base = base
+        self._event_postCopyToLocal = None
+        self._include_subFolders = False
+        self._mode = self.CMODE_DO_OPERATION
     def init(self):
         return True
     def upload(self, file_path, container_name, parent_folder, properties = None):
@@ -885,6 +899,11 @@ class Store(object):
         self._upl_container_name = container_name
         self._upl_parent_folder = parent_folder
         self._upl_properties = properties
+        return True
+    def setSource(self, container_name, parent_folder, properties = None):
+        self._dn_container_name = container_name
+        self._dn_parent_folder = parent_folder
+        self._dn_properties = properties
         return True
     def readProfile (self, account_name, account_key):
         import ConfigParser
@@ -912,9 +931,9 @@ class Azure(Store):
     CHUNK_MIN_SIZE = 4 * 1024 * 1024
     COUT_AZURE_ACCOUNTNAME_INFILE = 'azure_account_name'
     COUT_AZURE_ACCOUNTKEY_INFILE = 'azure_account_key'
-
     def __init__(self, account_name, account_key, profile_name = None, base = None):
         super(Azure, self).__init__(account_name, account_key, profile_name, base)
+        self._browsecontent = []
     def init(self):
         try:
             if (self._profile_name):    # profile name if defined supersedes (account_name, account_key)
@@ -927,18 +946,153 @@ class Azure(Store):
         except Exception as e:
             return False
         return True
+    @property
+    def getAccountName(self):
+        return self._account_name
     def _runBlock(self, bobj, fobj, container_name, blob_name, block_id):
         fobj.seek(0)
         bobj.put_block(container_name, blob_name, fobj.read(), block_id)
         fobj.close()
         del fobj
-
+    def _addBrowseContent(self, blobName):
+        if (not blobName):
+            return False
+        if (self._mode == self.CMODE_SCAN_ONLY):
+            self._browsecontent.append (blobName)
+            return True
+        return False
+    def getBrowseContent(self):
+        return self._browsecontent
+    def browseContent(self, container_name, parent_folder, cb = None):
+        super(Azure, self).setSource(container_name, parent_folder)
+        blobs = []
+        marker = None
+        while (True):
+            try:
+                batch = self._blob_service.list_blobs(self._dn_container_name, marker=marker)
+                blobs.extend(batch)
+                if not batch.next_marker:
+                    break
+                marker = batch.next_marker
+            except:
+                self._base.message('Unable to read from ({}). Check container name.'.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
+                return False
+        parent_folder_ = None
+        parent_folder_indx = -1
+        if (parent_folder and
+            parent_folder != '/'):
+            parent_folder_ = parent_folder.replace('\\', '/')
+            if (not parent_folder_.endswith('/')):
+                parent_folder_ += '/'
+            parent_folder_indx = len(parent_folder_)
+        for blob in blobs:
+            blob_name = blob.name.replace('\\', '/')
+            if (not self._include_subFolders):
+                if (not parent_folder or
+                    parent_folder == '/'):
+                    if (blob_name.find('/') != -1):
+                        continue
+            passed = False
+            if (parent_folder_):
+                if (parent_folder_ and
+                    blob_name.startswith(parent_folder_) or
+                    parent_folder_ == '/'):
+                    passed = True
+                if (not self._include_subFolders):
+                    passed = False
+                    if (blob_name.find('/', parent_folder_indx) == -1 and
+                        blob_name.find('/') != -1):
+                        passed = True
+            if (not parent_folder_ or
+                passed):
+                self._addBrowseContent(blob_name)
+                if (cb and
+                    self._mode != self.CMODE_SCAN_ONLY):
+                    cb(blob_name)
+        return True
+    def copyToLocal(self, blob_source):
+        try:
+            if (not blob_source):
+                return False
+            _user_config = self._base.getUserConfiguration
+            _resumeReporter = _user_config.getValue('handler_resume_reporter')
+            # what does the restore point say about the (S3_key) status?
+            if (_resumeReporter):
+                _get_rstr_val = _resumeReporter.getRecordStatus(blob_source, CRPT_COPIED)
+                if (_get_rstr_val == CRPT_YES):
+                    self._base.message ('{} {}'.format(CRESUME_MSG_PREFIX, blob_source))
+                    return True
+            # ends
+            _azureParentFolder = _user_config.getValue(CIN_AZURE_PARENTFOLDER, False)
+            _azurePath = blob_source if _azureParentFolder == '/' else blob_source.replace(_azureParentFolder, '')
+            output_path = _user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + _azurePath
+            if ((_user_config.getValue('istempoutput')) == True):
+                output_path = _user_config.getValue('tempoutput', False) + _azurePath
+            is_raster = False
+            is_tmp_input = getBooleanValue(_user_config.getValue('istempinput'))
+            if (True in [_azurePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
+                return False
+            elif (True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
+                if (is_tmp_input):
+                    output_path = _user_config.getValue('tempinput', False) + _azurePath
+                is_raster = True
+            if (_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
+                return False
+            if (not blob_source or
+                not output_path or
+                not self._dn_parent_folder):
+                    self._base.message ('Azure> Not initialized', self._base.const_critical_text)
+                    return False
+            flr =  os.path.dirname(output_path)
+            if (os.path.exists(flr) == False):
+                try:
+                    os.makedirs(flr)
+                except Exception as e:
+                    raise
+            if (is_raster):
+                exclude_callback(_azurePath, _azureParentFolder, _user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
+                if (not is_tmp_input):
+                    return True
+            writeTo = output_path
+            self._base.message ('[S3-Pull] {}'.format(blob_source))
+            self._blob_service.get_blob_to_path(self._dn_container_name, blob_source, writeTo)
+            if (self._event_postCopyToLocal):
+                self._event_postCopyToLocal(writeTo);
+            # mark download/copy status
+            if (_resumeReporter):
+                _resumeReporter.updateRecordStatus (blob_source, CRPT_COPIED, CRPT_YES)
+            # ends
+            # Handle any post-processing, if the final destination is to S3, upload right away.
+            if (getBooleanValue(_user_config.getValue(CCLOUD_UPLOAD))):
+                if (getBooleanValue(_user_config.getValue('istempinput'))):
+                    if (is_raster):
+                        return True
+                _is_success = self._base.S3Upl(writeTo, user_args_Callback)
+                if (not _is_success):
+                    return False
+            # ends
+        except Exception as e:
+            self._base.message ('({})'.format(str(e)), self._base.const_critical_text)
+            if (_resumeReporter):
+                _resumeReporter.updateRecordStatus (blob_source, CRPT_COPIED, CRPT_NO)
+            return False
+        return True
     def upload(self, input_path, container_name, parent_folder, properties = None):
+        if (not input_path or
+            not container_name or
+            parent_folder is None):
+            return False
+        _parent_folder = parent_folder
+        if (not _parent_folder):
+            if (self._base.getUserConfiguration):
+                _parent_folder = self._base.getUserConfiguration.getValue(CIN_AZURE_PARENTFOLDER)
+        elif (_parent_folder == '/'):
+            _parent_folder = ''
         if (properties):
             if ('tempoutput' in properties):
                 _tempoutput = properties['tempoutput']
-                parent_folder = os.path.dirname(input_path.replace('\\', '/').replace(_tempoutput, parent_folder))
-        super(Azure, self).upload(input_path, container_name, parent_folder, properties)
+                _parent_folder = os.path.dirname(input_path.replace('\\', '/').replace(_tempoutput, _parent_folder))
+        super(Azure, self).upload(input_path, container_name, _parent_folder, properties)
 
         blob_path = self._input_file_path
         blob_name = os.path.join(self._upl_parent_folder, os.path.basename(blob_path))
@@ -1098,7 +1252,7 @@ class S3Storage:
                 global _rpt
                 _remote_path = _rpt.root
             except Exception as e:
-                self._base.message ('Err. Report ({})'.format(str(e)), const_critical_text)
+                self._base.message ('Report ({})'.format(str(e)), self._base.const_critical_text)
                 return False
 
         self.remote_path = _remote_path.replace("\\","/")
@@ -1186,9 +1340,8 @@ class S3Storage:
                 self._base.message ('{} {}'.format(CRESUME_MSG_PREFIX, S3_key.name))
                 return True
         # ends
-
         if (self.m_user_config is None):     # shouldn't happen
-            self._base.message ('Err. Intenal/User config not initialized.', const_critical_text)
+            self._base.message ('Intenal/User config not initialized.', const_critical_text)
             return False
         input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + S3_path
         if ((self.m_user_config.getValue('istempoutput')) == True):
@@ -1205,14 +1358,13 @@ class S3Storage:
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
 
-
         # collect input file names.
         if (fn_collect_input_files(S3_key)):
             return False
         # ends
 
         is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
-        mk_path = input_path    # input_path.replace('\\', '/').replace(self.remote_path, '')
+        mk_path = input_path
         self._base.message ('[S3-Pull] %s' % (mk_path))
 
         flr = os.path.dirname(mk_path)
@@ -1220,7 +1372,7 @@ class S3Storage:
             try:
                 os.makedirs(flr)
             except Exception as exp:
-                self._base.message ('Err. (%s)' % (str(exp)), const_critical_text)
+                self._base.message ('(%s)' % (str(exp)), const_critical_text)
                 if (_rpt):
                     _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
                 return False
@@ -1243,19 +1395,16 @@ class S3Storage:
             if (S3_key):
                 S3_key.close()
         # ends
-
         # take care of (til) inputs.
         if (til):
             if (mk_path.lower().endswith(CTIL_EXTENSION_)):
                 if (til.addTIL(mk_path)):
                     til.setOutputPath(mk_path, mk_path)
         # ends
-
-        # mark donwload/copy status
+        # mark download/copy status
         if (_rpt):
             _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_YES)
         # ends
-
         # Handle any post-processing, if the final destination is to S3, upload right away.
         if (is_cpy_to_s3 == True):
             if (getBooleanValue(self.m_user_config.getValue('istempinput')) == True):
@@ -1391,13 +1540,13 @@ def Message(msg, status=0):
 def args_Callback(args, user_data = None):
     _LERC2 = 'lerc2'
     _JPEG = 'jpeg'
+    _JPEG12 = 'jpeg12'
     m_compression = 'lerc'  # default if external config is faulty
     m_lerc_prec = 0.5
     m_compression_quality = 85
     m_bsize = CCFG_BLOCK_SIZE
     m_mode = 'chs'
     m_nodata_value = None
-
     if (user_data is not None):
         try:
             compression_ = user_data[CIDX_USER_CONFIG].getValue('Compression')
@@ -1425,12 +1574,15 @@ def args_Callback(args, user_data = None):
                 m_mode == 'tiff'):
                     m_mode = 'GTiff'   # so that gdal_translate'd understand.
                     if (m_interleave == 'PIXEL' and
-                        m_compression == _JPEG):
+                        m_compression.startswith(_JPEG)):
                         args.append ('-co')
                         args.append ('PHOTOMETRIC=YCBCR')
+                        if (m_compression == _JPEG12):
+                            args.append ('-co')
+                            args.append ('NBITS=12')
+                        m_compression  = _JPEG
         except: # could throw if index isn't found
             pass    # ingnore with defaults.
-
     args.append ('-of')
     args.append (m_mode)
     args.append ('-co')
@@ -1524,7 +1676,7 @@ def exclude_callback(file, src, dst):
         return False
     (f, e) = os.path.splitext(file)
     if (e[1:] in cfg.getValue(CCFG_RASTERS_NODE)):
-        raster_buff.append({'f' : file, 'src' : src, 'dst' : dst})
+        raster_buff.append({'f' : file, 'src' : '' if src == '/' else src, 'dst' : dst if dst else ''})
         return True
     return False
 
@@ -1688,6 +1840,10 @@ class Copy:
                                     do_copy = not _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES
                              if (do_copy):
                                 shutil.copyfile(src_file, dst_file)
+                                if (self.m_user_config):        # Clone folder will get all the metadata files by default.
+                                    _clonePath = self.m_user_config.getValue(CCLONE_PATH, False)
+                                    if (_clonePath):
+                                        shutil.copyfile(src_file, dst_file.replace(self.dst, _clonePath))
                              if (self._input_flist):
                                 _rpt.updateRecordStatus (src_file, CRPT_COPIED, CRPT_YES)
                              self.message ('{} {}'.format(CRESUME_MSG_PREFIX if not do_copy else 'CPY', src_file.replace(self.src, '')))
@@ -1787,7 +1943,7 @@ class compression:
             os.path.isdir(self.m_gdal_path) == False):
             if (self.m_gdal_path):
                 self.message('Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path), const_warning_text)
-            self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'tools/bin')
+            self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'gdal/bin')
             if (not os.path.isdir(self.m_gdal_path)):
                 self.message('Err. GDAL not found at ({}).'.format(self.m_gdal_path), const_critical_text)
                 return False
@@ -1829,13 +1985,12 @@ class compression:
 
         return self.__call_external(args)
 
-
     def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
         _vsicurl_input = cfg.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
             if (_rpt):
-                _input_file = _input_file.replace(self.m_user_config.getValue('tempinput', False), _rpt.root)
+                _input_file = _input_file.replace(self.m_user_config.getValue('tempinput', False), '' if  _rpt.root == '/' else _rpt.root)
         _do_process = ret = True
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
@@ -1926,7 +2081,7 @@ class compression:
             _output_home_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)
             if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 _output_home_path = self.m_user_config.getValue('tempoutput', False)
-            if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH), 'clonemrf',
+            if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH), self.m_user_config.getValue('Mode'),
                 self.m_user_config.getValue(CCACHE_PATH), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
                 updateMRF.copyInputMRFFilesToOutput();
         # ends
@@ -1944,7 +2099,6 @@ class compression:
 
 
     def createaOverview(self, input_file, isBQA = False):
-
         # gdaladdo.exe -r mode -ro --config COMPRESS_OVERVIEW LZW --config USE_RRD NO  --config TILED YES input 2 4 8 16 32
         get_mode = self.m_user_config.getValue('Mode')
         if (get_mode is not None):
@@ -1952,14 +2106,12 @@ class compression:
                 get_mode == 'clonemrf' or
                 get_mode == 'splitmrf'):
                     return True
-
         # skip pyramid creation on (tiffs) related to (til) files.
         if (til):
             (p, n) = os.path.split(input_file)
             if (til.find(n)):
                 return True
         # ends
-
         self.message('Creating pyramid (%s)' % (input_file))
         # let's input cfg values..
         m_py_factor = '2'
@@ -1978,8 +2130,13 @@ class compression:
         m_py_interleave = self.m_user_config.getValue(CCFG_INTERLEAVE)
         if (m_py_compression == 'jpeg' or
             m_py_compression == 'png'):
-            if (get_mode.startswith('mrf') == False):
-                args.append ('-ro')
+            if (not get_mode.startswith('mrf')):
+                m_py_external = False
+                py_external_ = self.m_user_config.getValue('CreateExternalPyramids')
+                if (py_external_):
+                    m_py_external = getBooleanValue(py_external_)
+                if (m_py_external):
+                    args.append ('-ro')
                 if (get_mode.startswith('tif') and
                     m_py_compression == 'jpeg' and
                     m_py_interleave == 'pixel'):
@@ -1995,14 +2152,11 @@ class compression:
             args.append ('--config')
             args.append ('JPEG_QUALITY_OVERVIEW')
             args.append (m_py_quality)
-
         args.append (input_file)
         m_ary_factors = m_py_factor.replace(',', ' ').split()
         for f in m_ary_factors:
             args.append (f)
-
         return self.__call_external(args)
-
 
     def __call_external(self, args):
         p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -2079,24 +2233,22 @@ class Config:
                 return
         self.m_cfgs[key] = value
 
-
 def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     input_file = os.path.join(inputfldr, file)
     output_file = os.path.join(outputfldr, file)
     if (isinput_s3):
         input_file = cfg.getValue(CIN_S3_PREFIX, False) + input_file
-        output_file = outputfldr #  + '/' + inputfldr
+        output_file = outputfldr
         if (getBooleanValue(cfg.getValue('istempinput')) == True or
             getBooleanValue(cfg.getValue('istempoutput')) == True):
             output_file = os.path.join(output_file, file)
             if (getBooleanValue(cfg.getValue('istempinput')) == True):
-                input_file = os.path.join(cfg.getValue('tempinput', False), file)   # + inputfldr
+                input_file = os.path.join(cfg.getValue('tempinput', False), file)
             if (getBooleanValue(cfg.getValue('istempoutput')) == True):
-                output_file = os.path.join(cfg.getValue('tempoutput', False), file) # + inputfldr
+                output_file = os.path.join(cfg.getValue('tempoutput', False), file)
             return (input_file, output_file)
         output_file = os.path.join(output_file, file)
     return (input_file, output_file)
-
 
 def getBooleanValue(value):
     if (value is None):
@@ -2215,7 +2367,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5f'
+    __program_ver__ = 'v1.5g'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2315,7 +2467,7 @@ class Application:
                 log.Message('%s=%s' % (v, cfg.m_cfgs[v]), const_general_text)
             log.CloseCategory()
             # ends
-        return Base(log, self._msg_callback)
+        return Base(log, self._msg_callback, cfg)
 
     def writeToConsole(self, msg, status = const_general_text):
         if (self._msg_callback):
@@ -2363,6 +2515,7 @@ class Application:
             self._base.message ('Unable to initialize the (Base) module', base.const_critical_text)
             return CRET_ERROR
         # ends
+        self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
         return True
 
     def registerMessageCallback(self, fnptr):
@@ -2418,6 +2571,7 @@ class Application:
                 self._base.message ('Err. Unable to read the -input report file ({})'.format(self._args.input), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
             self._args.job = os.path.basename(self._args.input)
+            self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
         # ends
 
         # Get the default (project name)
@@ -2443,6 +2597,14 @@ class Application:
                 return
         # ends
 
+        # detect input cloud type
+        inAmazon = CCLOUD_AMAZON
+        dn_cloud_type = self._args.clouddownloadtype;
+        if (not dn_cloud_type):
+            dn_cloud_type = cfg.getValue(CIN_CLOUD_TYPE, True)
+        inAmazon = dn_cloud_type == CCLOUD_AMAZON or not dn_cloud_type
+        # ends
+
         # let's create a restore point
         if (not self._args.input or        # assume it's a folder from s3/azure
             (self._args.input and
@@ -2456,6 +2618,8 @@ class Application:
         COP_RPT : None
         }
 
+
+
         if (self._args.op):
             self._args.op = self._args.op.lower()
             if (not self._args.op in _utility):
@@ -2466,7 +2630,7 @@ class Application:
                 self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
             elif(self._args.op == COP_RPT):
                 g_rpt = Report();
-                if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER, False))):
+                if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message ('Err. Unable to init (Report)', const_critical_text)
                     return(terminate(self._base, eFAIL))
                 g_is_generate_report = True
@@ -2542,41 +2706,46 @@ class Application:
             cfg.setValue('tempoutput', self._args.tempoutput)
         # ends
 
-        # are we doing input from S3?
+        # are we doing input from S3|Azure?
+        err_init_msg = 'Unable to initialize the ({}) upload module!. Check module setup/credentials. Quitting..'
         isinput_s3 = getBooleanValue(self._args.s3input);
+        if (self._args.clouddownload):
+            isinput_s3 = getBooleanValue(self._args.clouddownload);
 
         # import boto modules only when required. This allows users to run the program for only local file operations.
-        if (isinput_s3 == True or
-            getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
+        if (isinput_s3 or
+            getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
             cfg.setValue(CCFG_PRIVATE_INC_BOTO, True)
             try:
                 global boto
                 import boto
                 from boto.s3.key import Key
                 from boto.s3.connection import OrdinaryCallingFormat
-            except Exception as exp:
-                self._base.message ('\n%s requires the (boto) module to run its S3 specific operations. Please install (boto) for python.' % (__program_name__), const_critical_text)
+            except:
+                self._base.message ('\n%s requires the (boto) module to run its S3 specific operations. Please install (boto) for python.' % (self.__program_name__), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
         # ends
 
         # take care of missing -input and -output if -s3input==True
+        # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
         if (isinput_s3 == True):
-            if (not self._args.input):
-                self._args.input = cfg.getValue(CIN_S3_PARENTFOLDER, False);
-                if (self._args.input):
-                    self._args.input = self._args.input.strip().replace('\\', '/')
-                cfg.setValue(CIN_S3_PARENTFOLDER, self._args.input)
+            _cloudInput = self._args.input
+            if (not _cloudInput):
+                _cloudInput = cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False);
+            if (_cloudInput):
+                self._args.input = _cloudInput = _cloudInput.strip().replace('\\', '/')
+            cfg.setValue(CIN_S3_PARENTFOLDER, _cloudInput)
 
         if (is_cloud_upload):
             if (not is_output_temp):
                 if ((self._args.op and self._args.op != COP_UPL) or
                     not self._args.op):
-                    self._base.message ('-tempoutput must be specified if -cloudupload=true', const_critical_text)
+                    self._base.message ('-tempoutput must be specified if -cloudupload=true', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
             _access = cfg.getValue(COUT_AZURE_ACCESS)
             if (_access):
                 if (not _access in ('private', 'blob', 'container')):
-                        self._base.message ('Invalid value for ({})'.format(COUT_AZURE_ACCESS), const_critical_text);
+                        self._base.message ('Invalid value for ({})'.format(COUT_AZURE_ACCESS), self._base.const_critical_text);
                         return(terminate(self._base, eFAIL))
                 if (_access == 'private'):      # private is not recognized by Azure, used internally only for clarity
                     cfg.setValue(COUT_AZURE_ACCESS, None)       # None == private container
@@ -2610,7 +2779,7 @@ class Application:
             dst_[-1:] != '/'):
             dst_ += '/'
 
-        cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_)
+        cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_ if dst_ else '')
         # ends
 
         # cfg-init-valid modes
@@ -2708,7 +2877,6 @@ class Application:
         s3_secret = cfg.getValue('Out_S3_Secret', False)
 
         if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
-            err_init_msg = 'Unable to initialize the ({}) upload module!. Check module setup/credentials. Quitting..'
             if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
                 if ((s3_output is None and self._args.output is None) or
                     (s3_id is None and out_s3_profile_name is None) or
@@ -2729,7 +2897,6 @@ class Application:
                     self._base.message (err_init_msg.format('S3'), const_critical_text);
                     return(terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
-                # chs
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format(S3_storage.bucketupload.generate_url(0).split('?')[0].replace('https', 'http'),
                 cfg.getValue(COUT_S3_PARENTFOLDER, False)))
                 pass
@@ -2740,6 +2907,7 @@ class Application:
                 _container = cfg.getValue(COUT_AZURE_CONTAINER);        #  Azure container names will be lowercased.
                 _out_profile = cfg.getValue(COUT_AZURE_PROFILENAME, False)
                 if (self._args.outputbucket):
+                    _container = self._args.outputbucket
                     cfg.setValue(COUT_AZURE_CONTAINER, self._args.outputbucket.lower())     # lowercased
                 if (self._args.outputprofile):
                     _out_profile = self._args.outputprofile
@@ -2752,10 +2920,10 @@ class Application:
                     return(terminate (self._base, eFAIL));
                 azure_storage = Azure(_account_name, _account_key, _out_profile, self._base);
                 if (not azure_storage.init()):
-                    self._base.message (err_init_msg.format('Azure'), const_critical_text);
+                    self._base.message (err_init_msg.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
-                cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(_account_name, _container),
-                cfg.getValue(COUT_S3_PARENTFOLDER, False)))
+                cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(azure_storage.getAccountName, _container),
+                self._args.output if self._args.output else cfg.getValue(COUT_S3_PARENTFOLDER, False)))
             else:
                 self._base.message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
                 return(terminate(self._base, eFAIL))
@@ -2873,39 +3041,20 @@ class Application:
         if (isinput_s3 == True):
             cfg.setValue('iss3', True);
             in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
-            if (self._args.input):        # this will never be (None)
-                in_s3_parent = self._args.input       # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
-                cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
-                if (os.path.exists(in_s3_parent)):      # are we reading from a list?
-                    try:
-                        _ln = _rpt.root
-                        if (_ln):
-                            cfg.setValue(CIN_S3_PARENTFOLDER, _remote_path)
-        ##                with open (in_s3_parent, 'r') as rpt:
-        ##                    _remote_path = rpt.readline().strip().replace('\\', '/')
-        ##                    if (_remote_path[-1:] != '/'):
-        ##                        self._base.message ('Err. First line in the -input report file must point to the (Original) input root folder', const_critical_text)
-        ##                        return(terminate(self._base, eFAIL))
-        ##                    cfg.setValue(CIN_S3_PARENTFOLDER, _remote_path)
-                    except Exception as e:
-                        pass    # assume the -input is a folder path
-                        #self._base.message ('Err. ({})'.format(str(e)), const_critical_text)
-                        #return(terminate(self._base, eFAIL))
-
             in_s3_profile_name = self._args.inputprofile
             if (not in_s3_profile_name):
-                in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName', False)
+                in_s3_profile_name = cfg.getValue('In_S3_AWS_ProfileName' if inAmazon else 'In_Azure_ProfileName', False)
             if (in_s3_profile_name):
                 cfg.setValue ('In_S3_AWS_ProfileName', in_s3_profile_name)
-            in_s3_id = cfg.getValue('In_S3_ID', False)
-            in_s3_secret = cfg.getValue('In_S3_Secret', False)
+            in_s3_id = cfg.getValue('In_S3_ID' if inAmazon else 'In_Azure_AccountName', False)
+            in_s3_secret = cfg.getValue('In_S3_Secret' if inAmazon else 'In_Azure_AccountKey', False)
             in_s3_bucket = self._args.inputbucket
             if (not in_s3_bucket):
-                in_s3_bucket = cfg.getValue('In_S3_Bucket', False)
+                in_s3_bucket = cfg.getValue('In_S3_Bucket' if inAmazon else 'In_Azure_Container', False)
 
             if (in_s3_parent is None or
                 in_s3_bucket is None):
-                    self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', const_critical_text)
+                    self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
             cfg.setValue('In_S3_Bucket', in_s3_bucket)          # update (in s3 bucket name in config)
 
@@ -2914,29 +3063,54 @@ class Application:
                 in_s3_parent = in_s3_parent[1:]
                 cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
 
-            o_S3_storage = S3Storage(self._base)
-            ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN, cfg)
-            if (ret == False):
-                self._base.message ('Unable to initialize S3-storage module!. Quitting..', const_critical_text);
-                return(terminate(self._base, eFAIL))
-            cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http')) # vsicurl doesn't like 'https'
-            o_S3_storage.inputPath = self._args.output
-            if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
-                self._base.message ('Err. Unable to read S3-Content', const_critical_text);
-                return(terminate(self._base, eFAIL))
-        # =/vsicurl/http://esridatasets.s3.amazonaws.com/
+            if (inAmazon):
+                o_S3_storage = S3Storage(self._base)
+                ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN, cfg)
+                if (ret == False):
+                    self._base.message ('Unable to initialize S3-storage module!. Quitting..', self._base.const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http')) # vsicurl doesn't like 'https'
+                o_S3_storage.inputPath = self._args.output
+                if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
+                    self._base.message ('Unable to read S3-Content', self._base.const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                # =/vsicurl/http://esridatasets.s3.amazonaws.com/
+            else:       # chs
+                # let's do (Azure) init
+                in_azure_storage = Azure(in_s3_id, in_s3_secret, in_s3_profile_name, self._base);
+                if (not in_azure_storage.init() or
+                    not in_azure_storage.getAccountName):
+                    self._base.message ('({}) download initialization error. Check input credentials/profile name. Quitting..'.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text);
+                    return(terminate(self._base, eFAIL))
+                in_azure_storage._include_subFolders = getBooleanValue(cfg.getValue('IncludeSubdirectories'))
+                _restored = cfg.getValue(CLOAD_RESTORE_POINT)
+                if (not _restored):
+                    in_azure_storage._mode = in_azure_storage.CMODE_SCAN_ONLY
+                    cfg.setValue(CIN_AZURE_PARENTFOLDER, in_s3_parent if in_s3_parent.endswith('/') else in_s3_parent + '/')
+                _azureParentFolder = _azParent = cfg.getValue(CIN_AZURE_PARENTFOLDER, False) if not _rpt else _rpt.root
+                if (_azureParentFolder == '/'):
+                    _azureParentFolder = ''
+                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(in_azure_storage.getAccountName, cfg.getValue('In_S3_Bucket')),
+                _azureParentFolder))
+                if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal)):
+                    return(terminate(self._base, eFAIL))
+                if (not _restored):
+                    _files = in_azure_storage.getBrowseContent()
+                    if (_files):
+                        for f in _files:
+                            fn_collect_input_files(f)
+                # ends
         # ends
-
         # control flow if conversions required.
         if (is_caching == False):
             if (isinput_s3 == False):
                 ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
                 if  (ret == False):
-                    self._base.message(CONST_CPY_ERR_0, const_critical_text);
+                    self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
                 ret = cpy.processs(self._base.S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy if is_input_temp == True else fn_pre_process_copy_default)
                 if (ret == False):
-                    self._base.message(CONST_CPY_ERR_1, const_critical_text);
+                    self._base.message(CONST_CPY_ERR_1, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
                 if (is_input_temp == True):
                     pass        # no post custom code yet for non-rasters
@@ -3282,18 +3456,18 @@ def main():
     parser.add_argument('-mode', help='Processing mode/output format', dest='mode');
     parser.add_argument('-input', help='Input raster files directory', dest='input');
     parser.add_argument('-output', help='Output directory', dest='output');
+    parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='subs');
     parser.add_argument('-cache', help='cache output directory', dest='cache');
     parser.add_argument('-config', help='Configuration file with default settings', dest='config');
     parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality');
     parser.add_argument('-prec', help='LERC precision', dest='prec');
     parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only]', dest='pyramids');
-    parser.add_argument('-s3input', help='Is -input path on S3? [true/false: default:false]', dest='s3input');
-    parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='subs');
     parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest='tempinput');
     parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest='tempoutput');
-    parser.add_argument('-cloudupload', help='Upload output to Cloud? [true/false]', dest='cloudupload');
+    parser.add_argument('-clouddownload', help='Is -input a cloud storage? [true/false: default:false]', dest='clouddownload');
+    parser.add_argument('-cloudupload', help='Is -output a cloud storage? [true/false]', dest='cloudupload');
     parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype');
-    parser.add_argument('-s3output', help='Is -output path on S3? [true/false]. Please note, this flag is depreciated but will continue to work for backward compatibilily. Please use (-cloudupload) instead.', dest='s3output');
+    parser.add_argument('-clouddownloadtype', choices=['amazon', 'azure'], help='Download Cloud Type [amazon/azure]', dest='clouddownloadtype');
     parser.add_argument('-inputprofile', help='Input cloud profile name with credentials', dest='inputprofile');
     parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest='outputprofile');
     parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket');
@@ -3301,6 +3475,8 @@ def main():
     parser.add_argument('-op', help='Utility operation mode [upload]', dest='op');
     parser.add_argument('-job', help='job/log-prefix file name', dest='job');
     parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath');
+    parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input');
+    parser.add_argument('-s3output', help='Deprecated. Use (-cloudupload)', dest='s3output');
 
     args = parser.parse_args()
     app = Application(args)
@@ -3313,6 +3489,3 @@ if __name__ == '__main__':
     ret = main()
     print ('\nDone..')
     exit(ret)
-
-
-
