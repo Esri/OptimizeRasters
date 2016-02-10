@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160208
+# Version: 20160210
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -292,15 +292,15 @@ class Base(object):
 
         return (len(ret_buff) > 0)
 
-
 class UpdateMRF:
-    def __init__(self):
+    def __init__(self, base = None):
         self._mode = \
         self._cachePath = \
         self._input = \
         self._output = \
         self._homePath = \
         self._outputURLPrefix = None
+        self._base = base
     def init(self, input, output, mode = None,
         cachePath = None, homePath = None, outputURLPrefix = None):
         if (not input or
@@ -324,8 +324,9 @@ class UpdateMRF:
     def copyInputMRFFilesToOutput(self, doUpdate = True):
         if (not self._input or
             not self._output):
-                print ('Err. Not initialized!');
-                return False
+            if (self._base):
+                self._base.message('Not initialized!', self._base.const_critical_text)
+            return False
         _prefix  = self._input[:self._input.rfind('.')]
         input_folder = os.path.dirname(self._input)
         for r,d,f in os.walk(input_folder):
@@ -337,7 +338,6 @@ class UpdateMRF:
                         continue
                     _mk_path = r + '/' + _file
                     if (_mk_path.startswith(_prefix)):
-                        print _file
                         try:
                             _output_path = self._output
                             if (self._homePath):
@@ -345,23 +345,28 @@ class UpdateMRF:
                             if (not os.path.exists(_output_path)):
                                 os.makedirs(_output_path)
                             _mk_copy_path = os.path.join(_output_path, _file).replace('\\', '/')
-                            shutil.copyfile(_mk_path, _mk_copy_path)
-                            is_mrf = _mk_path.lower().endswith('.mrf')
-                            # let's load the (mrf, raster*) to edit as (xml)
-                            if (_file == os.path.basename(self._input)):
+                            if (_file.lower() == os.path.basename(self._input).lower()):
                                 if (doUpdate):
-                                    self.update(_mk_copy_path)
-                            # ends
+                                    if (not self.update(_mk_copy_path)):
+                                        if (self._base):
+                                            self._base.message('Updating ({}) failed!'.format(_mk_copy_path), self._base.const_critical_text)
+                                continue
+                            if (self._base and
+                                self._base.getUserConfiguration):
+                                if (True in [_mk_path.lower().endswith(x) for x in self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE)]):
+                                    continue
+                            shutil.copy(_mk_path, _mk_copy_path)
                         except Exception as e:
-                            print ('Err. -clonepath/{}'.format(str(e)))
+                            if (self._base):
+                                self._base.message('-clonepath/{}'.format(str(e)), self._base.const_critical_text)
                             continue
-
     def update(self, output):
         try:
             comp_val =  None         # for (splitmrf)
-            f, ext = os.path.splitext(os.path.basename(output))
-            with open(output, "r") as c:
-                content = c.read()
+            f, ext = os.path.splitext(os.path.basename(self._input))
+            content = None
+            with open(self._input, "r") as rfptr:
+                content = rfptr.read()
                 key =  '<MRF_META>'
                 pos = content.find(key)
                 if (pos == -1):
@@ -375,8 +380,6 @@ class UpdateMRF:
                 if (self._mode):
                     if (self._mode.startswith('mrf')):
                         content = content.replace('<Source>', '<Source clone="true">')
-                        with open (output, "w") as c:
-                            c.write(content)
                     elif(self._mode == 'splitmrf'):
                         CONST_LBL_COMP = '<Compression>'
                         comp_indx = content.find(CONST_LBL_COMP)
@@ -399,21 +402,27 @@ class UpdateMRF:
                         rep_data_file = '%s.%s' % (f, extensions_lup[comp_val]['data'])
                         rep_indx_file = '%s.%s' % (f, extensions_lup[comp_val]['index'])
                 content = content[:pos] + '<DataFile>%s</DataFile>\n<IndexFile>%s</IndexFile>' % (rep_data_file, rep_indx_file) + content[pos:]
-                with open (output, "w") as c:
-                    c.write(content)
+            if (content):
+                with open (output, "w") as wfptr:
+                    wfptr.write(content)
         except Exception as e:
-            print ('Err. Updating ({}) was not successful!\n{}'.format(output, str(e)));
+            if (self._base):
+                self._base.message('Updating ({}) was not successful!\n{}'.format(output, str(e)), self._base.const_critical_text)
             return False
         return True
 
 class Report:
     CHEADER_PREFIX = '#'
     CJOB_EXT = '.orjob'
-    def __init__(self):
+    def __init__(self, base):
         self._input_list = []
         self._input_list_info = {}
         self._header = {}
+        self._base = base
     def init(self, report_file, root = None):
+        if (not self._base or
+            not isinstance(self._base, Base)):
+                return False
         if (not report_file):
             return False
         self._report_file = report_file
@@ -448,15 +457,15 @@ class Report:
             return False
         _input = input.strip()
         if (not _input in self._input_list_info):
-            Message ('Err. Invalid input ({}) at (Reporter)'.format (_input), const_critical_text)
+            self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_critical_text)
             return False        # possible internal flow err.
         _type = type.upper()
         if (not _type in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
-            Message ('Err. Invalid type ({}) at (Reporter)'.format(type), const_critical_text)
+            self._base.message('Invalid type ({}) at (Reporter)'.format(type), self._base.const_critical_text)
             return False
         _value = value.lower()
         if (not _value in [CRPT_YES, CRPT_NO]):
-            Message ('Err. Invalid value ({}) at (Reporter)'.format(_value), const_critical_text)
+            self._base.message('Invalid value ({}) at (Reporter)'.format(_value), self._base.const_critical_text)
             return False
 
         self._input_list_info[input][_type] = _value
@@ -527,7 +536,7 @@ class Report:
                             }
                     ln = _fptr.readline()
         except Exception as exp:
-            Message ('Err. {}'.format(str(exp)), const_critical_text)
+            self._base.message('{}'.format(str(exp)), self._base.const_critical_text)
             return False
         return True
 
@@ -544,10 +553,10 @@ class Report:
         try:
             get_tile = os.path.basename(self._report_file)
             mk_path = os.path.join(path, get_tile)
-            Message ('[MV] {}'.format(mk_path))
+            self._base.message('[MV] {}'.format(mk_path))
             shutil.move(self._report_file, mk_path)
         except Exception as e:
-            Message ('Err. ({})'.format(str(e)), const_critical_text)
+            self._base.message('({})'.format(str(e)), self._base.const_critical_text)
             return False
         return True
 
@@ -576,7 +585,7 @@ class Report:
                     self._input_list_info[f][CRPT_UPLOADED] if f in self._input_list_info else ''
                     ));
         except Exception as exp:
-            Message ('Err. {}'.format(str(exp)), const_critical_text)
+            self._base.message('{}'.format(str(exp)), self._base.const_critical_text)
             return False
         return True
     def walk(self):
@@ -716,7 +725,7 @@ class S3Upload_:
         try:
             self.mp = self.m_s3_bucket.initiate_multipart_upload(self.m_s3_path, policy=self.m_acl_policy)
         except Exception as exp:
-            Message ('Err. ({})'.format(str(exp)), const_critical_text)
+            self._base.message('({})'.format(str(exp)), self._base.const_critical_text)
             return False
         return True
         # ends
@@ -748,7 +757,7 @@ class S3Upload_:
                     self.mp.cancel_upload()
                     raise
         except Exception as e:
-            self._base.message ('Err. File open/Upload: ({})'.format(str(e)), self._base.const_critical_text)
+            self._base.message ('File open/Upload: ({})'.format(str(e)), self._base.const_critical_text)
             if (f):
                 f.close()
             return False
@@ -796,14 +805,14 @@ class S3Upload_:
                     threads.append(t)
                     idx += 1
                 except Exception as e:
-                    self._base.message ('Err. {}'.format(str(e)), self._base.const_critical_text);
+                    self._base.message ('{}'.format(str(e)), self._base.const_critical_text);
                     if (f):
                         f.close()
                     return False
         try:
             self.mp.complete_upload()
         except Exception as e:
-            self._base.message ('Err. {}'.format(str(e)), self._base.const_critical_text)
+            self._base.message ('{}'.format(str(e)), self._base.const_critical_text)
             self.mp.cancel_upload()
             return False
         finally:
@@ -1469,7 +1478,7 @@ class S3Storage:
                             upl_file = mk_path.replace(rep, self.remote_path if self.m_user_config.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
                         S3 = S3Upload_(self._base, self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
-                            self._base.message ('Err. Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), const_warning_text)
+                            self._base.message ('Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), self._base.const_warning_text)
                             continue
                         upl_retries = CS3_UPLOAD_RETRIES
                         ret  = False
@@ -1478,7 +1487,7 @@ class S3Storage:
                             if (ret == False):
                                 time.sleep(10)   # let's sleep for a while until s3 kick-starts
                                 upl_retries -= 1
-                                self._base.message ('Err. [S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), const_warning_text)
+                                self._base.message ('[S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), self._base.const_warning_text)
                         if (ret == False):
                             if (not 'upl' in  self.__m_failed_upl_lst):
                                 self.__m_failed_upl_lst['upl'] = []
@@ -1494,7 +1503,7 @@ class S3Storage:
                                 S3 = None
                             continue
                     except Exception as inf:
-                        self._base.message ('Err. (%s)' % (str(inf)), const_critical_text)
+                        self._base.message ('(%s)' % (str(inf)), self._base.const_critical_text)
                     finally:
                         if (S3 is not None):
                             del S3
@@ -1517,6 +1526,7 @@ CCFG_EXCLUDE_NODE = 'ExcludeFilter'
 CCFG_PRIVATE_INC_BOTO = '__inc_boto__'
 CCFG_PRIVATE_OUTPUT = '__output__'
 CCFG_INTERLEAVE = 'Interleave'
+CCFG_PREDICTOR = 'Predictor'
 
 # log status
 const_general_text = 0
@@ -1525,54 +1535,57 @@ const_critical_text = 2
 const_status_text = 3
 # ends
 
-
 def messageDebug(msg, status):
     print ('*{}'.format(msg))
 
 def Message(msg, status=0):
-    #if (log):
-    #    log.Message(msg, status)
-    #else:
     print (msg)
-    #sys.stdout.flush()      # for any paprent processes to receive the stdout realtime.
-
 
 def args_Callback(args, user_data = None):
+    _LERC =  'lerc'
     _LERC2 = 'lerc2'
     _JPEG = 'jpeg'
     _JPEG12 = 'jpeg12'
-    m_compression = 'lerc'  # default if external config is faulty
+    m_compression = _LERC    # default if external config is faulty
     m_lerc_prec = 0.5
     m_compression_quality = 85
     m_bsize = CCFG_BLOCK_SIZE
     m_mode = 'chs'
     m_nodata_value = None
-    if (user_data is not None):
+    m_predictor = 1
+    m_interleave = 'PIXELS'
+    if (user_data):
         try:
             compression_ = user_data[CIDX_USER_CONFIG].getValue('Compression')
-            if (compression_ is not None):
+            if (compression_):
                 m_compression = compression_
             compression_quality_ = user_data[CIDX_USER_CONFIG].getValue('Quality')
-            if (compression_quality_ is not None):
+            if (compression_quality_):
                 m_compression_quality = compression_quality_
             bsize_ = user_data[CIDX_USER_CONFIG].getValue('BlockSize')
-            if (bsize_ is not None):
+            if (bsize_):
                 m_bsize = bsize_
             lerc_prec_ = user_data[CIDX_USER_CONFIG].getValue('LERCPrecision')
-            if (lerc_prec_ is not None):
+            if (lerc_prec_):
                 m_lerc_prec = lerc_prec_
             m_nodata_value = user_data[CIDX_USER_CONFIG].getValue('NoDataValue')
             m_mode = user_data[CIDX_USER_CONFIG].getValue('Mode')
-            m_interleave = user_data[CIDX_USER_CONFIG].getValue(CCFG_INTERLEAVE)
-            if (m_interleave is not None):
-                m_interleave = m_interleave.upper()
+            m_predictor_ = user_data[CIDX_USER_CONFIG].getValue(CCFG_PREDICTOR)
+            if (m_predictor_):
+                m_predictor = m_predictor_
+            m_interleave_ = user_data[CIDX_USER_CONFIG].getValue(CCFG_INTERLEAVE)
+            if (m_interleave_):
+                m_interleave = m_interleave_.upper()
             mode_ = m_mode.split('_')
             if (len(mode_) > 1):
                 m_mode = mode_[0]      # mode/output
                 m_compression = mode_[1]     # compression
-            if (m_mode == 'tif' or
-                m_mode == 'tiff'):
-                    m_mode = 'GTiff'   # so that gdal_translate'd understand.
+            if (m_mode.startswith('tif')):
+                    args.append ('-co')
+                    args.append ('BIGTIFF=IF_NEEDED')
+                    args.append ('-co')
+                    args.append ('TILED=YES')
+                    m_mode = 'GTiff'   # so that gdal_translate can understand.
                     if (m_interleave == 'PIXEL' and
                         m_compression.startswith(_JPEG)):
                         args.append ('-co')
@@ -1581,13 +1594,19 @@ def args_Callback(args, user_data = None):
                             args.append ('-co')
                             args.append ('NBITS=12')
                         m_compression  = _JPEG
+                    if (m_interleave == 'PIXEL' and
+                        m_compression == 'deflate'):
+                            args.append ('-co')
+                            args.append ('PHOTOMETRIC=YCBCR')
+                            args.append ('-co')
+                            args.append (m_predictor)
         except: # could throw if index isn't found
             pass    # ingnore with defaults.
     args.append ('-of')
     args.append (m_mode)
     args.append ('-co')
-    args.append ('COMPRESS=%s' % ('lerc' if m_compression == _LERC2 else m_compression))
-    if (m_nodata_value is not None):
+    args.append ('COMPRESS=%s' % (_LERC if m_compression == _LERC2 else m_compression))
+    if (m_nodata_value):
         args.append ('-a_nodata')
         args.append (str(m_nodata_value))
     if (m_compression == _JPEG):
@@ -1598,41 +1617,42 @@ def args_Callback(args, user_data = None):
             args.append ('JPEG_QUALITY=%s' % (m_compression_quality))
         args.append ('-co')
         args.append ('INTERLEAVE=%s' % (m_interleave))
-    if (m_compression.startswith('lerc')):
+    if (m_compression.startswith(_LERC)):
         args.append ('-co')
-        args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_compression == _LERC2 else ''))
+        args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_compression == _LERC2 or m_compression == _LERC else ''))
     args.append ('-co')
     args.append ('{}={}'.format('BLOCKXSIZE' if m_mode.lower() == 'gtiff' else 'BLOCKSIZE', m_bsize))
     return args
 
 
 def args_Callback_for_meta(args, user_data = None):
+    _LERC =  'lerc'
     _LERC2 = 'lerc2'
     m_scale = 2
     m_bsize = CCFG_BLOCK_SIZE
     m_pyramid = True
-    m_comp = 'lerc'
+    m_comp = _LERC
     m_lerc_prec = 0.5
     m_compression_quality = 85
-    if (user_data is not None):
+    if (user_data):
         try:
             scale_ = user_data[CIDX_USER_CONFIG].getValue('Scale')
-            if (scale_ is not None):
+            if (scale_):
                 m_scale = scale_
             bsize_ = user_data[CIDX_USER_CONFIG].getValue('BlockSize')
-            if (bsize_ is not None):
+            if (bsize_):
                 m_bsize = bsize_
             ovrpyramid = user_data[CIDX_USER_CONFIG].getValue('isuniformscale')
-            if (ovrpyramid is not None):
+            if (ovrpyramid):
                 m_pyramid = ovrpyramid
             py_comp = user_data[CIDX_USER_CONFIG].getValue('Compression')
-            if (py_comp is not None):
+            if (py_comp):
                 m_comp = py_comp
             compression_quality_ = user_data[CIDX_USER_CONFIG].getValue('Quality')
-            if (compression_quality_ is not None):
+            if (compression_quality_):
                 m_compression_quality = compression_quality_
             m_interleave = user_data[CIDX_USER_CONFIG].getValue(CCFG_INTERLEAVE)
-            if (m_interleave is not None):
+            if (m_interleave):
                 m_interleave = m_interleave.upper()
             lerc_prec = user_data[CIDX_USER_CONFIG].getValue('LERCPrecision')
             if (lerc_prec):
@@ -1643,10 +1663,10 @@ def args_Callback_for_meta(args, user_data = None):
     args.append ('-of')
     args.append ('MRF')
     args.append ('-co')
-    args.append ('COMPRESS=%s' % ('lerc' if m_comp == _LERC2 else m_comp))
+    args.append ('COMPRESS=%s' % (_LERC if m_comp == _LERC2 else m_comp))
     if (m_comp.startswith('lerc')):
         args.append ('-co')
-        args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_comp == _LERC2 else ''))
+        args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_comp == _LERC2 or m_comp == _LERC else ''))
     elif(m_comp == 'jpeg'):
         args.append ('-co')
         args.append ('QUALITY=%s' % (m_compression_quality))
@@ -1665,7 +1685,6 @@ def args_Callback_for_meta(args, user_data = None):
     args.append ('CACHEDSOURCE=%s' % (cache_source))
     # ends
     return args
-
 
 def copy_callback(file, src, dst):
     Message(file)
@@ -1721,14 +1740,14 @@ class Copy:
         self._input_flist = None
         if (not os.path.isdir(self.src)):
             if (not os.path.exists(self.src)):
-                self.message ('Err. Invalid -input report file ({})'.format(self.src), const_critical_text)
+                self.message ('Invalid -input report file ({})'.format(self.src), const_critical_text)
                 return False
             self._input_flist = self.src
             try:
                 global _rpt
                 self.src = _rpt.root;
             except Exception as e:
-                self.message ('Err. Report ({})'.format(str(e)), const_critical_text)
+                self.message ('Report ({})'.format(str(e)), const_critical_text)
                 return False
         if (self.src[-1:] != '/'):
                 self.src += '/'
@@ -1840,10 +1859,16 @@ class Copy:
                                     do_copy = not _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES
                              if (do_copy):
                                 shutil.copyfile(src_file, dst_file)
-                                if (self.m_user_config):        # Clone folder will get all the metadata files by default.
+                                if (self.m_user_config):
+                                    # Clone folder will get all the metadata files by default.
                                     _clonePath = self.m_user_config.getValue(CCLONE_PATH, False)
                                     if (_clonePath):
-                                        shutil.copyfile(src_file, dst_file.replace(self.dst, _clonePath))
+                                        _cloneDstFile = dst_file.replace(self.dst, _clonePath)
+                                        _cloneDirs = os.path.dirname(_cloneDstFile)
+                                        if (not os.path.exists(_cloneDirs)):
+                                            os.makedirs(_cloneDirs)
+                                        shutil.copyfile(src_file, _cloneDstFile)
+                                    # ends
                              if (self._input_flist):
                                 _rpt.updateRecordStatus (src_file, CRPT_COPIED, CRPT_YES)
                              self.message ('{} {}'.format(CRESUME_MSG_PREFIX if not do_copy else 'CPY', src_file.replace(self.src, '')))
@@ -1855,7 +1880,7 @@ class Copy:
                 except Exception as info:
                     if (self._input_flist):
                         _rpt.updateRecordStatus (os.path.join(r, file), CRPT_COPIED, CRPT_NO)
-                    self.message ('Err. (%s)' % (str(info)), const_critical_text)
+                    self.message ('(%s)' % (str(info)), const_critical_text)
                     continue
 
         self.message ('Done.')
@@ -1917,26 +1942,25 @@ class Copy:
 
 
 class compression:
-
-    def __init__(self, gdal_path):
+    def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
 
         self.CGDAL_TRANSLATE_EXE = 'gdal_translate.exe'
         self.CGDAL_BUILDVRT_EXE = 'gdalbuildvrt.exe'
         self.CGDAL_ADDO_EXE = 'gdaladdo.exe'
         self.m_id = None
+        self.m_user_config = None
+        self._base = base
 
-    def init(self, user_callback = None, id = None, user_config = None):
-        self.m_user_callback = False
-        if (user_callback != None):
-            self.m_user_callback = True
-            self.m_callback = user_callback
-
+    def init(self, id = None):
         if (id != None):
             self.m_id = id
-
-        if (user_config != None):
-            self.m_user_config = user_config
+        if (not self._base or
+            not isinstance(self._base, Base) or
+            not isinstance(self._base.getUserConfiguration, Config)):
+            Message ('Err/Internal. (Compression) instance is not initialized with a valid (Base) instance.', const_critical_text)
+            return False
+        self.m_user_config = self._base.getUserConfiguration
 
         # intenal gdal_pathc could get modified here.
         if (not self.m_gdal_path or
@@ -1945,29 +1969,26 @@ class compression:
                 self.message('Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path), const_warning_text)
             self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'gdal/bin')
             if (not os.path.isdir(self.m_gdal_path)):
-                self.message('Err. GDAL not found at ({}).'.format(self.m_gdal_path), const_critical_text)
+                self.message('GDAL not found at ({}).'.format(self.m_gdal_path), self._base.const_critical_text)
                 return False
         # ends
         # set gdal_data enviornment path
         os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
         # ends
-
-        msg_text = 'Error: %s is not found at (%s)'
+        msg_text = '(%s) is not found at (%s)'
         if (os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)) == False):
-            self.message(msg_text % (self.CGDAL_TRANSLATE_EXE, self.m_gdal_path))
+            self.message(msg_text % (self.CGDAL_TRANSLATE_EXE, self.m_gdal_path), self._base.const_critical_text)
             return False
         if (os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)) == False):
-            self.message(msg_text % (self.CGDAL_ADDO_EXE, self.m_gdal_path))
+            self.message(msg_text % (self.CGDAL_ADDO_EXE, self.m_gdal_path), self._base.const_critical_text)
             return False
-
         return True
 
     def message(self, msg, status = const_general_text):
-        if (self.m_user_callback == True):
-            write = msg
-            if (self.m_id != None):
-                write = '[{}] {}'.format(threading.current_thread().name, msg)
-            self.m_callback(write, status)
+        write = msg
+        if (self.m_id != None):
+            write = '[{}] {}'.format(threading.current_thread().name, msg)
+        self._base.message(write, status)
         return True
 
     def buildMultibandVRT(self, input_files, output_file):
@@ -2008,7 +2029,7 @@ class compression:
                 except Exception as exp:
                     time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
                     if (os.path.exists(out_dir_path) == False):
-                        self.message ('Err. (%s)' % str(exp), const_critical_text)
+                        self.message ('(%s)' % str(exp), const_critical_text)
                         if (_rpt):
                             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
@@ -2070,14 +2091,14 @@ class compression:
                             self.message ('rename (%s=>%s)' % (in_, out_))
                             os.rename(in_, out_)
                         except:
-                            self.message ('Warning: Unable to rename/remove (%s)' % (output_file), const_warning_text)
+                            self.message ('Unable to rename/remove (%s)' % (output_file), const_warning_text)
                             if (_rpt):
                                 _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
 
         # Do auto generate cloneMRF?
         if (self.m_user_config.getValue(CCLONE_PATH)):
-            updateMRF = UpdateMRF()
+            updateMRF = UpdateMRF(self._base)
             _output_home_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)
             if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 _output_home_path = self.m_user_config.getValue('tempoutput', False)
@@ -2367,7 +2388,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5g'
+    __program_ver__ = 'v1.5j'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2494,27 +2515,25 @@ class Application:
                     pass
             if (self._args.__getattr__(CRESUME_ARG) is None):
                 self._args.__setattr__(CRESUME_ARG, True)
+        if (not self.__load_config__(self._args)):
+            return False
+        self._base = self.__setup_log_support()          # initialize log support.
+        if (not self._base.init()):
+            self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
+            return CRET_ERROR
         if (self._args.input and
             os.path.isfile (self._args.input)):
-            _rpt = Report();
+            _rpt = Report(self._base);
             if (not _rpt.init(self._args.input)):        # not checked for return.
-                print ('Err. Unable to init (Report/job)')
+                self._base.message('Unable to init (Report/job)', self._base.const_critical_text)
                 return False
             for arg in vars(self._args):
                 if (arg == 'input'):
                     continue
                 setattr(self._args, arg, None)      # any other cmd-line args will be ignored/nullified.
             if (not _rpt.read(self.__jobContentCallback)):
-                print ('Err. Unable to read the -input job file.')
+                self._base.message('Unable to read the -input job file.', self._base.const_critical_text)
                 return False
-        # ends
-        if (not self.__load_config__(self._args)):
-            return False
-        self._base = self.__setup_log_support()          # initialize log support.
-        if (not self._base.init()):
-            self._base.message ('Unable to initialize the (Base) module', base.const_critical_text)
-            return CRET_ERROR
-        # ends
         self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
         return True
 
@@ -2563,12 +2582,12 @@ class Application:
         # is resume?
         if (self._args.input and
             os.path.isfile (self._args.input)):
-            _rpt = Report();
+            _rpt = Report(self._base);
             if (not _rpt.init(self._args.input)):        # not checked for return.
-                self._base.message ('Err. Unable to init (Reporter/obj)', self._base.const_critical_text)
+                self._base.message ('Unable to init (Reporter/obj)', self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
             if (not _rpt.read()):
-                self._base.message ('Err. Unable to read the -input report file ({})'.format(self._args.input), self._base.const_critical_text)
+                self._base.message ('Unable to read the -input report file ({})'.format(self._args.input), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
             self._args.job = os.path.basename(self._args.input)
             self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
@@ -2617,21 +2636,20 @@ class Application:
         COP_DNL : None,
         COP_RPT : None
         }
-
-
+        # ends
 
         if (self._args.op):
             self._args.op = self._args.op.lower()
             if (not self._args.op in _utility):
-                self._base.message ('Err. Invalid utility operation mode ({})'.format(self._args.op), const_critical_text)
+                self._base.message ('Invalid utility operation mode ({})'.format(self._args.op), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
             if (self._args.op == COP_UPL):
                 self._args.cloudupload = 'true'
                 self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
             elif(self._args.op == COP_RPT):
-                g_rpt = Report();
+                g_rpt = Report(self._base);
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
-                    self._base.message ('Err. Unable to init (Report)', const_critical_text)
+                    self._base.message ('Unable to init (Report)', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 g_is_generate_report = True
 
@@ -2644,7 +2662,7 @@ class Application:
 
         # read in (interleave)
         if (cfg.getValue(CCFG_INTERLEAVE) is None):
-            cfg.setValue(CCFG_INTERLEAVE, 'BAND');
+            cfg.setValue(CCFG_INTERLEAVE, 'PIXEL');
         # ends
 
         # overwrite (Out_CloudUpload, IncludeSubdirectories) with cmd-line args if defined.
@@ -2812,9 +2830,13 @@ class Application:
         cfg_mode = cfg_mode.lower()
         cfg.setValue('Mode', cfg_mode)
         # ends
+
         # is clonepath defined?
         if (self._args.clonepath and
             cfg_mode.startswith('mrf')):
+            self._args.clonepath = self._args.clonepath.replace('\\', '/')
+            if (not self._args.clonepath.endswith('/')):
+                self._args.clonepath += '/'
             cfg.setValue(CCLONE_PATH, self._args.clonepath)
         # ends
 
@@ -2859,9 +2881,9 @@ class Application:
         gdal_path = cfg.getValue(CCFG_GDAL_PATH)      # note: validity is checked within (compression-mod)
         # ends
 
-        comp = compression(gdal_path)
-        ret = comp.init(self._base.message, 0, user_config = cfg)      # warning/error messages get printed within .init()
-        if (ret == False):
+        comp = compression(gdal_path, base = self._base)
+        ret = comp.init(0)      # warning/error messages get printed within .init()
+        if (not ret):
             self._base.message('Unable to initialize/compression module', self._base.const_critical_text);
             return(terminate(self._base, eFAIL))
 
@@ -2953,12 +2975,12 @@ class Application:
                                     self._base.S3Upl (_rd, user_args_Callback)
                                     _rd = _fptr.readline()
                         except Exception as e:
-                            self._base.message ('Err. {}'.format(str(e)), self._base.const_critical_text)
+                            self._base.message ('{}'.format(str(e)), self._base.const_critical_text)
                     elif (os.path.isdir (self._args.input)):
                         user_args_Callback[CINC_SUB] = getBooleanValue(cfg.getValue('IncludeSubdirectories'))   # setup config property
                         self._base.S3Upl('{}/'.format(self._args.input), user_args_Callback)
                     else:
-                        self._base.message ('Err. Invalid -input. ({})'.format(self._args.input), self._base.const_critical_text)
+                        self._base.message ('Invalid -input. ({})'.format(self._args.input), self._base.const_critical_text)
                         return(terminate (self._base, eFAIL));
                     retry_failed_lst  = []
                     failed_upl_lst = S3_storage.getFailedUploadList()
@@ -2978,7 +3000,7 @@ class Application:
                                     for _wl in retry_failed_lst:
                                         _fptr.write ('{}\n'.format(_wl))
                             except Exception as e:
-                                self._base.message ('Err. Writing the failed upload file list.\n{}'.format(str(e)), self._base.const_critical_text)
+                                self._base.message ('Writing the failed upload file list.\n{}'.format(str(e)), self._base.const_critical_text)
                         # ends
         # ends
 
@@ -3018,15 +3040,15 @@ class Application:
         'exclude'  : exclude_callback_for_meta
         }
 
-        CONST_CPY_ERR_0 = 'Err. Unable to initialize (Copy) module!'
-        CONST_CPY_ERR_1 = 'Err. Unable to process input data/(Copy) module!'
+        CONST_CPY_ERR_0 = 'Unable to initialize (Copy) module!'
+        CONST_CPY_ERR_1 = 'Unable to process input data/(Copy) module!'
 
         CONST_OUTPUT_EXT = '.%s' % ('mrf')
 
         # keep original-source-ext
         cfg_keep_original_ext = getBooleanValue(cfg.getValue('KeepExtension'))
         cfg_threads = cfg.getValue('Threads')
-        msg_threads = 'Warning: Thread-count invalid/undefined, resetting to default'
+        msg_threads = 'Thread-count invalid/undefined, resetting to default'
         try:
             cfg_threads = int(cfg_threads)   # (None) value is expected
         except:
@@ -3034,7 +3056,7 @@ class Application:
         if (cfg_threads <= 0 or
             cfg_threads > CCFG_THREADS):
             cfg_threads = CCFG_THREADS
-            self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS))
+            self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS), self._base.const_warning_text)
         # ends
 
         # let's deal with copying when -input is on s3
@@ -3075,7 +3097,7 @@ class Application:
                     self._base.message ('Unable to read S3-Content', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
                 # =/vsicurl/http://esridatasets.s3.amazonaws.com/
-            else:       # chs
+            else:
                 # let's do (Azure) init
                 in_azure_storage = Azure(in_s3_id, in_s3_secret, in_s3_profile_name, self._base);
                 if (not in_azure_storage.init() or
