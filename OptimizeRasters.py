@@ -170,8 +170,6 @@ class Base(object):
         if (self._m_msg_callback):
             self._m_msg_callback(msg, status)
             return
-        #sys.stdout.flush()      # for any paprent process to receive the stdout realtime.
-
     def getBooleanValue(self, value):        # helper function
         if (value is None):
             return False
@@ -183,7 +181,7 @@ class Base(object):
             val == 't' or
             val == '1' or
             val == 'y'):
-                return True
+            return True
         return False
     @property
     def getUserConfiguration(self):
@@ -310,6 +308,9 @@ class UpdateMRF:
             return False
         if (input.rfind('.') == -1):
             return False
+        if (self._base and
+            not isinstance(self._base, Base)):
+                return False
         self._mode = mode
         self._input = self._convertToForwardSlash(input)
         self._output = self._convertToForwardSlash(output)
@@ -1219,41 +1220,40 @@ class Azure(Store):
 
         return True
 
-
 class S3Storage:
     def __init__(self, base):
         self._base = base
-
-    def init(self, remote_path, s3_key, s3_secret, direction, user_config = None):
-        self.m_user_config = None
+    def init(self, remote_path, s3_key, s3_secret, direction):
+        if (not isinstance(self._base, Base)):
+            return False
         self._input_flist = None
         self.__m_failed_upl_lst = {}
-
-        if (user_config != None):
-            self.m_user_config = user_config
+        self.m_user_config = self._base.getUserConfiguration
         self.CAWS_ACCESS_KEY_ID = s3_key
         self.CAWS_ACCESS_KEY_SECRET = s3_secret
-
         self.m_bucketname = ''         # no default bucket-name
         if (self.m_user_config):
             s3_bucket = self.m_user_config.getValue('{}_S3_Bucket'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
             if (s3_bucket):
                 self.m_bucketname = s3_bucket
             _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
+            if ((not self.CAWS_ACCESS_KEY_ID or
+                 not self.CAWS_ACCESS_KEY_SECRET) and
+                 not _profile_name):
+                    return False
             # setup s3 connection
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
                 _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 else 'boto.s3.connection.OrdinaryCallingFormat')
                 try:
                     is_bucket_public = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
-                    con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET,
+                    con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID if not _profile_name else None, self.CAWS_ACCESS_KEY_SECRET if not _profile_name else None,
                     profile_name = _profile_name if _profile_name else None, calling_format = _calling_format,
                     anon = True if is_bucket_public else False)
                 except Exception as e:
-                    self._base.message (format(str(e)), const_critical_text)
+                    self._base.message (str(e), self._base.const_critical_text)
                     return False
                 self.bucketupload = con.get_bucket(self.m_bucketname, False, None)
             # ends
-
         _remote_path = remote_path
         if (os.path.isfile(_remote_path)):      # are we reading a file list?
             self._input_flist = _remote_path
@@ -1268,18 +1268,14 @@ class S3Storage:
         if (self.remote_path[-1:] != '/'):
             self.remote_path += '/'
         return True
-
     @property
     def inputPath(self):
         return self.__m_input_path
-
     @inputPath.setter
     def inputPath(self, value):
         self.__m_input_path = value
-
     def getFailedUploadList(self):
         return self.__m_failed_upl_lst;
-
     # code to iterate a S3 bucket/folder
     def getS3Content(self, prefix, cb = None, precb = None):
         is_link = not self._input_flist is None;
@@ -1335,7 +1331,6 @@ class S3Storage:
         # ends
         return True
     # ends
-
     # code to deal with s3-local-cpy
     def S3_copy_to_local(self, S3_key, S3_path):
         err_msg_0 = 'S3/Local path is invalid'
@@ -1425,17 +1420,13 @@ class S3Storage:
         # ends
         return True
     # ends
-
-
     def upload(self):
         self._base.message ('[S3-Push]..');
         for r,d,f in os.walk(self.inputPath):
-
             for file in f:
                 lcl_file = os.path.join(r, file).replace('\\', '/')
                 upl_file = lcl_file.replace(self.inputPath, self.remote_path)
                 self._base.message (upl_file)
-                # ends
                 try:
                     S3 = S3Upload_(self.bucketupload, upl_file, lcl_file, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                     if (S3.init() == False):
@@ -1451,13 +1442,21 @@ class S3Storage:
                     if (S3 is not None):
                         del S3
         return True
-
-
+    def _addToFailedList(self, localPath, remotePath):
+        if (not 'upl' in self.getFailedUploadList()):
+            self.__m_failed_upl_lst['upl'] = []
+        _exists = False
+        for v in self.__m_failed_upl_lst['upl']:
+            if (v['local'] == localPath):
+                _exists = True
+                break
+        if (not _exists):
+            self.__m_failed_upl_lst['upl'].append({'local' : localPath, 'remote' : remotePath})
+        return True
     def upload_group(self, input_source, single_upload = False, include_subs = False):
         m_input_source = input_source.replace('\\', '/')
         input_path = os.path.dirname(m_input_source)
         upload_buff = []
-
         (p, e) = os.path.splitext(m_input_source)
         for r,d,f in os.walk(input_path):
             for file in f:
@@ -1478,7 +1477,8 @@ class S3Storage:
                             upl_file = mk_path.replace(rep, self.remote_path if self.m_user_config.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
                         S3 = S3Upload_(self._base, self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
-                            self._base.message ('Unable to initialize S3-Upload for (%s=%s)' % (mk_path, upl_file), self._base.const_warning_text)
+                            self._base.message ('Unable to initialize S3-Upload for (%s=>%s)' % (mk_path, upl_file), self._base.const_warning_text)
+                            self._addToFailedList(mk_path, upl_file)
                             continue
                         upl_retries = CS3_UPLOAD_RETRIES
                         ret  = False
@@ -1489,15 +1489,7 @@ class S3Storage:
                                 upl_retries -= 1
                                 self._base.message ('[S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), self._base.const_warning_text)
                         if (ret == False):
-                            if (not 'upl' in  self.__m_failed_upl_lst):
-                                self.__m_failed_upl_lst['upl'] = []
-                            exists_ = False
-                            for v in self.__m_failed_upl_lst['upl']:
-                                if (v['local'] == mk_path):
-                                    exists_ = True
-                                    break
-                            if (not exists_):
-                                self.__m_failed_upl_lst['upl'].append({'local' : mk_path, 'remote' : upl_file})
+                            self._addToFailedList(mk_path, upl_file)
                             if (S3 is not None):
                                 del S3
                                 S3 = None
@@ -1515,7 +1507,6 @@ class S3Storage:
                 return upload_buff
         return upload_buff       # this could be empty.
 # ends
-
 
 CIDX_USER_CONFIG  = 2
 CCFG_BLOCK_SIZE = 512
@@ -1940,7 +1931,6 @@ class Copy:
                 # ends
         return True
 
-
 class compression:
     def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
@@ -1983,31 +1973,23 @@ class compression:
             self.message(msg_text % (self.CGDAL_ADDO_EXE, self.m_gdal_path), self._base.const_critical_text)
             return False
         return True
-
     def message(self, msg, status = const_general_text):
         write = msg
         if (self.m_id != None):
             write = '[{}] {}'.format(threading.current_thread().name, msg)
         self._base.message(write, status)
         return True
-
     def buildMultibandVRT(self, input_files, output_file):
-
         if (len(input_files) ==  0):
             return False
-
         args = [os.path.join(self.m_gdal_path, self.CGDAL_BUILDVRT_EXE)]
         args.append (output_file)
-
         for f in (input_files):
             args.append(f)
-
         self.message('Creating VRT output file (%s)' % (output_file))
-
         return self.__call_external(args)
-
     def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
-        _vsicurl_input = cfg.getValue(CIN_S3_PREFIX, False)
+        _vsicurl_input = self.m_user_config.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
             if (_rpt):
@@ -2035,7 +2017,6 @@ class compression:
                         return False
             # ends
             do_pyramids = self.m_user_config.getValue('Pyramids')
-
             if (do_pyramids != CCMD_PYRAMIDS_ONLY):
                 args = [os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)]
                 if (args_callback is None):      # defaults
@@ -2047,10 +2028,8 @@ class compression:
                     args.append ('BLOCKSIZE=512')
                 else:
                     args = args_callback(args, [input_file, output_file, self.m_user_config])      # callback user function to get arguments.
-
                 args.append (input_file)
                 args.append (output_file)
-
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self.__call_external(args)
                 self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
@@ -2058,7 +2037,6 @@ class compression:
                     if (_rpt):
                         _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                     return ret
-
             if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
                 if (do_pyramids == 'true' or
                     do_pyramids == CCMD_PYRAMIDS_ONLY):
@@ -2095,7 +2073,6 @@ class compression:
                             if (_rpt):
                                 _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
-
         # Do auto generate cloneMRF?
         if (self.m_user_config.getValue(CCLONE_PATH)):
             updateMRF = UpdateMRF(self._base)
@@ -2106,7 +2083,6 @@ class compression:
                 self.m_user_config.getValue(CCACHE_PATH), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
                 updateMRF.copyInputMRFFilesToOutput();
         # ends
-
         # call any user-defined fnc for any post-processings.
         if (post_processing_callback):
             if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD)) == True):
@@ -2117,8 +2093,6 @@ class compression:
         if (_rpt):
             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
-
-
     def createaOverview(self, input_file, isBQA = False):
         # gdaladdo.exe -r mode -ro --config COMPRESS_OVERVIEW LZW --config USE_RRD NO  --config TILED YES input 2 4 8 16 32
         get_mode = self.m_user_config.getValue('Mode')
@@ -2178,7 +2152,6 @@ class compression:
         for f in m_ary_factors:
             args.append (f)
         return self.__call_external(args)
-
     def __call_external(self, args):
         p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         message = ''
@@ -2388,7 +2361,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5j'
+    __program_ver__ = 'v1.5k'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2914,7 +2887,7 @@ class Application:
                 if (self._args.outputbucket):
                     cfg.setValue('Out_S3_Bucket', self._args.outputbucket)
                 # end
-                ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT, cfg)
+                ret =  S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT)
                 if (ret == False):
                     self._base.message (err_init_msg.format('S3'), const_critical_text);
                     return(terminate(self._base, eFAIL))
@@ -3087,7 +3060,7 @@ class Application:
 
             if (inAmazon):
                 o_S3_storage = S3Storage(self._base)
-                ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN, cfg)
+                ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN)
                 if (ret == False):
                     self._base.message ('Unable to initialize S3-storage module!. Quitting..', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
