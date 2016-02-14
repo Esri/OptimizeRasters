@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160210
+# Version: 20160211
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1538,7 +1538,7 @@ def args_Callback(args, user_data = None):
     _JPEG = 'jpeg'
     _JPEG12 = 'jpeg12'
     m_compression = _LERC    # default if external config is faulty
-    m_lerc_prec = 0.5
+    m_lerc_prec = None
     m_compression_quality = 85
     m_bsize = CCFG_BLOCK_SIZE
     m_mode = 'chs'
@@ -1609,12 +1609,14 @@ def args_Callback(args, user_data = None):
         args.append ('-co')
         args.append ('INTERLEAVE=%s' % (m_interleave))
     if (m_compression.startswith(_LERC)):
-        args.append ('-co')
-        args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_compression == _LERC2 or m_compression == _LERC else ''))
+        if (m_lerc_prec or
+            m_compression == _LERC2 or
+            m_compression == _LERC):
+            args.append ('-co')
+            args.append ('OPTIONS={}{}'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format( m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_compression == _LERC2 or m_compression == _LERC else ''))
     args.append ('-co')
     args.append ('{}={}'.format('BLOCKXSIZE' if m_mode.lower() == 'gtiff' else 'BLOCKSIZE', m_bsize))
     return args
-
 
 def args_Callback_for_meta(args, user_data = None):
     _LERC =  'lerc'
@@ -1623,7 +1625,7 @@ def args_Callback_for_meta(args, user_data = None):
     m_bsize = CCFG_BLOCK_SIZE
     m_pyramid = True
     m_comp = _LERC
-    m_lerc_prec = 0.5
+    m_lerc_prec = None
     m_compression_quality = 85
     if (user_data):
         try:
@@ -1655,9 +1657,12 @@ def args_Callback_for_meta(args, user_data = None):
     args.append ('MRF')
     args.append ('-co')
     args.append ('COMPRESS=%s' % (_LERC if m_comp == _LERC2 else m_comp))
-    if (m_comp.startswith('lerc')):
-        args.append ('-co')
-        args.append ('OPTIONS=LERC_PREC={}{}'.format(m_lerc_prec, ' V2=ON' if m_comp == _LERC2 or m_comp == _LERC else ''))
+    if (m_comp.startswith(_LERC)):
+        if (m_lerc_prec or
+            m_comp == _LERC2 or
+            m_comp == _LERC):
+            args.append ('-co')
+            args.append ('OPTIONS={}{}'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format( m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_comp == _LERC2 or m_comp == _LERC else ''))
     elif(m_comp == 'jpeg'):
         args.append ('-co')
         args.append ('QUALITY=%s' % (m_compression_quality))
@@ -2361,7 +2366,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5k'
+    __program_ver__ = 'v1.5l'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2820,18 +2825,18 @@ class Application:
 
         # read in build pyramids value
         do_pyramids = 'true'
-        if (self._args.pyramids is None):
+        if (not self._args.pyramids):
             self._args.pyramids = cfg.getValue('BuildPyramids')
-        if (self._args.pyramids is not None):
+        if (self._args.pyramids):
             do_pyramids = self._args.pyramids = str(self._args.pyramids).lower()
         # ends
 
         # set jpeg_quality from cmd to override cfg value. Must be set before compression->init()
-        if (self._args.quality is not None):
+        if (self._args.quality):
             cfg.setValue('Quality', self._args.quality)
-        if (self._args.prec is not None):
+        if (self._args.prec):
             cfg.setValue('LERCPrecision', self._args.prec)
-        if (self._args.pyramids is not None):
+        if (self._args.pyramids):
             if (self._args.pyramids == CCMD_PYRAMIDS_ONLY):
                 if (not cfg.getValue(CLOAD_RESTORE_POINT)):     # -input, -output path check isn't done if -input points to a job (.csv) file
                     if (self._args.input != self._args.output):
