@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160211
+# Version: 20160214
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -311,6 +311,15 @@ class UpdateMRF:
         if (self._base and
             not isinstance(self._base, Base)):
                 return False
+        self._or_mode = self._base.getUserConfiguration.getValue('Mode')    # mode/output
+        if (not self._or_mode):
+            self._base.message('UpdateMRF> (Mode) not defined.', self._base.const_critical_text)
+            return False
+        _type = self._or_mode.split('_')
+        if (len(_type) > 1):
+            self._or_mode = _type[0]
+        if (self._or_mode.endswith('mrf')):         # to trap modes (cachingmrf/clonemrf).
+            self._or_mode = 'mrf'
         self._mode = mode
         self._input = self._convertToForwardSlash(input)
         self._output = self._convertToForwardSlash(output)
@@ -352,10 +361,8 @@ class UpdateMRF:
                                         if (self._base):
                                             self._base.message('Updating ({}) failed!'.format(_mk_copy_path), self._base.const_critical_text)
                                 continue
-                            if (self._base and
-                                self._base.getUserConfiguration):
-                                if (True in [_mk_path.lower().endswith(x) for x in self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE)]):
-                                    continue
+                            if (_mk_path.lower().endswith(self._or_mode)):
+                                continue
                             shutil.copy(_mk_path, _mk_copy_path)
                         except Exception as e:
                             if (self._base):
@@ -554,6 +561,8 @@ class Report:
         try:
             get_tile = os.path.basename(self._report_file)
             mk_path = os.path.join(path, get_tile)
+            if (not os.path.exists(path)):
+                os.makedirs(path)
             self._base.message('[MV] {}'.format(mk_path))
             shutil.move(self._report_file, mk_path)
         except Exception as e:
@@ -2366,7 +2375,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5l'
+    __program_ver__ = 'v1.5m'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3488,4 +3497,4 @@ def main():
 if __name__ == '__main__':
     ret = main()
     print ('\nDone..')
-    exit(ret)
+    exit(ret) 
