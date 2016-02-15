@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160214
+# Version: 20160215
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -170,6 +170,10 @@ class Base(object):
         if (self._m_msg_callback):
             self._m_msg_callback(msg, status)
             return
+    def convertToForwardSlash(self, input):
+        if (not input):
+            return None
+        return input.replace('\\', '/')
     def getBooleanValue(self, value):        # helper function
         if (value is None):
             return False
@@ -422,6 +426,7 @@ class UpdateMRF:
 class Report:
     CHEADER_PREFIX = '#'
     CJOB_EXT = '.orjob'
+    CVSCHAR  = '\t'
     def __init__(self, base):
         self._input_list = []
         self._input_list_info = {}
@@ -496,7 +501,7 @@ class Report:
             return False
         _file = file.replace('\\', '/')
         _get_store =  self.findWith(_file)
-        if (not _get_store and
+        if (_get_store and
              _get_store == _file):
             return False        # no duplicate entires allowed.
         self._input_list.append(_file)
@@ -517,7 +522,7 @@ class Report:
                         continue
                     if (readCallback):      # client side callback support.
                         readCallback(ln)
-                    lns = ln.strip().split(',')
+                    lns = ln.strip().split(self.CVSCHAR)
                     _fname = lns[0].strip().replace('\\', '/')
                     if (_fname.startswith(self.CHEADER_PREFIX)):
                         _hdr = _fname.replace(self.CHEADER_PREFIX, '').split('=')
@@ -547,7 +552,13 @@ class Report:
             self._base.message('{}'.format(str(exp)), self._base.const_critical_text)
             return False
         return True
-
+    def findExact(self, input):
+        if (not self._input_list):
+            return None
+        for f in self._input_list:
+            if (f == input):
+                return f
+        return None
     def findWith(self, input):
         if (not self._input_list):
             return None
@@ -583,7 +594,7 @@ class Report:
     def write(self):
         try:
             CCSV_HEADER_ = 'csv_header'
-            _frmt = '{},{},{},{}\n'
+            _frmt = '{}/{}/{}/{}\n'.replace('/', self.CVSCHAR)
             with open(self._report_file , 'w+') as _fptr:
                 for key in self._header:
                     _fptr.write('{} {}={}\n'.format(self.CHEADER_PREFIX, key, self._header[key]))
@@ -1713,13 +1724,12 @@ def getSourcePathUsingTempOutput(input):
     if (not _rpt or
         not getBooleanValue(cfg.getValue('istempoutput'))):
         return None
-    _tempoutput = cfg.getValue('tempoutput', False)
-    _mk_path = input.replace(_tempoutput, '')
+    _mk_path = input.replace(cfg.getValue('tempoutput', False), '')
     _indx  = -1
-    if (True in [_mk_path.lower().endswith(i) for i in ['.idx', '.lrc', '.aux.xml']]):        # if any one of these extensions fails,
+    if (True in [_mk_path.lower().endswith(i) for i in ['.idx', '.lrc', '.aux.xml']]):       # if any one of these extensions fails,
         _indx = _mk_path.rfind('.')                                                          # the main (raster) file upload entry in (Reporter) would be set to (no) denoting a failure in one of its associated files.
     if (_indx == -1):
-        return (_rpt.findWith(_mk_path))
+        return (_rpt.findExact('{}{}'.format(_rpt.root, _mk_path)))
     for i in _rpt:
         if (i.find(_mk_path[:_indx + 1]) != -1):
             if (True in [i.endswith(x) for x in cfg.getValue(CCFG_RASTERS_NODE)]):
@@ -2375,7 +2385,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5m'
+    __program_ver__ = 'v1.5o'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2642,9 +2652,11 @@ class Application:
 
         # fix the slashes to force a convention
         if (self._args.input):
-            self._args.input = self._args.input.replace('\\', '/')
+            self._args.input = self._base.convertToForwardSlash(self._args.input)
         if (self._args.output):
-            self._args.output = self._args.output.replace('\\', '/')
+            self._args.output = self._base.convertToForwardSlash(self._args.output)
+            if (not self._args.output.endswith('/')):
+                self._args.output += '/'
         # ends
 
         # read in (interleave)
@@ -2689,14 +2701,14 @@ class Application:
             cfg.setValue('tempinput', self._args.tempinput)
         # ends
 
-        # let's setup output temp path.
+        # let's setup -tempoutput
         is_output_temp = False
         if (self._args.tempoutput):
             self._args.tempoutput = self._args.tempoutput.strip().lower().replace('\\', '/')
             if (self._args.tempoutput.endswith('/') == False):
                 self._args.tempoutput += '/'
             if (os.path.isdir(self._args.tempoutput) == False):
-                # attempt to create the temp-output path
+                # attempt to create the -tempoutput
                 try:
                     if (not self._args.op or
                         (self._args.op and
@@ -3155,8 +3167,7 @@ class Application:
                         _tempinput = cfg.getValue('tempinput', False)
                         _tempinput = _tempinput[:-1] if _tempinput.endswith('/') else _tempinput
                         _src = _src.replace(_tempinput, self._args.input)
-                    if (not g_rpt.findWith(_src)):  #  prior to this point, rasters get added to g_rpt during the (pull/copy) process if -s3input=true && -tempinput is defined.
-                        g_rpt.addFile(_src)
+                    g_rpt.addFile(_src)     # prior to this point, rasters get added to g_rpt during the (pull/copy) process if -s3input=true && -tempinput is defined.
                 self._base.message ('{}'.format(CRESUME_CREATE_JOB_TEXT).format (_project_path))
                 for arg in vars(self._args):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
