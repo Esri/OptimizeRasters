@@ -1319,7 +1319,7 @@ class S3Storage:
                         if (key.name.lower().endswith(CTIL_EXTENSION_)):
                             cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
             except Exception as e:
-                self._base.message (e.message, const_critical_text)
+                self._base.message (e.message, self._base.const_critical_text)
                 return False
         # ends
         try:
@@ -2495,10 +2495,11 @@ class Application:
 
     def init(self):
         global _rpt, \
-        cfg
+        cfg, \
+        til
         self.writeToConsole(self.__program_name__)
         self.writeToConsole(self.__program_desc__)
-        _rpt = cfg = None
+        _rpt = cfg = til = None     #by (default) til extensions or its associated files aren't processed differently.
         if (not self._usr_args):
             return False
         if (isinstance(self._usr_args, argparse.Namespace)):
@@ -2532,6 +2533,12 @@ class Application:
                 self._base.message('Unable to read the -input job file.', self._base.const_critical_text)
                 return False
         self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
+        # do we need to process (til) files?
+        for x in self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE):
+            if (x.lower() == 'til'):
+                til = TIL()
+                break
+        # ends
         return True
 
     def registerMessageCallback(self, fnptr):
@@ -2958,8 +2965,6 @@ class Application:
         }
         # ends
 
-        til = None      # by (default) til extensions or its associated files aren't processed differently.
-
         # handle utility operations
         if (self._args.op):
             if (self._args.op == COP_UPL):
@@ -3003,14 +3008,7 @@ class Application:
                         # ends
         # ends
 
-
         cpy = Copy(self._base)
-        # do we need to process (til) files?
-        for x in cfg.getValue(CCFG_RASTERS_NODE):
-            if (x.lower() == 'til'):
-                til = TIL()
-                break
-        # ends
 
         list = {
         'copy' : {'*'},
@@ -3213,7 +3211,7 @@ class Application:
                 if (til):
                     for _til in til:
                         if (not til.isAllFilesProcessed(_til)):
-                            print ('** not yet completed for ({})'.format(_til));
+                            self._base.message ('TIL> Not yet completed for ({})'.format(_til));
                         if (til.isAllFilesProcessed(_til)):
                             til_output_path = til.getOutputPath(_til)
                             if (not til_output_path):
