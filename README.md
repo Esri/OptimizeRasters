@@ -16,7 +16,7 @@ c:\Python27\ArcGIS10.3\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\Optimi
 ```
 Creating Clone MRF
 ```
-c:\Python27\ArcGIS10.3\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters..py -input=e:\projects\OptimizeRaster\outdata -output=e:\projects\OptimizeRaster\cachedata -mode=clonemrf
+c:\Python27\ArcGIS10.3\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters.py -input=e:\projects\OptimizeRaster\outdata -output=e:\projects\OptimizeRaster\cachedata -mode=clonemrf
  ```
 Creating MRF and uploading to s3 ( make sure you use correct slash and cases for s3 as its case sensitive also s3 and the permission to access the data from that machine) 
 In this case you need to define the s3 output folder and the keys in the config file 
