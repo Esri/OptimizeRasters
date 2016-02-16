@@ -55,7 +55,7 @@ def setXMLXPathValue(doc, xPath, key, value):
             if (not node.hasChildNodes()):
                 node.appendChild(doc.createTextNode(value))
                 return True
-            node.firstChild.data = value
+            node.firstChild.data = str(value)
             return True
     return False
 
@@ -69,17 +69,15 @@ def returntemplatefiles ():
     for ft in templatefilelist:
         if ft.endswith('.xml'):
             allactualxmlFiles.append(ft)
-            ##ft = ft.replace('_',' ')      # chs
             ft = ft.replace('.xml','')
             allxmlFiles.append(ft)
 
-    userTempLoc = os.path.join(selfscriptpath,'user_configs')
+    userTempLoc = os.path.join(selfscriptpath,'UserTemplates')
     if os.path.exists(userTempLoc) == True:
         userTempLoclist = os.listdir(userTempLoc)
         for ft in userTempLoclist:
             if ft.endswith('.xml'):
                 allactualxmlFiles.append(ft)
-                ##ft = ft.replace('_',' ')      # chs
                 ft = ft.replace('.xml','')
                 allxmlFiles.append(ft)
 
@@ -95,7 +93,6 @@ def returnjobFiles ():
     for ft in jobfileList:
         if ft.endswith('.orjob'):
             allactualjobfiles.append(ft)
-            ##ft = ft.replace('_',' ')      # chs
             ft = ft.replace('.orjob','')
             alljobFiles.append(ft)
 
@@ -111,9 +108,9 @@ def setPaths(xFname,values):
         aKey = keyValueList[0]
         aVal = keyValueList[1]
         pathtoreplace = rootPath+aKey
-        setXMLXPathValue(doc, pathtoreplace, aKey, aVal)
+        setXMLXPathValue(doc,pathtoreplace,aKey,aVal)
 
-    if 'user_configs' in xFname:
+    if 'UserTemplates' in xFname:
         if overExisting == True:
             fnToWrite = xfName2
         else:
@@ -122,7 +119,7 @@ def setPaths(xFname,values):
 
     else:
         selfscriptpath = os.path.dirname(__file__)
-        userLoc = os.path.join(selfscriptpath,'user_configs')
+        userLoc = os.path.join(selfscriptpath,'UserTemplates')
         if os.path.exists(userLoc) == False:
             os.mkdir(userLoc)
 
@@ -132,7 +129,7 @@ def setPaths(xFname,values):
         fnToWrite = os.path.join(userLoc,baseName)
 
     c = open(fnToWrite, "w")
-    c.write(doc.toxml('UTF-8'))
+    c.write(doc.toprettyxml(encoding='UTF-8'))
     c.close()
     return fnToWrite
 
@@ -610,12 +607,10 @@ class OptimizeRasters(object):
         configVals = arcpy.Parameter(
         displayName='Configuration Values:',
         name='configVals',
-        datatype='Value Table',
+        datatype='GPValueTable',
         parameterType='Optional',
         direction='Input')
         configVals.columns = [['GPString', 'Parameter'], ['GPString', 'Value']]
-        configVals.filters[1].type = 'ValueList'
-        configVals.filters[1].list = []
         configVals.enabled = False
         configVals.category = 'Advanced'
 
@@ -624,6 +619,8 @@ class OptimizeRasters(object):
 
 
     def updateParameters(self, parameters):
+        configParams = parameters[0]
+        configParams.filter.list = returntemplatefiles()
 
         if parameters[13].value == True:
             parameters[14].enabled = True
@@ -638,7 +635,11 @@ class OptimizeRasters(object):
 
                 template_path = os.path.realpath(__file__)
                 _CTEMPLATE_FOLDER = 'Templates'
-                configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
+                configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+                if not os.path.exists(configFN):
+                    _CTEMPLATE_FOLDER = 'UserTemplates'
+                    #configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
+                    configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
                 allValues = returnPaths(configFN)
                 attchValues(parameters[14],allValues)
             else:
@@ -646,7 +647,12 @@ class OptimizeRasters(object):
                 if templateinUse != optTemplates:
                     template_path = os.path.realpath(__file__)
                     _CTEMPLATE_FOLDER = 'Templates'
-                    configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
+                    configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+                    if not os.path.exists(configFN):
+                        _CTEMPLATE_FOLDER = 'UserTemplates'
+                        #configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
+                        configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+
                     allValues = returnPaths(configFN)
                     attchValues(parameters[14],allValues)
                     templateinUse = optTemplates
@@ -721,7 +727,14 @@ class OptimizeRasters(object):
 
                 parameters[7].filter.list = p6List
 
-        pass
+
+        if parameters[14].altered == True:
+                configValList = parameters[14].value
+                aVal = configValList[0][1]
+                parameters[11].enabled = True
+                if ((aVal.strip().lower() == 'clonemrf') or (aVal.strip().lower() == 'cachingmrf')):
+                    parameters[11].enabled = False
+
 
     def updateMessages(self, parameters):
         if parameters[1].altered == True:
@@ -764,10 +777,11 @@ class OptimizeRasters(object):
         optTemplates = parameters[0].valueAsText
         template_path = os.path.realpath(__file__)
         _CTEMPLATE_FOLDER = 'Templates'
-        configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
+        configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
         if os.path.exists(configFN) == False:
-            _CTEMPLATE_FOLDER = 'user_configs'
-            configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
+            _CTEMPLATE_FOLDER = 'UserTemplates'
+            configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+
 
         inType = parameters[1].valueAsText
         inprofiles = parameters[2].valueAsText
@@ -833,4 +847,4 @@ class OptimizeRasters(object):
             return False
         return app.run()
         # ends
-        pass 
+        pass
