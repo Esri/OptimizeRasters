@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160208
+# Version: 20160216
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -37,16 +37,27 @@ def returnDate():
     sTime = str(datetime.time(datetime.today())).split('.')[0].replace(':', '')
     return sDate+sTime
 
-def replaceXMLNodeValue(doc, nodeName, nodeValue) :
-    if (doc == None):
-        return ''
-    node = doc.getElementsByTagName(nodeName)
-    if (node == None or
-        node.length == 0 or
-        node[0].firstChild.nodeType != minidom.Node.TEXT_NODE):
-        return ''
-
-    node[0].firstChild.data = nodeValue
+def setXMLXPathValue(doc, xPath, key, value):
+    if (not doc or
+        not xPath or
+        not key or
+        not value):
+        return False
+    nodes = doc.getElementsByTagName(key)
+    for node in nodes:
+        parents = []
+        c = node
+        while(c.parentNode):
+            parents.insert(0, c.nodeName)
+            c = c.parentNode
+        p = '/'.join(parents)
+        if (p == xPath):
+            if (not node.hasChildNodes()):
+                node.appendChild(doc.createTextNode(value))
+                return True
+            node.firstChild.data = value
+            return True
+    return False
 
 def returntemplatefiles ():
     selfscriptpath = os.path.dirname(__file__)
@@ -92,7 +103,7 @@ def returnjobFiles ():
 
 def setPaths(xFname,values):
     overExisting = True
-    rootPath = '/OptimizeRasters/Defaults/'
+    rootPath = 'OptimizeRasters/Defaults/'
     xfName2 = os.path.normpath(xFname)
     doc = minidom.parse(xfName2)
 
@@ -100,7 +111,7 @@ def setPaths(xFname,values):
         aKey = keyValueList[0]
         aVal = keyValueList[1]
         pathtoreplace = rootPath+aKey
-        replaceXMLNodeValue(doc,pathtoreplace,aVal)
+        setXMLXPathValue(doc, pathtoreplace, aKey, aVal)
 
     if 'user_configs' in xFname:
         if overExisting == True:
@@ -758,8 +769,6 @@ class OptimizeRasters(object):
             _CTEMPLATE_FOLDER = 'user_configs'
             configFN = '{}/{}.xml'.format(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates)
 
-
-
         inType = parameters[1].valueAsText
         inprofiles = parameters[2].valueAsText
         inBucket = parameters[3].valueAsText
@@ -824,4 +833,4 @@ class OptimizeRasters(object):
             return False
         return app.run()
         # ends
-        pass
+        pass 
