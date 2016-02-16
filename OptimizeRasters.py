@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160215
+# Version: 20160216
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -634,8 +634,9 @@ class TIL:
     def addTIL(self, input):        # add (til) files to process later via (fnc: process).
                                     # This when the (til) files are found before the associated (files) could be not found at the (til) location because they may not have been downloaded yet.
         _input = input.replace('\\', '/')
-        self._tils.append(_input)
-        if (not input in self._tils_info):
+        if (not _input in self._tils):
+            self._tils.append(_input)
+        if (not input.lower() in self._tils_info):
             self._tils_info[_input.lower()] = {
             self.CRELATED_FILE_COUNT : 0,
             self.CPROCESSED_FILE_COUNT : 0,
@@ -2120,7 +2121,7 @@ class compression:
     def createaOverview(self, input_file, isBQA = False):
         # gdaladdo.exe -r mode -ro --config COMPRESS_OVERVIEW LZW --config USE_RRD NO  --config TILED YES input 2 4 8 16 32
         get_mode = self.m_user_config.getValue('Mode')
-        if (get_mode is not None):
+        if (get_mode):
             if (get_mode == 'cachingmrf' or
                 get_mode == 'clonemrf' or
                 get_mode == 'splitmrf'):
@@ -2136,11 +2137,14 @@ class compression:
         m_py_factor = '2'
         m_py_sampling = 'average'
         py_factor_ = self.m_user_config.getValue('PyramidFactor')
-        if (py_factor_ is not None):
+        if (py_factor_):
             m_py_factor = py_factor_
         py_sampling_ = self.m_user_config.getValue('PyramidSampling')
-        if (py_sampling_ is not None):
+        if (py_sampling_):
             m_py_sampling = py_sampling_
+            if (m_py_sampling.lower() == 'avg' and
+                input_file.lower().endswith('.til')):
+                    m_py_sampling = 'average'
         m_py_compression = self.m_user_config.getValue('PyramidCompression')
         args = [os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)]
         args.append ('-r')
@@ -2385,7 +2389,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5o'
+    __program_ver__ = 'v1.5p'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3203,7 +3207,6 @@ class Application:
                     t.daemon = True
                     t.start()
                     threads.append(t)
-
                 for t in threads:
                     t.join()
 
