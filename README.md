@@ -9,37 +9,47 @@ MRF files can be read by ArcGIS directly as raster datasets. Further optimizatio
  
 Note that OptimizeRasters uses GDAL_Translate and GDALAddo to perform the conversion and so can read most GDAL readable file formats. There are some difference in versions GDAL and if installed on a machine with ArcGIS 10.4, OptimizeRasters will use a version of the GDAL binaries that is licensed with ArcGIS and include readers for formats such as JPEG2000 using Kakadu. If not installed on an machine with ArcGIS 10.4 then a public version of GDAL is used which cannot read JPEG2000 files.
 ##Installation
-*	Unzip the zip file in C:\ Image_Mgmt_Workflows\
-*	If uploading to s3 or downloading from s3; boto is required to be installed. 
-*	First download pip.py from https://pip.pypa.io/en/latest/installing.html#python-os-support place it in c:\Python27\ArcGIS10.4 and at command line run the following command c:\Python27\ArcGIS10.4\python.exe get-pip.py
-*	Then go to the folder where pip is installed i.e c:\Python27\ArcGIS10.4\Scripts and in the command prompt run the following ( the command window needs to be in the same path where the pip scripts is present) ----- > pip install boto
-*	If you unzip in a different location Update the gdal path in the optimizerastes.xml
+**Prerequisites**
 
-Refer to the user documentation for more command line arguments and various parameters in the configuration file
-## Sample Commands
-Some of the example command lines are 
-Converting TIF to MRF ( input local output Local ) 
-```
-c:\Python27\ArcGIS10.4\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters.py -input=e:\projects\OptimizeRaster\indata -output=e:\projects\OptimizeRaster\outdata -mode=mrf
-```
-Creating Clone MRF
-```
-<<<<<<< HEAD
-c:\Python27\ArcGIS10.4\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters.py -input=e:\projects\OptimizeRaster\outdata -output=e:\projects\OptimizeRaster\cachedata -mode=clonemrf
-=======
-c:\Python27\ArcGIS10.4\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters.py -input=e:\projects\OptimizeRaster\outdata -output=e:\projects\OptimizeRaster\cachedata -mode=clonemrf
->>>>>>> origin/master
- ```
-Creating MRF and uploading to s3 ( make sure you use correct slash and cases for s3 as its case sensitive also s3 and the permission to access the data from that machine) 
-In this case you need to define the s3 output folder and the keys in the config file 
-```
-c:\PYTHON27\ArcGIS10.4\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters.py -input=e:\projects\OptimizeRaster\indata -output=s3bucketfolder/a/s/r -tempoutput=c:\temp\convertdata -s3output=True -mode=mrf
-```
- Creating caching MRF with s3 as input 
-```
-c:\PYTHON27\ArcGIS10.4\python.exe c:\Image_Mgmt_Workflows\OptimizeRasters\OptimizeRasters.py -input=s3bucketfolder/a/s/r -output=e:\projects\OptimizeRaster\s3caching -s3input=True -mode=cachingmrf
-```
+    <Optional> 
+      1. Boto python module is required to read/write to (AWS S3) cloud file system
+         To install (Boto)
+           1. Visit https://pip.pypa.io/en/latest/installing/#python-os-support to install (pip) if not already installed.
+           2. Type in pip install boto from *{PYTHON_FOLDER}*\Scripts to install the Boto module.
+      2. Azure python module is required to read/write to (Microsoft Azure block blob) cloud file system.
+         To install (Azure)
+           1. Visit (https://pypi.python.org/pypi/azure/1.0.3)
 
+**Setup**
+
+    It's recommended to use the setup EXE (OptimizeRastersToolsSetup.exe) found within the (Setup) folder
+    in the (OptimizeRasters-master.zip) file downloaded from Github. However if a manual approach is preferred, 
+    please follow the steps below,
+    1. Download (OptimizeRasters-master.zip) from Github.
+    2. Extract the zip contents to C:\Image_Mgmt_Workflows\ 
+
+**Usage**
+
+    Using a DOS-CMD window.
+    It's assumed the CWD is at C:\Image_Mgmt_Workflows\ and the (python.exe) is in path.
+      1. To convert from TIF to MRF ([*local*]-input->-output[*Local*]) 
+         python.exe OptimizeRasters.py -config=Templates\Imagery_to_TIF_JPEG.xml -input=c:\point_to_a_folder_with_tiffs
+         -output=c:\output_processed_data\ -mode=mrf
+         
+      2. To create a Clone MRF
+         python.exe OptimizeRasters.py -config=Templates\CloneMRF.xml -input=c:\point_to_a_folder_with_tiffs
+         -output=c:\output_processed_data\clone -mode=clonemrf
+         
+      3. To create a MRF and to upload to AWS S3. Note> [To show syntax usage only. Not a working sample]
+         Note> It's assumed the necessary AWS S3 access permissions are in place. Please refer to (OptmizeRasters_UserDoc.docx) for
+         more info for using cloud file storage systems with OptimizeRasters.
+         python.exe OptimizeRasters.py -config=Templates\Imagery_to_TIF_JPEG.xml -input=c:\point_to_a_folder_with_tiffs
+         -cloudupload=true -clouduploadtype=amazon -output=processed_folder/a/b/c -outputprofile=my_permission_keys -mode=mrf
+         
+      4. To create caching MRFs with AWS S3 an input source. Note> [To show syntax usage only. Not a working sample]
+         python.exe OptimizeRasters.py -input=input_folder/a/b/c -output=c:\output_processed_data\caching -clouddownload=true 
+         -clouduploadtype=amazon -mode=cachingmrf
+         
 ## Issues
 
 Find a bug or want to request a new feature?  Please let us know by [submitting an issue](../../issues).
