@@ -28,7 +28,7 @@ Note that OptimizeRasters uses GDAL_Translate and GDALAddo to perform the conver
     1. Download (OptimizeRasters-master.zip) from Github.
     2. Extract the zip contents to C:\Image_Mgmt_Workflows\ 
 
-**Usage**
+##Usage
 
     Using a DOS-CMD window.
     It's assumed the CWD is at C:\Image_Mgmt_Workflows\ and the (python.exe) is in path.
