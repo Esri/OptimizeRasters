@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160216
+# Version: 20160221
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1836,7 +1836,8 @@ class Copy:
                             break
                     if (not _isCpy):
                         continue
-                if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']]):       # skip 'exclude' list items.
+                if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
+                    not file.lower().endswith(CTIL_EXTENSION_)):       # skip 'exclude' list items and always copy (.til) files to destination.
                     if (('exclude' in self.cb_list) == True):
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
@@ -2143,7 +2144,7 @@ class compression:
         if (py_sampling_):
             m_py_sampling = py_sampling_
             if (m_py_sampling.lower() == 'avg' and
-                input_file.lower().endswith('.til')):
+                input_file.lower().endswith(CTIL_EXTENSION_)):
                     m_py_sampling = 'average'
         m_py_compression = self.m_user_config.getValue('PyramidCompression')
         args = [os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)]
@@ -2389,7 +2390,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5p'
+    __program_ver__ = 'v1.5q'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
