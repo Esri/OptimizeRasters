@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160216
+# Version: 20160222
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -31,6 +31,8 @@ import time
 import ConfigParser
 from xml.dom import minidom
 from datetime import datetime
+
+templateinUse = None
 
 def returnDate():
     sDate = str(datetime.date(datetime.today())).replace('-', '')
