@@ -15,7 +15,7 @@ Note that OptimizeRasters uses GDAL_Translate and GDALAddo to perform the conver
       1. Boto python module is required to read/write to (AWS S3) cloud file system
          To install (Boto)
            1. Visit https://pip.pypa.io/en/latest/installing/#python-os-support to install (pip) if not already installed.
-           2. Type in pip install boto from *{PYTHON_FOLDER}*\Scripts to install the Boto module.
+           2. Type in pip install boto from {PYTHON_FOLDER}\Scripts to install the Boto module.
       2. Azure python module is required to read/write to (Microsoft Azure block blob) cloud file system.
          To install (Azure)
            1. Visit (https://pypi.python.org/pypi/azure/1.0.3)
