@@ -8,17 +8,35 @@ OptimizeRasters enables the input and/or output directories to be file systems o
 MRF files can be read by ArcGIS directly as raster datasets. Further optimization can be achieved using Cloned MRF files that reference the MRF index and data files on slower storage, but keep local caches of the data to reduce repeated access. Caching MRF files are similar, but the source can be most GDAL readable files. OptimizeRasters can be used to create such Cloned and Caching MRF files.
  
 Note that OptimizeRasters uses GDAL_Translate and GDALAddo to perform the conversion and so can read most GDAL readable file formats. There are some difference in versions GDAL and if installed on a machine with ArcGIS 10.4, OptimizeRasters will use a version of the GDAL binaries that is licensed with ArcGIS and include readers for formats such as JPEG2000 using Kakadu. If not installed on an machine with ArcGIS 10.4 then a public version of GDAL is used which cannot read JPEG2000 files.
-##Installation
-**Prerequisites**
 
-    <Optional> 
-      1. Boto python module is required to read/write to (AWS S3) cloud file system
-         To install (Boto)
-           1. Visit https://pip.pypa.io/en/latest/installing/#python-os-support to install (pip) if not already installed.
-           2. Type in pip install boto from {PYTHON_FOLDER}\Scripts to install the Boto module.
-      2. Azure python module is required to read/write to (Microsoft Azure block blob) cloud file system.
-         To install (Azure)
-           1. Visit (https://pypi.python.org/pypi/azure/1.0.3)
+##Installation
+**Optional Packages**
+
+    To upload to Amazon S3 and Microsoft Azure there are some third party packages for python that need to be installed. 
+    The easiest way to install these third party packages is by using a tool for installing python packages. 
+    This tool is called PIP. If the version of python installed on your machine is version 2.7.9 and above pip is already installed. 
+    With ArcGIS 10.3.1, the python version is 2.7.8. Therefore pip would need to be installed. 
+
+    Installing PIP. 
+        1. Open this link in a browser.  https://pip.pypa.io/en/latest/installing/
+        2. Under the heading Installing with get-pip.py right click and download the file get-pip.py
+        3. run the command python get-pip.py. 
+        example c:\PYTHON27\ArcGIS10.3\python.exe c:\temp\download\get-pip.py
+   
+    Installing boto (To use Amazon S3).
+        1. Open a command line window. (Start/Run/Cmd)
+        2. Browse to the Scripts folder within the python folder. 
+            example cd c:\PYTHON27\ArcGIS10.3\Scripts
+        3. Type in the line pip install boto 
+
+    Installing Azure.
+        Azure python module is required to read/write to (Microsoft Azure block blob) cloud file system.
+        1. Open a command line window. (Start/Run/Cmd)
+        2. If pip is not installed, install pip first. 
+        3. Browse to the Scripts folder within the python folder. 
+            example cd c:\PYTHON27\ArcGIS10.3\Scripts
+        4. Type in pip install azure
+        5. Browse to the link : https://pypi.python.org/pypi/azure/1.0.3
 
 **Setup**
 
