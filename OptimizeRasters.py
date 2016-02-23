@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160221
+# Version: 20160223
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1581,6 +1581,7 @@ def args_Callback(args, user_data = None):
             if (lerc_prec_):
                 m_lerc_prec = lerc_prec_
             m_nodata_value = user_data[CIDX_USER_CONFIG].getValue('NoDataValue')
+            m_ignorealphaband = getBooleanValue(user_data[CIDX_USER_CONFIG].getValue('IgnoreAlphaBand'))
             m_mode = user_data[CIDX_USER_CONFIG].getValue('Mode')
             m_predictor_ = user_data[CIDX_USER_CONFIG].getValue(CCFG_PREDICTOR)
             if (m_predictor_):
@@ -1625,6 +1626,9 @@ def args_Callback(args, user_data = None):
         args.append ('-co')
         if (m_mode == 'mrf'):   # if the output is (mrf)
             args.append ('QUALITY=%s' % (m_compression_quality))
+            if (m_ignorealphaband):
+                args.append ('-co')
+                args.append ('OPTIONS="MULTISPECTRAL:1"')
         else:
             args.append ('JPEG_QUALITY=%s' % (m_compression_quality))
         args.append ('-co')
@@ -2390,7 +2394,7 @@ class Args:
 
 
 class Application:
-    __program_ver__ = 'v1.5q'
+    __program_ver__ = 'v1.5r'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
