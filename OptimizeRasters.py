@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160223
+# Version: 20160224
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -58,6 +58,7 @@ CRPT_SOURCE = 'SOURCE'
 CRPT_COPIED = 'COPIED'
 CRPT_PROCESSED = 'PROCESSED'
 CRPT_UPLOADED = 'UPLOADED'
+CRPT_HEADER_KEY = 'config'
 
 CRPT_YES = 'yes'
 CRPT_NO = 'no'
@@ -147,7 +148,6 @@ CS3STORAGE_IN = 0
 CS3STORAGE_OUT = 1
 # ends
 
-
 class Base(object):
     # log status types enums
     const_general_text = 0
@@ -169,11 +169,14 @@ class Base(object):
             self._m_log.Message(msg, status)
         if (self._m_msg_callback):
             self._m_msg_callback(msg, status)
-            return
-    def convertToForwardSlash(self, input):
+    def convertToForwardSlash(self, input, endSlash = True):
         if (not input):
             return None
-        return input.replace('\\', '/')
+        _input = input.replace('\\', '/').strip()
+        if (endSlash and
+             not _input.endswith('/')):
+            _input += '/'
+        return _input
     def getBooleanValue(self, value):        # helper function
         if (value is None):
             return False
@@ -438,6 +441,8 @@ class Report:
                 return False
         if (not report_file):
             return False
+        if (not report_file.lower().endswith(self.CJOB_EXT)):
+            return False
         self._report_file = report_file
         if (root):
             _root = root.replace('\\', '/')
@@ -462,16 +467,26 @@ class Report:
         _jobName  = _prefix + "_%04d%02d%02dT%02d%02d%02d%06d" % (_dt.year, _dt.month, _dt.day, \
         _dt.hour, _dt.minute, _dt.second, _dt.microsecond)
         return _jobName
-
     def updateRecordStatus(self, input, type, value):  # input is the (src) path name which is case sensitive.
         if (input is None or
             type is None or
             value is None):
             return False
         _input = input.strip()
-        if (not _input in self._input_list_info):
-            self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_critical_text)
-            return False        # possible internal flow err.
+        _path = os.path.dirname(_input.replace('\\', '/'))
+        if (not _path.endswith('/')):
+            _path += '/'
+        if (_path == self._header['output']):
+            _input  = _input.replace(_path, self._header['input'])
+        (p, e) = os.path.splitext(_input)
+        while(e):
+            _input = '{}{}'.format(p, e)
+            if (_input in self._input_list_info):
+                break
+            (p, e) = os.path.splitext(p)
+        if (not e):
+            self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_warning_text)
+            return False
         _type = type.upper()
         if (not _type in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
             self._base.message('Invalid type ({}) at (Reporter)'.format(type), self._base.const_critical_text)
@@ -480,8 +495,7 @@ class Report:
         if (not _value in [CRPT_YES, CRPT_NO]):
             self._base.message('Invalid value ({}) at (Reporter)'.format(_value), self._base.const_critical_text)
             return False
-
-        self._input_list_info[input][_type] = _value
+        self._input_list_info[_input][_type] = _value
         return True
     def addHeader(self, key, value):
         if (not key or
@@ -695,7 +709,6 @@ class TIL:
                             if (_key_til_info in self._tils_info):
                                 self._tils_info[_key_til_info][self.CRELATED_FILE_COUNT] += 1
                                 self._tils_info[_key_til_info][self.CKEY_FILES].append(file_name)
-                            print ('{}'.format(file_name))
                 _line = _fp.readline()
 ##        self._tils.append (input)
         return True
@@ -1814,7 +1827,6 @@ class Copy:
                             continue
                     if (file.lower().endswith(CTIL_EXTENSION_)):
                         _til_filename = os.path.join(r, file)
-                        print (_til_filename)
                         if (til):
                             til.addTIL(_til_filename)
             for _til in til:
@@ -2124,7 +2136,6 @@ class compression:
             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
     def createaOverview(self, input_file, isBQA = False):
-        # gdaladdo.exe -r mode -ro --config COMPRESS_OVERVIEW LZW --config USE_RRD NO  --config TILED YES input 2 4 8 16 32
         get_mode = self.m_user_config.getValue('Mode')
         if (get_mode):
             if (get_mode == 'cachingmrf' or
@@ -2342,10 +2353,6 @@ def fn_pre_process_copy_default (src, dst, arg):
             til.setOutputPath(src, dst)
     return True
 
-def fn_pre_process_copy(src, dst, arg):
-    g_pre_cpy_list.append({'src' : src, 'dst' : dst})
-    return fn_pre_process_copy_default(src, dst, arg)   # continue with default logic/copying within caller.
-
 def fn_copy_temp_dst(input_source, cb_args, *args):
     fn_cpy_ = Copy()
     file_lst = fn_cpy_.get_group_filelist(input_source)
@@ -2393,8 +2400,8 @@ class Args:
         return _return_str
 
 
-class Application:
-    __program_ver__ = 'v1.5r'
+class Application(object):
+    __program_ver__ = 'v1.6'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2406,6 +2413,7 @@ class Application:
         self._msg_callback = None
         self._log_path = None
         self._base = None
+        self._postMessagesToArcGIS = False
 
     def __load_config__ (self, config):
         global cfg
@@ -2415,6 +2423,19 @@ class Application:
         if (not self._args.config):
             self._args.config = os.path.abspath(os.path.join(os.path.dirname(__file__), CCFG_FILE))
         config_ = self._args.config
+        if (self._args.input and            # Pick up the config file name from a (resume) job file.
+            self._args.input.lower().endswith(Report.CJOB_EXT)):
+            _r = Report(Base());
+            if (not _r.init(self._args.input)):
+                self.writeToConsole('Err. ({})/init'.format(self._args.input))
+                return False
+            if (not _r.read()):
+                self.writeToConsole('Err. ({})/read'.format(self._args.input))
+                return False
+            if (CRPT_HEADER_KEY in _r._header):
+                config_ = _r._header[CRPT_HEADER_KEY]
+            _r = None
+        self._args.config = os.path.abspath(config_)         # replace/force the original path to abspath.
         cfg  = Config()
         ret = cfg.init(config_, 'Defaults')
         if (not ret):
@@ -2482,7 +2503,7 @@ class Application:
                     log.Message('Invalid arg at cmd-line (%s)' % (arg.strip()), const_critical_text)
                     continue
                 if (v != 'none'):
-                    cmd_line.append(arg)
+                    cmd_line.append('-{}'.format(arg.replace('\'', '"').strip()))
 
             log.Message(' '.join(cmd_line), const_general_text);
             log.CloseCategory()
@@ -2555,6 +2576,18 @@ class Application:
             return False
         self._msg_callback = fnptr
 
+    @property
+    def postMessagesToArcGIS(self):
+        return self._postMessagesToArcGIS
+    @postMessagesToArcGIS.setter
+    def postMessagesToArcGIS(self, value):
+        if (not self._base or
+            not self._base._m_log or
+            not hasattr(self._base._m_log, 'isGPRun')):
+            return
+        self._postMessagesToArcGIS = self._base.getBooleanValue(value)
+        self._base._m_log.isGPRun = self.postMessagesToArcGIS
+
     def __jobContentCallback(self, line):
         if (cfg):
             if (cfg.getValue(CLOAD_RESTORE_POINT)):      # ignore if not called from main()
@@ -2576,7 +2609,6 @@ class Application:
         cfg, \
         _rpt, \
         g_rpt, \
-        g_pre_cpy_list, \
         g_is_generate_report, \
         user_args_Callback, \
         S3_storage, \
@@ -2586,7 +2618,6 @@ class Application:
         azure_storage = None
 
         g_rpt = None
-        g_pre_cpy_list = []
         raster_buff = []
         g_is_generate_report = False
 
@@ -2668,11 +2699,9 @@ class Application:
 
         # fix the slashes to force a convention
         if (self._args.input):
-            self._args.input = self._base.convertToForwardSlash(self._args.input)
+            self._args.input = self._base.convertToForwardSlash(self._args.input, not self._args.input.lower().endswith(Report.CJOB_EXT))
         if (self._args.output):
             self._args.output = self._base.convertToForwardSlash(self._args.output)
-            if (not self._args.output.endswith('/')):
-                self._args.output += '/'
         # ends
 
         # read in (interleave)
@@ -2702,17 +2731,15 @@ class Application:
 
         # do we have -tempinput path to copy rasters first before conversion.
         is_input_temp = False
-        if (self._args.tempinput is not None):
-            self._args.tempinput = self._args.tempinput.strip().replace('\\', '/')
-            if (self._args.tempinput.endswith('/') == False):
-                self._args.tempinput += '/'
-            if (os.path.isdir(self._args.tempinput) == False):
+        if (self._args.tempinput):
+            self._args.tempinput = self._base.convertToForwardSlash(self._args.tempinput)
+            if (not os.path.isdir(self._args.tempinput)):
                 try:
                     os.makedirs(self._args.tempinput)
                 except Exception as exp:
-                    self._base.message('Unable to create the -tempinput path (%s) [%s]' % (self._args.tempinput, str(exp)), const_critical_text)
+                    self._base.message('Unable to create the -tempinput path (%s) [%s]' % (self._args.tempinput, str(exp)), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
-            is_input_temp = True         # flag flows to deal with temp-input-path
+            is_input_temp = True         # flag flows to deal with -tempinput
             cfg.setValue('istempinput', is_input_temp)
             cfg.setValue('tempinput', self._args.tempinput)
         # ends
@@ -2720,10 +2747,8 @@ class Application:
         # let's setup -tempoutput
         is_output_temp = False
         if (self._args.tempoutput):
-            self._args.tempoutput = self._args.tempoutput.strip().lower().replace('\\', '/')
-            if (self._args.tempoutput.endswith('/') == False):
-                self._args.tempoutput += '/'
-            if (os.path.isdir(self._args.tempoutput) == False):
+            self._args.tempoutput = self._base.convertToForwardSlash(self._args.tempoutput)
+            if (not os.path.isdir(self._args.tempoutput)):
                 # attempt to create the -tempoutput
                 try:
                     if (not self._args.op or
@@ -2731,7 +2756,7 @@ class Application:
                          self._args.op != COP_UPL)):
                         os.makedirs(self._args.tempoutput)
                 except Exception as exp:
-                    self._base.message ('Unable to create the temp-output-path (%s)\n[%s]' % (self._args.tempoutput, str(exp)), const_critical_text)
+                    self._base.message ('Unable to create the -tempoutput path (%s)\n[%s]' % (self._args.tempoutput, str(exp)), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 # ends
             is_output_temp = True
@@ -2759,8 +2784,8 @@ class Application:
                 return(terminate(self._base, eFAIL))
         # ends
 
-        # take care of missing -input and -output if -s3input==True
-        # Note/Warning: S3 inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3
+        # take care of missing -input and -output if -clouddownload==True
+        # Note/Warning: S3/Azure inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3/Azure
         if (isinput_s3 == True):
             _cloudInput = self._args.input
             if (not _cloudInput):
@@ -2790,7 +2815,7 @@ class Application:
                 elif (_cloud_upload_type == CCLOUD_AZURE):
                     self._args.output = cfg.getValue(COUT_AZURE_PARENTFOLDER, False);
                 else:
-                    self._base.message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
+                    self._base.message ('Invalid value for ({})'.format(COUT_CLOUD_TYPE), self._base.const_critical_text)
                     return(terminate (self._base, eFAIL))
                 if (self._args.output):
                     self._args.output = self._args.output.strip().replace('\\', '/')
@@ -2803,7 +2828,7 @@ class Application:
                 not self._args.input) or
                 (self._args.op and
                 not self._args.input)):
-                self._base.message ('-input/-ouput is not specified!', const_critical_text)
+                self._base.message ('-input/-output is not specified!', self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
 
         # set output in cfg.
@@ -3136,7 +3161,7 @@ class Application:
                 if  (ret == False):
                     self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
-                ret = cpy.processs(self._base.S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy if is_input_temp == True else fn_pre_process_copy_default)
+                ret = cpy.processs(self._base.S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy_default)
                 if (ret == False):
                     self._base.message(CONST_CPY_ERR_1, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
@@ -3149,7 +3174,7 @@ class Application:
                 if (is_input_temp == True and
                     isinput_s3 == False and
                     not cfg.getValue(CLOAD_RESTORE_POINT)):
-                    # if the temp-input path is define, we first copy rasters from the source path to temp-input before any conversion.
+                    # if the -tempinput path is defined, we first copy rasters from the source path to -tempinput before any conversion.
                     self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue('tempinput', False)))
                     cpy_files_ = []
                     for i in range(0, len(files)):
@@ -3172,9 +3197,9 @@ class Application:
                     _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     if (getBooleanValue(cfg.getValue('istempinput'))):
                         _tempinput = cfg.getValue('tempinput', False)
-                        _tempinput = _tempinput[:-1] if _tempinput.endswith('/') else _tempinput
+                        _tempinput = _tempinput[:-1] if _tempinput.endswith('/') and not self._args.input.endswith('/') else _tempinput
                         _src = _src.replace(_tempinput, self._args.input)
-                    g_rpt.addFile(_src)     # prior to this point, rasters get added to g_rpt during the (pull/copy) process if -s3input=true && -tempinput is defined.
+                    g_rpt.addFile(_src)     # prior to this point, rasters get added to g_rpt during the (pull/copy) process if -clouddownload=true && -tempinput is defined.
                 self._base.message ('{}'.format(CRESUME_CREATE_JOB_TEXT).format (_project_path))
                 for arg in vars(self._args):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
@@ -3229,7 +3254,7 @@ class Application:
                             if (not ret):
                                 self._base.message ('Warning. Unable to build pyramids on ({})'.format(til_output_path));
                                 continue
-                            ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path))
+                            ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path), args_Callback)
                             if (not ret):
                                 self._base.message ('Warning. Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path))
                                 continue
@@ -3238,9 +3263,8 @@ class Application:
                                 os.remove('{}.ovr'.format(til_output_path))
                                 os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
                             except Exception as e:
-                                self._base.message ('Warning. ({})'.format(str(e)))
+                                self._base.message ('({})'.format(str(e)), self._base.const_warning_text)
                                 continue
-
                             # upload (til) related files (.idx, .ovr, .lrc)
                             if (is_cloud_upload):
                                 ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
@@ -3257,7 +3281,6 @@ class Application:
                                         mk_filename = os.path.join(r, file).replace('\\', '/')
                                         if (til.fileTILRelated(mk_filename)):
                                             if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
-                                                print ('**{} in failed upload list'.format(mk_filename))
                                                 continue
                                             try:
                                                 self._base.message ('[Del] {}'.format(mk_filename))
@@ -3274,7 +3297,6 @@ class Application:
             # let's clean up the input-temp if has been used.
             # ends
         # ends
-
 
         #return(terminate(self._base, eOK));
 
@@ -3323,29 +3345,6 @@ class Application:
                 ext = ext.lower()
                 if (cfg_keep_original_ext == False):
                     output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
-
-                # does the input (mrf) have the required associate(s) e.g. (idx) file?
-                # This is a simple check to make sure, we're only dealing with valid (mrf) formats.
-                # Note: Below code has been disabled until a later stage (20150329).
-        ##        idx_file = input_file
-        ##        is_idx_file = False
-        ##        s3_prefix = cfg.getValue(CIN_S3_PREFIX)
-        ##        if (s3_prefix and
-        ##            o_S3_storage and
-        ##            idx_file.startswith(s3_prefix)):
-        ##            idx_file = '%s.idx' % (os.path.splitext(input_file[len(s3_prefix):])[0])
-        ##            for k in o_S3_storage.bucketupload.list(idx_file):
-        ##                is_idx_file = not is_idx_file
-        ##                break
-        ##        else:
-        ##            try:
-        ##                is_idx_file = os.path.exists('%s.idx' % (os.path.splitext(input_file)[0]))
-        ##            except:
-        ##                pass
-        ##        if (not is_idx_file):
-        ##            self._base.message ('%s looks like an invalid/incomplete (MRF) file. Skipping.' % (input_file), const_warning_text)
-        ##            continue
-                # ends
                 if (cfg_mode != 'splitmrf'):     # uses GDAL utilities
                     ret = comp.compress(input_file, output_file, args_Callback_for_meta)
                 else:
@@ -3354,7 +3353,6 @@ class Application:
                     except Exception as e:
                         self._base.message ('[CPY] %s (%s)' % (input_file, str(e)))
                         continue
-
                 # let's deal with ops if the (cache) folder is defined at the cmd-line
                 input_ = output_file.replace('\\', '/').split('/')
                 f, e = os.path.splitext(input_[len(input_) - 1])
@@ -3458,7 +3456,7 @@ class Application:
         # ends
 
         if (not raster_buff):
-            self._base.message ('No input rasters to process..', const_warning_text);
+            self._base.message ('No input rasters to process..', self._base.const_warning_text);
         # ends
 
         _status = eOK
@@ -3480,7 +3478,7 @@ class Application:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', help='Processing mode/output format', dest='mode');
-    parser.add_argument('-input', help='Input raster files directory', dest='input');
+    parser.add_argument('-input', help='Input raster files directory/job file to resume', dest='input');
     parser.add_argument('-output', help='Output directory', dest='output');
     parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='subs');
     parser.add_argument('-cache', help='cache output directory', dest='cache');
