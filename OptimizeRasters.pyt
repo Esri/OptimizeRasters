@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160222
+# Version: 20160224
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -282,12 +282,6 @@ class ResumeJobs(object):
         """Set whether tool is licensed to execute."""
         return True
 
-    def messages (self, msg, status):
-        _msg = 'log-msg: {}'.format(msg)
-        if (status == 2):
-            return (arcpy.AddError(_msg))
-        return (arcpy.AddMessage (_msg))
-
     def execute(self, parameters, messages):
         CORJOB = '.orjob'
         args = {}
@@ -300,13 +294,14 @@ class ResumeJobs(object):
             arcpy.AddError('Err. OptimizeRasters job file ({}) is not found!'.format(configFN));
             return False
         args['input'] = configFN
+
        # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)
-        app.registerMessageCallback(self.messages)
         if (not app.init()):
-            self.messages ('Err. Unable to initialize (OptimizeRasters module)', 2)
+            arcpy.AddError ('Err. Unable to initialize (OptimizeRasters module)')
             return False
+        app.postMessagesToArcGIS = True
         return app.run()
         # ends
 
@@ -429,10 +424,6 @@ class ProfileEditor(object):
     def isLicensed(parameters):
         """Set whether tool is licensed to execute."""
         return True
-
-    def messages (self, msg, status):
-
-        pass
 
     def execute(self, parameters, messages):
 
@@ -767,12 +758,6 @@ class OptimizeRasters(object):
         """Set whether tool is licensed to execute."""
         return True
 
-    def messages (self, msg, status):
-        _msg = 'log-msg: {}'.format(msg)
-        if (status == 2):
-            return (arcpy.AddError(_msg))
-        return (arcpy.AddMessage (_msg))
-
     def execute(self, parameters, messages):
         args = {}
 
@@ -843,10 +828,9 @@ class OptimizeRasters(object):
         # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)
-        app.registerMessageCallback(self.messages)
         if (not app.init()):
-            self.messages ('Err. Unable to initialize (OptimizeRasters module)', 2)
+            arcpy.AddError ('Err. Unable to initialize (OptimizeRasters module)')
             return False
+        app.postMessagesToArcGIS = True
         return app.run()
         # ends
-        pass
