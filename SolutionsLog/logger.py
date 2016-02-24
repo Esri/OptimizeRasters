@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: Logger.py
 # Description: Class to log status from components to log files.
-# Version: 20150917
+# Version: 20160223
 # Requirements: ArcGIS 10.1 SP1
 # Author: Esri Imagery Workflows team
 #------------------------------------------------------------------------------
@@ -50,6 +50,7 @@ class Logger:
         self.logFileName = ''
 
         self.isGPRun = False
+        self.isPrint = True
 
     @property
     def LogNamePrefix(self):
@@ -135,15 +136,20 @@ class Logger:
 
             _message = 'log-' + errorTypeText + ': ' + message     #print out error message to console while logging.
 
-            if (self.isGPRun == True):
+            if (self.isGPRun):
                 try:
                     import arcpy
-                    arcpy.AddMessage(_message)
+                    if (messageType == self.const_warning_text):
+                        arcpy.AddWarning(_message)
+                    elif (messageType == self.const_critical_text):
+                        arcpy.AddWarning(_message)      # arcpy.AddError causes a crash. For now, all critical errors are shown as warnings.
+                    else:
+                        arcpy.AddMessage(_message)
                 except:
                     pass
             else:
-                print (_message)
-
+                if (self.isPrint):          # via (self.isPrint) clients can disable the default printToConsole/print
+                    print (_message)        # if a client side msgCallback has been set.
             return True
 
     def WriteLog(self, project):
