@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160224
+# Version: 20160301
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -76,6 +76,7 @@ CDEL_DELAY_SECS = 20
 
 CPRJ_NAME = 'ProjectName'
 CLOAD_RESTORE_POINT = '__LOAD_RESTORE_POINT__'
+CCMD_ARG_INPUT = '__CMD_ARG_INPUT__'
 
 # utility const
 CSIN_UPL = 'SIN_UPL'
@@ -136,6 +137,8 @@ CCFG_GDAL_PATH = 'GDALPATH'
 
 # til related
 CTIL_EXTENSION_ = '.til'
+CCACHE_EXT =  '.mrf_cache'
+CMRF_DOC_ROOT = 'MRF_META'
 # ends
 
 # global dbg flags
@@ -368,7 +371,8 @@ class UpdateMRF:
                                         if (self._base):
                                             self._base.message('Updating ({}) failed!'.format(_mk_copy_path), self._base.const_critical_text)
                                 continue
-                            if (_mk_path.lower().endswith(self._or_mode)):
+                            if (_mk_path.lower().endswith(self._or_mode) or
+                                _mk_path.lower().endswith('.ovr')):
                                 continue
                             shutil.copy(_mk_path, _mk_copy_path)
                         except Exception as e:
@@ -377,49 +381,80 @@ class UpdateMRF:
                             continue
     def update(self, output):
         try:
+            _CCACHE_EXT =  '.mrf_cache'
+            _CDOC_ROOT = 'MRF_META'
             comp_val =  None         # for (splitmrf)
-            f, ext = os.path.splitext(os.path.basename(self._input))
-            content = None
-            with open(self._input, "r") as rfptr:
-                content = rfptr.read()
-                key =  '<MRF_META>'
-                pos = content.find(key)
-                if (pos == -1):
-                    raise Exception('{} not found!'.format(key))
-                pos += len(key)
-                _rasterSource = self._input
-                if (self._outputURLPrefix and
-                    self._homePath):
-                    _rasterSource  = '{}/{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
-                content = content[:pos] + '\n<CachedSource>\n<Source>{}</Source>\n</CachedSource>{}'.format(_rasterSource, content[pos:])
-                if (self._mode):
-                    if (self._mode.startswith('mrf')):
-                        content = content.replace('<Source>', '<Source clone="true">')
-                    elif(self._mode == 'splitmrf'):
-                        CONST_LBL_COMP = '<Compression>'
-                        comp_indx = content.find(CONST_LBL_COMP)
-                        if (comp_indx != -1):
-                            comp_val = content[comp_indx + len(CONST_LBL_COMP): content.find(CONST_LBL_COMP.replace('<', '</'))].lower()
-            key = '<Raster>'
-            pos = content.find(key)
-            if (pos != -1):
-                pos += len(key)
-                cache_output = os.path.dirname(output)
-                if (self._cachePath):
-                    cache_output = self._cachePath
-                rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, ''), '%s.mrf_cache' % (f)).replace('\\', '/')
-                if (comp_val):
-                    extensions_lup = {
-                    'lerc' : {'data' : 'lrc', 'index' : 'idx' }
-                    }
-                    f, e =  os.path.splitext(self._input)
-                    if (comp_val in extensions_lup):
-                        rep_data_file = '%s.%s' % (f, extensions_lup[comp_val]['data'])
-                        rep_indx_file = '%s.%s' % (f, extensions_lup[comp_val]['index'])
-                content = content[:pos] + '<DataFile>%s</DataFile>\n<IndexFile>%s</IndexFile>' % (rep_data_file, rep_indx_file) + content[pos:]
-            if (content):
-                with open (output, "w") as wfptr:
-                    wfptr.write(content)
+            doc = minidom.parse(self._input)
+            _rasterSource = self._input
+            if (self._outputURLPrefix and
+                self._homePath):
+                _rasterSource  = '{}/{}'.format(self._outputURLPrefix, _rasterSource.replace(self._output if self._cachePath else self._homePath, ''))
+            nodeMeta = doc.getElementsByTagName(_CDOC_ROOT)
+            nodeRaster = doc.getElementsByTagName('Raster')
+            if (not nodeMeta or
+                not nodeRaster):
+                raise Exception('Err. Invalid header')
+            cachedNode = doc.getElementsByTagName('CachedSource')
+            if (not cachedNode):
+                cachedNode.append(doc.createElement('CachedSource'))
+                nodeSource = doc.createElement('Source')
+                nodeSource.appendChild(doc.createTextNode(_rasterSource))
+                cachedNode[0].appendChild(nodeSource)
+                nodeMeta[0].insertBefore(cachedNode[0], nodeRaster[0])
+            if (self._mode):
+                if (self._mode.startswith('mrf') or
+                    self._mode == 'clonemrf'):
+                    node = doc.getElementsByTagName('Source')
+                    if (node):
+                        node[0].setAttribute('clone', 'true')
+                elif(self._mode == 'splitmrf'):
+                    CONST_LBL_COMP = 'Compression'
+                    node = doc.getElementsByTagName(CONST_LBL_COMP)
+                    if (node):
+                        if (node[0].hasChildNodes()):
+                            comp_val = node[0].firstChild.nodeValue.lower()
+            cache_output = self._base.convertToForwardSlash(os.path.dirname(output))
+            if (self._cachePath):
+                cache_output = self._cachePath
+            if (not self._base.getUserConfiguration):
+                raise Exception('Err/Internal. UpdateMRF/getUserConfiguration')
+            cacheSubFolders = ''
+            if (self._cachePath):
+                cacheSubFolders = self._base.convertToForwardSlash(os.path.dirname(output)).replace(self._output if self._cachePath else self._homePath, '')
+            (f, ext) = os.path.splitext(os.path.basename(self._input))
+            rep_data_file = rep_indx_file = '{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)
+            nodeData = nodeIndex = None
+            if (comp_val):
+                extensions_lup = {
+                'lerc' : {'data' : '.lrc', 'index' : '.idx' }
+                }
+            nodeData = nodeRaster[0].getElementsByTagName('DataFile')
+            if (not nodeData):
+                nodeData.append(doc.createElement('DataFile'))
+                nodeData[0].appendChild(doc.createTextNode(''))
+                nodeRaster[0].appendChild(nodeData[0])
+            nodeIndex = nodeRaster[0].getElementsByTagName('IndexFile')
+            if (not nodeIndex):
+                nodeIndex.append(doc.createElement('IndexFile'))
+                nodeIndex[0].appendChild(doc.createTextNode(''))
+                nodeRaster[0].appendChild(nodeIndex[0])
+            if (nodeData):
+                if (comp_val and
+                    comp_val in extensions_lup):
+                    rep_data_file = rep_data_file.replace(_CCACHE_EXT, extensions_lup[comp_val]['data'])
+                nodeData[0].firstChild.nodeValue = rep_data_file
+            if (nodeIndex):
+                if (comp_val and
+                    comp_val in extensions_lup):
+                    rep_indx_file = rep_indx_file.replace(_CCACHE_EXT, extensions_lup[comp_val]['index'])
+                nodeIndex[0].firstChild.nodeValue = rep_indx_file
+            with open (output, "w") as c:
+                _mrfBody = doc.toxml().replace('&quot;', '"')       # GDAL mrf driver can't handle XML entity names.
+                _indx = _mrfBody.find ('<{}>'.format(_CDOC_ROOT))
+                if (_indx == -1):
+                    raise Exception('Err. Invalid MRF/header')
+                _mrfBody = _mrfBody[_indx:]
+                c.write(_mrfBody)
         except Exception as e:
             if (self._base):
                 self._base.message('Updating ({}) was not successful!\n{}'.format(output, str(e)), self._base.const_critical_text)
@@ -2401,7 +2436,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6'
+    __program_ver__ = 'v1.6a'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2702,6 +2737,8 @@ class Application(object):
             self._args.input = self._base.convertToForwardSlash(self._args.input, not self._args.input.lower().endswith(Report.CJOB_EXT))
         if (self._args.output):
             self._args.output = self._base.convertToForwardSlash(self._args.output)
+        if (self._args.cache):
+            self._args.cache = self._base.convertToForwardSlash(self._args.cache)
         # ends
 
         # read in (interleave)
@@ -3178,7 +3215,7 @@ class Application(object):
                     self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue('tempinput', False)))
                     cpy_files_ = []
                     for i in range(0, len(files)):
-                        get_dst_path = files[0]['dst'].replace(self._args.output if cfg.getValue('tempoutput', False) is None else cfg.getValue('tempoutput', False), cfg.getValue('tempinput', False))
+                        get_dst_path = files[i]['dst'].replace(self._args.output if cfg.getValue('tempoutput', False) is None else cfg.getValue('tempoutput', False), cfg.getValue('tempinput', False))
                         cpy_files_.append(
                         {
                         'src' : files[i]['src'],
@@ -3248,15 +3285,15 @@ class Application(object):
                         if (til.isAllFilesProcessed(_til)):
                             til_output_path = til.getOutputPath(_til)
                             if (not til_output_path):
-                                self._base.message ('Warning. TIL output-path returned empty/Internal error');
+                                self._base.message ('TIL output-path returned empty/Internal error', self._base.const_warning_text);
                                 continue
                             ret = comp.createaOverview(til_output_path)
                             if (not ret):
-                                self._base.message ('Warning. Unable to build pyramids on ({})'.format(til_output_path));
+                                self._base.message ('Unable to build pyramids on ({})'.format(til_output_path), self._base.const_warning_text);
                                 continue
                             ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path), args_Callback)
                             if (not ret):
-                                self._base.message ('Warning. Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path))
+                                self._base.message ('Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path), self._base.const_warning_text)
                                 continue
                             # let's rename (.mrf) => (.ovr)
                             try:
@@ -3265,6 +3302,26 @@ class Application(object):
                             except Exception as e:
                                 self._base.message ('({})'.format(str(e)), self._base.const_warning_text)
                                 continue
+                            # update .ovr file updates at -clonepath
+                            try:
+                                if (self._args.clonepath):
+                                    _clonePath = til_output_path.replace(self._args.output, '')
+                                    _mk_input_path = os.path.join(self._args.clonepath, '{}.mrf'.format(_clonePath))
+                                    doc = minidom.parse(_mk_input_path)
+                                    xmlString = doc.toxml()
+                                    xmlString = xmlString.replace('.mrf<', '.ovr<')
+                                    xmlString = xmlString.replace('.{}'.format(CCACHE_EXT), '.ovr.{}'.format(CCACHE_EXT))
+                                    _indx = xmlString.find ('<{}>'.format(CMRF_DOC_ROOT))
+                                    if (_indx == -1):
+                                        raise Exception('Err. Invalid MRF/header')
+                                    xmlString = xmlString[_indx:]
+                                    _mk_save_path = '{}{}.ovr'.format(self._args.clonepath, _clonePath.replace('.mrf', ''))
+                                    with open (_mk_save_path, 'w+') as _fpOvr:
+                                        _fpOvr.write(xmlString)
+                            except Exception as e:
+                                self._base.message ('Unable to update .ovr for [{}] ({})'.format(til_output_path, str(e)), self._base.const_warning_text)
+                                continue
+                            # ends
                             # upload (til) related files (.idx, .ovr, .lrc)
                             if (is_cloud_upload):
                                 ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
@@ -3334,6 +3391,7 @@ class Application(object):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write();
                 self._args.op = None
+                cfg.setValue(CCMD_ARG_INPUT, self._args.input)      # preserve the original -input path
                 self._args.input = _project_path
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
@@ -3353,46 +3411,22 @@ class Application(object):
                     except Exception as e:
                         self._base.message ('[CPY] %s (%s)' % (input_file, str(e)))
                         continue
-                # let's deal with ops if the (cache) folder is defined at the cmd-line
+                # let's deal with ops if the (-cache) folder is defined at the cmd-line
                 input_ = output_file.replace('\\', '/').split('/')
                 f, e = os.path.splitext(input_[len(input_) - 1])
                 if (os.path.exists(output_file) == False):
                     continue
                 # update .mrf.
-                try:
-                    comp_val =  None         # for (splitmrf)
-                    with open(output_file, "r") as c:
-                        content = c.read()
-                        if (cfg_mode == 'clonemrf'):
-                            if (ext != '.tif'):
-                                content = content.replace('<Source>', '<Source clone="true">')
-                                with open (output_file, "w") as c:
-                                    c.write(content)
-                        elif(cfg_mode == 'splitmrf'):
-                            CONST_LBL_COMP = '<Compression>'
-                            comp_indx = content.find(CONST_LBL_COMP)
-                            if (comp_indx != -1):
-                                comp_val = content[comp_indx + len(CONST_LBL_COMP): content.find(CONST_LBL_COMP.replace('<', '</'))].lower()
-                    key = '<Raster>'
-                    pos = content.find(key)
-                    if (pos != -1):
-                        pos += len(key)
-                        cache_output = os.path.dirname(output_file)
-                        if (self._args.cache):
-                            cache_output = self._args.cache
-                        rep_data_file = rep_indx_file = os.path.join(os.path.join(cache_output, ''), '%s.mrf_cache' % (f)).replace('\\', '/')
-                        if (not comp_val is None):
-                            f, e =  os.path.splitext(input_file)
-                            if (comp_val in extensions_lup):
-                                rep_data_file = '%s.%s' % (f, extensions_lup[comp_val]['data'])
-                                rep_indx_file = '%s.%s' % (f, extensions_lup[comp_val]['index'])
-                        content = content[:pos] + '<DataFile>%s</DataFile>\n<IndexFile>%s</IndexFile>' % (rep_data_file, rep_indx_file) + content[pos:]
-                        with open (output_file, "w") as c:
-                            c.write(content)
-                except Exception as exp:
-                    self._base.message ('Error: Updating (%s) was not successful!\n%s' % (output_file, str(exp)));
+                updateMRF = UpdateMRF(self._base)
+                _output_home_path = self._args.output
+                if (self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
+                    _output_home_path = cfg.getValue('tempoutput', False)
+                if (updateMRF.init(output_file, output_file, cfg.getValue('Mode'),
+                    self._args.cache, _output_home_path, cfg.getValue(COUT_VSICURL_PREFIX, False))):
+                    if (not updateMRF.update(output_file)):
+                        self._base.message ('Updating ({}) was not successful!'.format(output_file));
+                        continue
                 # ends
-
         # do we have failed upload files on list?
         if (is_cloud_upload):
             if (cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON):
@@ -3438,7 +3472,7 @@ class Application(object):
                         _fptr = None
         # ends
 
-        # let's clean-up rasters @ temp input path
+        # let's clean-up rasters @ -tempinput path
         dbg_delete = True
         if (dbg_delete == True):
             if (is_input_temp == True and
