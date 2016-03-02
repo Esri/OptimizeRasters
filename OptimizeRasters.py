@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160301
+# Version: 20160302
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -354,7 +354,12 @@ class UpdateMRF:
             if (r == input_folder):
                 for _file in f:
                     if (_file.lower().endswith('.lrc') or
-                        _file.lower().endswith('.idx')):
+                        _file.lower().endswith('.idx') or
+                        _file.lower().endswith('.pjg') or
+                        _file.lower().endswith('.ppng') or
+                        _file.lower().endswith('.pft') or
+                        _file.lower().endswith('.pjp') or
+                        _file.lower().endswith('.pzp')):
                         continue
                     _mk_path = r + '/' + _file
                     if (_mk_path.startswith(_prefix)):
@@ -388,7 +393,7 @@ class UpdateMRF:
             _rasterSource = self._input
             if (self._outputURLPrefix and
                 self._homePath):
-                _rasterSource  = '{}/{}'.format(self._outputURLPrefix, _rasterSource.replace(self._output if self._cachePath else self._homePath, ''))
+                _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
             nodeMeta = doc.getElementsByTagName(_CDOC_ROOT)
             nodeRaster = doc.getElementsByTagName('Raster')
             if (not nodeMeta or
@@ -1542,7 +1547,7 @@ class S3Storage:
                             if (rep.endswith('/') == False):
                                 rep += '/'
                             if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
-                                rep = self.m_user_config.getValue('tempoutput')
+                                rep = self.m_user_config.getValue('tempoutput', False)
                             upl_file = mk_path.replace(rep, self.remote_path if self.m_user_config.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
                         S3 = S3Upload_(self._base, self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
@@ -1779,7 +1784,7 @@ def getSourcePathUsingTempOutput(input):
         return None
     _mk_path = input.replace(cfg.getValue('tempoutput', False), '')
     _indx  = -1
-    if (True in [_mk_path.lower().endswith(i) for i in ['.idx', '.lrc', '.aux.xml']]):       # if any one of these extensions fails,
+    if (True in [_mk_path.lower().endswith(i) for i in ['.idx', '.lrc', '.pjg', '.pzp', '.pft', '.ppng', '.pjp', '.aux.xml']]):       # if any one of these extensions fails,
         _indx = _mk_path.rfind('.')                                                          # the main (raster) file upload entry in (Reporter) would be set to (no) denoting a failure in one of its associated files.
     if (_indx == -1):
         return (_rpt.findExact('{}{}'.format(_rpt.root, _mk_path)))
@@ -2436,7 +2441,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6a'
+    __program_ver__ = 'v1.6b'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2485,7 +2490,7 @@ class Application(object):
 
         exclude_ext_ = cfg.getValue(CCFG_EXCLUDE_NODE, False)
         if (exclude_ext_ is None):
-            exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp' # defaults: in-code if defaults are missing in cfg file.
+            exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp,pjg' # defaults: in-code if defaults are missing in cfg file.
 
         cfg.setValue(CCFG_RASTERS_NODE, formatExtensions(rasters_ext_))
         cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
