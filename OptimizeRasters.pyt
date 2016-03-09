@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160224
+# Version: 20160309
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -137,7 +137,7 @@ def setPaths(xFname,values):
 
 def returnPaths(xFname):
 
-    keyList = ['Mode','RasterFormatFilter','ExcludeFilter','Compression','Quality','LERCPrecision','BuildPyramids','PyramidFactor','PyramidSampling','PyramidCompression','NoDataValue','BlockSize','Scale','KeepExtension']
+    keyList = ['Mode','RasterFormatFilter','ExcludeFilter','Compression','Quality','LERCPrecision','BuildPyramids','PyramidFactor','PyramidSampling','PyramidCompression','NoDataValue','BlockSize','Scale','KeepExtension','Threads']
 
     xfName2 = os.path.normpath(xFname)
 
