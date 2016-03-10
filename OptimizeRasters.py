@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# Copyright 2015 Esri
+# Copyright 2016 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160302
+# Version: 20160310
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -697,7 +697,6 @@ class TIL:
             self.CKEY_FILES : []
             }
         return True
-
     def fileTILRelated(self, input):
         idx = input.split('.')
         f = idx[0]
@@ -2441,7 +2440,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6b'
+    __program_ver__ = 'v1.6c'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3288,47 +3287,54 @@ class Application(object):
                         if (not til.isAllFilesProcessed(_til)):
                             self._base.message ('TIL> Not yet completed for ({})'.format(_til));
                         if (til.isAllFilesProcessed(_til)):
+                            _doPostProcessing = True
+                            if (cfg.getValue(CLOAD_RESTORE_POINT)):
+                                if (_rpt.getRecordStatus(_til, CRPT_PROCESSED) == CRPT_YES):
+                                    self._base.message ('{} {}'.format(CRESUME_MSG_PREFIX, _til))
+                                    _doPostProcessing = False
                             til_output_path = til.getOutputPath(_til)
-                            if (not til_output_path):
-                                self._base.message ('TIL output-path returned empty/Internal error', self._base.const_warning_text);
-                                continue
-                            ret = comp.createaOverview(til_output_path)
-                            if (not ret):
-                                self._base.message ('Unable to build pyramids on ({})'.format(til_output_path), self._base.const_warning_text);
-                                continue
-                            ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path), args_Callback)
-                            if (not ret):
-                                self._base.message ('Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path), self._base.const_warning_text)
-                                continue
-                            # let's rename (.mrf) => (.ovr)
-                            try:
-                                os.remove('{}.ovr'.format(til_output_path))
-                                os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
-                            except Exception as e:
-                                self._base.message ('({})'.format(str(e)), self._base.const_warning_text)
-                                continue
-                            # update .ovr file updates at -clonepath
-                            try:
-                                if (self._args.clonepath):
-                                    _clonePath = til_output_path.replace(self._args.output, '')
-                                    _mk_input_path = os.path.join(self._args.clonepath, '{}.mrf'.format(_clonePath))
-                                    doc = minidom.parse(_mk_input_path)
-                                    xmlString = doc.toxml()
-                                    xmlString = xmlString.replace('.mrf<', '.ovr<')
-                                    xmlString = xmlString.replace('.{}'.format(CCACHE_EXT), '.ovr.{}'.format(CCACHE_EXT))
-                                    _indx = xmlString.find ('<{}>'.format(CMRF_DOC_ROOT))
-                                    if (_indx == -1):
-                                        raise Exception('Err. Invalid MRF/header')
-                                    xmlString = xmlString[_indx:]
-                                    _mk_save_path = '{}{}.ovr'.format(self._args.clonepath, _clonePath.replace('.mrf', ''))
-                                    with open (_mk_save_path, 'w+') as _fpOvr:
-                                        _fpOvr.write(xmlString)
-                            except Exception as e:
-                                self._base.message ('Unable to update .ovr for [{}] ({})'.format(til_output_path, str(e)), self._base.const_warning_text)
-                                continue
-                            # ends
+                            if (_doPostProcessing):
+                                if (not til_output_path):
+                                    self._base.message ('TIL output-path returned empty/Internal error', self._base.const_warning_text);
+                                    continue
+                                ret = comp.createaOverview(til_output_path)
+                                if (not ret):
+                                    self._base.message ('Unable to build pyramids on ({})'.format(til_output_path), self._base.const_warning_text);
+                                    continue
+                                ret = comp.compress('{}.ovr'.format(til_output_path), '{}.mrf'.format(til_output_path), args_Callback)
+                                if (not ret):
+                                    self._base.message ('Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path), self._base.const_warning_text)
+                                    continue
+                                # let's rename (.mrf) => (.ovr)
+                                try:
+                                    os.remove('{}.ovr'.format(til_output_path))
+                                    os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
+                                except Exception as e:
+                                    self._base.message ('({})'.format(str(e)), self._base.const_warning_text)
+                                    continue
+                                # update .ovr file updates at -clonepath
+                                try:
+                                    if (self._args.clonepath):
+                                        _clonePath = til_output_path.replace(self._args.output, '')
+                                        _mk_input_path = os.path.join(self._args.clonepath, '{}.mrf'.format(_clonePath))
+                                        doc = minidom.parse(_mk_input_path)
+                                        xmlString = doc.toxml()
+                                        xmlString = xmlString.replace('.mrf<', '.ovr<')
+                                        xmlString = xmlString.replace('.{}'.format(CCACHE_EXT), '.ovr.{}'.format(CCACHE_EXT))
+                                        _indx = xmlString.find ('<{}>'.format(CMRF_DOC_ROOT))
+                                        if (_indx == -1):
+                                            raise Exception('Err. Invalid MRF/header')
+                                        xmlString = xmlString[_indx:]
+                                        _mk_save_path = '{}{}.ovr'.format(self._args.clonepath, _clonePath.replace('.mrf', ''))
+                                        with open (_mk_save_path, 'w+') as _fpOvr:
+                                            _fpOvr.write(xmlString)
+                                except Exception as e:
+                                    self._base.message ('Unable to update .ovr for [{}] ({})'.format(til_output_path, str(e)), self._base.const_warning_text)
+                                    continue
+                                # ends
                             # upload (til) related files (.idx, .ovr, .lrc)
-                            if (is_cloud_upload):
+                            if (is_cloud_upload and
+                                S3_storage):
                                 ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
                                 retry_failed_lst  = []
                                 failed_upl_lst = S3_storage.getFailedUploadList()
@@ -3352,7 +3358,6 @@ class Application(object):
                                 # ends
                             # ends
                 # ends
-
                 s = m
                 if s == files_len or s == 0:
                     break
@@ -3360,18 +3365,10 @@ class Application(object):
             # ends
         # ends
 
-        #return(terminate(self._base, eOK));
-
         # block to deal with meta-data ops.
         if (is_caching == True and
             do_pyramids != CCMD_PYRAMIDS_ONLY):
             self._base.message ('\nProcessing caching operations...')
-
-            # set data, index extension lookup
-            extensions_lup = {
-            'lerc' : {'data' : 'lrc', 'index' : 'idx' }
-            }
-            # ends
             if (isinput_s3 == False):
                 raster_buff = []
                 if (cfg_mode == 'splitmrf'):        # set explicit (exclude list) for mode (splitmrf)
@@ -3384,7 +3381,6 @@ class Application(object):
                 if (ret == False):
                     self._base.message(CONST_CPY_ERR_1, const_critical_text);
                     return(terminate(self._base, eFAIL))
-
             if (g_is_generate_report and
                 g_rpt):
                 for req in raster_buff:
@@ -3433,7 +3429,8 @@ class Application(object):
                         continue
                 # ends
         # do we have failed upload files on list?
-        if (is_cloud_upload):
+        if (is_cloud_upload and
+            S3_storage):
             if (cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON):
                 failed_upl_lst = S3_storage.getFailedUploadList()
                 if (failed_upl_lst):
@@ -3455,7 +3452,6 @@ class Application(object):
                         # the following files will be logged as unsuccessful uploads to output cloud
                         if (not ret):
                             if (_fptr): _fptr.write('{}\n'.format(v['local']))
-
                             if (_rpt):      # Do we have an input file list?
                                 if ('local' in v):
                                     _local = v['local']
