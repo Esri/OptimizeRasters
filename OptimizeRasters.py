@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160316
+# Version: 20160317
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -58,6 +58,7 @@ CRPT_SOURCE = 'SOURCE'
 CRPT_COPIED = 'COPIED'
 CRPT_PROCESSED = 'PROCESSED'
 CRPT_UPLOADED = 'UPLOADED'
+CRPT_URL_TRUENAME = 'URL_NAME'
 CRPT_HEADER_KEY = 'config'
 
 CRPT_YES = 'yes'
@@ -77,6 +78,8 @@ CDEL_DELAY_SECS = 20
 CPRJ_NAME = 'ProjectName'
 CLOAD_RESTORE_POINT = '__LOAD_RESTORE_POINT__'
 CCMD_ARG_INPUT = '__CMD_ARG_INPUT__'
+
+CUSR_TEMPINPUT = 'tempinput'
 
 # utility const
 CSIN_UPL = 'SIN_UPL'
@@ -99,6 +102,7 @@ CCACHE_PATH = 'cache'
 CRESUME = '_RESUME_'
 CRESUME_MSG_PREFIX = '[Resume]'
 CRESUME_ARG = 'resume'
+CRESUME_HDR_INPUT = 'input'
 # ends
 
 CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
@@ -177,7 +181,8 @@ class Base(object):
             return None
         _input = input.replace('\\', '/').strip()
         if (endSlash and
-             not _input.endswith('/')):
+             not _input.endswith('/') and
+             not _input.lower().startswith('http')):
             _input += '/'
         return _input
     def getBooleanValue(self, value):        # helper function
@@ -379,7 +384,8 @@ class UpdateMRF:
                             if (_mk_path.lower().endswith(self._or_mode) or
                                 _mk_path.lower().endswith('.ovr')):
                                 continue
-                            shutil.copy(_mk_path, _mk_copy_path)
+                            if (not os.path.exists(_mk_copy_path)):
+                                shutil.copy(_mk_path, _mk_copy_path)
                         except Exception as e:
                             if (self._base):
                                 self._base.message('-clonepath/{}'.format(str(e)), self._base.const_critical_text)
@@ -475,6 +481,7 @@ class Report:
         self._input_list_info = {}
         self._header = {}
         self._base = base
+        self._isInputHTTP = False
     def init(self, report_file, root = None):
         if (not self._base or
             not isinstance(self._base, Base)):
@@ -486,6 +493,10 @@ class Report:
         self._report_file = report_file
         if (root):
             _root = root.replace('\\', '/')
+            if (root.lower().startswith('http://') or
+                root.lower().startswith('https://')):
+                    self._input_list.append(_root)
+                    return True
             if (_root[-1:] != '/'):
                 _root += '/'
             self._input_list.append(_root)          # first element in the report is the -input path to source
@@ -513,11 +524,21 @@ class Report:
             value is None):
             return False
         _input = input.strip()
+        if (CUSR_TEMPINPUT in self._header):
+            if (_input.startswith(self._header[CUSR_TEMPINPUT])):
+                _input = _input.replace(self._header[CUSR_TEMPINPUT], self.root)
+                (p, e) = os.path.split(_input)
+                for _k in self._input_list_info:
+                    if (_k.startswith(p)):
+                        if (CRPT_URL_TRUENAME in self._input_list_info[_k]):
+                            if (self._input_list_info[_k][CRPT_URL_TRUENAME] == e):
+                                _input = _k
+                                break
         _path = os.path.dirname(_input.replace('\\', '/'))
         if (not _path.endswith('/')):
             _path += '/'
         if (_path == self._header['output']):
-            _input  = _input.replace(_path, self._header['input'])
+            _input  = _input.replace(_path, self._header[CRESUME_HDR_INPUT])
         (p, e) = os.path.splitext(_input)
         while(e):
             _input = '{}{}'.format(p, e)
@@ -525,8 +546,11 @@ class Report:
                 break
             (p, e) = os.path.splitext(p)
         if (not e):
-            self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_warning_text)
-            return False
+            if (CRPT_URL_TRUENAME in self._input_list_info[_input]):
+                (p, e) = os.path.splitext(self._input_list_info[_input][CRPT_URL_TRUENAME])
+            if (not e): # still no extension?
+                self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_warning_text)
+                return False
         _type = type.upper()
         if (not _type in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
             self._base.message('Invalid type ({}) at (Reporter)'.format(type), self._base.const_critical_text)
@@ -564,19 +588,27 @@ class Report:
     def root(self):
         if (not self._input_list):
             return ''
-        return self._input_list[0]      # first element is the (root) input/source folder.
+        _root = self._input_list[0]
+        if (CRESUME_HDR_INPUT in self._header):
+            _root  = self._header[CRESUME_HDR_INPUT]
+            if (_root.lower().startswith('http')):
+                if (not _root.endswith('/')):
+                    _root += '/'
+        return _root
     def read(self, readCallback = None):
         try:
             with open(self._report_file , 'r') as _fptr:
                 ln = _fptr.readline()
                 hdr_skipped = False
                 while(ln):
-                    if (not ln.strip()):        # ignore empty-lines.
+                    ln = ln.strip()
+                    if (not ln or
+                        ln.startswith('//')):        # ignore empty-lines and comment lines (beginning with '//')
                         ln = _fptr.readline()
                         continue
                     if (readCallback):      # client side callback support.
                         readCallback(ln)
-                    lns = ln.strip().split(self.CVSCHAR)
+                    lns = ln.split(self.CVSCHAR)
                     _fname = lns[0].strip().replace('\\', '/')
                     if (_fname.startswith(self.CHEADER_PREFIX)):
                         _hdr = _fname.replace(self.CHEADER_PREFIX, '').split('=')
@@ -586,16 +618,20 @@ class Report:
                             continue
                     if (not _fname or
                         not hdr_skipped):        # do not accept empty lines.
-                        ln = _fptr.readline()
+                        if (len(lns) == 4):      # skip line if it's the column header without the '#' prefix?
+                            ln = _fptr.readline()
                         if (_fname):
                             hdr_skipped = True
+                            if (CRESUME_HDR_INPUT in self._header):
+                                _input = self._header[CRESUME_HDR_INPUT].lower()
+                                if (_input.startswith('http://') or
+                                    _input.startswith('https://')):
+                                    self._isInputHTTP = True
                         continue
                     _copied = '' if len(lns) <= 1 else lns[1].strip()       # for now, previously stored status values aren't used.
                     _processed  = '' if len(lns) <= 2 else lns[2].strip()
                     _uploaded = '' if len(lns) <= 3 else lns[3].strip()
-
-                    self._input_list.append(_fname)
-                    if (not _fname in self._input_list_info):
+                    if (self.addFile(_fname)):
                         self._input_list_info[_fname] = {
                             CRPT_COPIED : _copied,
                             CRPT_PROCESSED : _processed,
@@ -634,7 +670,6 @@ class Report:
             self._base.message('({})'.format(str(e)), self._base.const_critical_text)
             return False
         return True
-
     def hasFailures(self):
         if (not self._input_list):
             return False
@@ -644,7 +679,6 @@ class Report:
                 self._input_list_info[f][CRPT_UPLOADED] == CRPT_NO):
                     return True
         return False
-
     def write(self):
         try:
             CCSV_HEADER_ = 'csv_header'
@@ -768,12 +802,10 @@ class TIL:
     def __iter__(self):
         return iter(self._tils)
 
-
 # classes of S3Upload module to merge as a single source.
 class S3Upload:
     def __init__(self, base):
         self._base = base
-
     def run(self, bobj, fobj, id, tot_ids):
         fobj.seek(0)
         msg_frmt = '[Push] block'
@@ -782,7 +814,6 @@ class S3Upload:
         self._base.message ('{} ({}/{}) - Done'.format(msg_frmt, id, tot_ids));
         fobj.close()
         del fobj
-
 
 class S3Upload_:
     def __init__(self, base, s3_bucket, s3_path, local_file, acl_policy = 'private'):
@@ -1117,7 +1148,7 @@ class Azure(Store):
                 return False
             elif (True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
                 if (is_tmp_input):
-                    output_path = _user_config.getValue('tempinput', False) + _azurePath
+                    output_path = _user_config.getValue(CUSR_TEMPINPUT, False) + _azurePath
                 is_raster = True
             if (_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
                 return False
@@ -1430,7 +1461,7 @@ class S3Storage:
             return False
         elif (True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
             if (is_tmp_input == True):
-                input_path = self.m_user_config.getValue('tempinput', False) + S3_path
+                input_path = self.m_user_config.getValue(CUSR_TEMPINPUT, False) + S3_path
                 is_raster = True
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
@@ -1767,7 +1798,8 @@ def exclude_callback(file, src, dst):
     if (file is None):
         return False
     (f, e) = os.path.splitext(file)
-    if (e[1:] in cfg.getValue(CCFG_RASTERS_NODE)):
+    if (e[1:] in cfg.getValue(CCFG_RASTERS_NODE) or
+        src.lower().startswith('http')):
         raster_buff.append({'f' : file, 'src' : '' if src == '/' else src, 'dst' : dst if dst else ''})
         return True
     return False
@@ -1777,7 +1809,6 @@ def exclude_callback_for_meta(file, src, dst):
 
 def getSourcePathUsingTempOutput(input):
     # cfg, _rpt are global vars.
-    # rpt_status must be (CRPT_YES, CRPT_NO)
     if (not _rpt or
         not getBooleanValue(cfg.getValue('istempoutput'))):
         return None
@@ -1838,7 +1869,6 @@ class Copy:
             include_subs = self.m_user_config.getValue('IncludeSubdirectories')
             if (include_subs is not None):    # if there's a value either (!None), take it else defaults to (True)
                 self.__m_include_subs = getBooleanValue(include_subs)
-
         return True
 
     def message(self, msg, msgType = None):
@@ -1880,7 +1910,6 @@ class Copy:
                         continue
                 free_pass = False
                 dst_path = r.replace(self.src, self.dst)
-
                 if (('*' in self.format['copy']) == True):
                     free_pass = True
                 if (free_pass == False):
@@ -1891,17 +1920,59 @@ class Copy:
                             break
                     if (not _isCpy):
                         continue
+                isInputWebAPI = False
+                if (_rpt and
+                    _rpt._isInputHTTP):
+                    (f, e) = os.path.splitext(file)
+                    if (not e):     # if no file extension at the end of URL, it's assumed we're talking to a service which in turn returns a raster.
+                        isInputWebAPI = True
                 if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
-                    not file.lower().endswith(CTIL_EXTENSION_)):       # skip 'exclude' list items and always copy (.til) files to destination.
+                    not file.lower().endswith(CTIL_EXTENSION_) or       # skip 'exclude' list items and always copy (.til) files to destination.
+                    isInputWebAPI):
                     if (('exclude' in self.cb_list) == True):
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
                                 if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
                                     dst_path = r.replace(self.src, self.m_user_config.getValue('tempoutput', False))    # no checks on temp-output validty done here. It's assumed it has been prechecked at the time of its assignment.
+                            _r  = r
                             if (self.m_user_config):
                                 if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
                                     if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
-                                        r = r.replace(self.src, self.m_user_config.getValue('tempinput'))
+                                        r = r.replace(self.src, self.m_user_config.getValue(CUSR_TEMPINPUT))
+                            if (_rpt and
+                                _rpt._isInputHTTP):
+                                _mkRemoteURL = os.path.join(_r, file)
+                                try:
+                                    import urllib2
+                                    file_url = urllib2.urlopen(_mkRemoteURL if not isInputWebAPI else os.path.splitext(_mkRemoteURL)[0])
+                                    isFileNameInHeader = False
+                                    for v in file_url.headers.headers:
+                                        if (v.startswith('Content-Disposition')):
+                                            token = 'filename='
+                                            f = v.find(token)
+                                            if (f != -1):
+                                                e = v.find('\r',  f + len(token))
+                                                if (_mkRemoteURL in _rpt._input_list_info):
+                                                    _rpt._input_list_info[_mkRemoteURL][CRPT_URL_TRUENAME] = v[f + len(token) : e].strip().replace('"', '').replace('?', '_')
+                                                isFileNameInHeader = True
+                                            break
+                                    if (self.m_user_config.getValue(CUSR_TEMPINPUT)):    # we've to dn the file first and save to the name requested.
+                                        r = r.replace(self.src, self.m_user_config.getValue(CUSR_TEMPINPUT))
+                                        if (not os.path.exists(r)):
+                                            os.makedirs(r)
+                                        file = _rpt._input_list_info[_mkRemoteURL][CRPT_URL_TRUENAME] if isFileNameInHeader else file
+                                        with open(os.path.join(r, file), 'wb') as fp:
+                                            buff = 2024 * 1024
+                                            while True:
+                                                chunk = file_url.read(buff)
+                                                if not chunk: break
+                                                fp.write(chunk)
+                                        # mark download/copy status
+                                        if (_rpt):
+                                            _rpt.updateRecordStatus (_mkRemoteURL, CRPT_COPIED, CRPT_YES)
+                                        # ends
+                                except Exception as e:
+                                    self._base.message('{}'.format(str(e), self._base.const_critical_text))
                             if (self.cb_list['exclude'](file, r, dst_path) == False):       # skip fruther processing if 'false' returned from the call-back fnc
                                 continue
                     continue
@@ -1949,10 +2020,10 @@ class Copy:
                         if (post_processing_callback):
                             ret = post_processing_callback(dst_file, post_processing_callback_args)    # ignore errors from the callback
                     # ends
-                except Exception as info:
+                except Exception as e:
                     if (self._input_flist):
                         _rpt.updateRecordStatus (os.path.join(r, file), CRPT_COPIED, CRPT_NO)
-                    self.message ('(%s)' % (str(info)), const_critical_text)
+                    self.message ('(%s)' % (str(e)), const_critical_text)
                     continue
 
         self.message ('Done.')
@@ -2070,11 +2141,15 @@ class compression:
         self.message('Creating VRT output file (%s)' % (output_file))
         return self.__call_external(args)
     def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
+        if (_rpt):
+            if (input_file in _rpt._input_list_info and
+                CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
+                output_file = '{}/{}'.format(os.path.dirname(output_file), _rpt._input_list_info[input_file][CRPT_URL_TRUENAME])
         _vsicurl_input = self.m_user_config.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
             if (_rpt):
-                _input_file = _input_file.replace(self.m_user_config.getValue('tempinput', False), '' if  _rpt.root == '/' else _rpt.root)
+                _input_file = _input_file.replace(self.m_user_config.getValue(CUSR_TEMPINPUT, False), '' if  _rpt.root == '/' else _rpt.root)
         _do_process = ret = True
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
@@ -2320,7 +2395,7 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
             getBooleanValue(cfg.getValue('istempoutput')) == True):
             output_file = os.path.join(output_file, file)
             if (getBooleanValue(cfg.getValue('istempinput')) == True):
-                input_file = os.path.join(cfg.getValue('tempinput', False), file)
+                input_file = os.path.join(cfg.getValue(CUSR_TEMPINPUT, False), file)
             if (getBooleanValue(cfg.getValue('istempoutput')) == True):
                 output_file = os.path.join(cfg.getValue('tempoutput', False), file)
             return (input_file, output_file)
@@ -2440,7 +2515,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6d'
+    __program_ver__ = 'v1.6e'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2595,7 +2670,7 @@ class Application(object):
                 self._base.message('Unable to init (Report/job)', self._base.const_critical_text)
                 return False
             for arg in vars(self._args):
-                if (arg == 'input'):
+                if (arg == CRESUME_HDR_INPUT):
                     continue
                 setattr(self._args, arg, None)      # any other cmd-line args will be ignored/nullified.
             if (not _rpt.read(self.__jobContentCallback)):
@@ -2637,7 +2712,7 @@ class Application(object):
             _hdr = _fname.replace(Report.CHEADER_PREFIX, '').split('=')
             if (len(_hdr) > 1):
                 _key = _hdr[0].strip()
-                if (_key == 'input'):
+                if (_key == CRESUME_HDR_INPUT):
                     return True
                 setattr (self._args, _key, _hdr[1].strip())
         return True
@@ -2782,7 +2857,7 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
             is_input_temp = True         # flag flows to deal with -tempinput
             cfg.setValue('istempinput', is_input_temp)
-            cfg.setValue('tempinput', self._args.tempinput)
+            cfg.setValue(CUSR_TEMPINPUT, self._args.tempinput)
         # ends
 
         # let's setup -tempoutput
@@ -3197,7 +3272,8 @@ class Application(object):
         # ends
         # control flow if conversions required.
         if (is_caching == False):
-            if (isinput_s3 == False):
+            if (isinput_s3 == False and
+                not self._args.input.lower().startswith('http')):
                 ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
                 if  (ret == False):
                     self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text);
@@ -3216,10 +3292,10 @@ class Application(object):
                     isinput_s3 == False and
                     not cfg.getValue(CLOAD_RESTORE_POINT)):
                     # if the -tempinput path is defined, we first copy rasters from the source path to -tempinput before any conversion.
-                    self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue('tempinput', False)))
+                    self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue(CUSR_TEMPINPUT, False)))
                     cpy_files_ = []
                     for i in range(0, len(files)):
-                        get_dst_path = files[i]['dst'].replace(self._args.output if cfg.getValue('tempoutput', False) is None else cfg.getValue('tempoutput', False), cfg.getValue('tempinput', False))
+                        get_dst_path = files[i]['dst'].replace(self._args.output if cfg.getValue('tempoutput', False) is None else cfg.getValue('tempoutput', False), cfg.getValue(CUSR_TEMPINPUT, False))
                         cpy_files_.append(
                         {
                         'src' : files[i]['src'],
@@ -3237,7 +3313,7 @@ class Application(object):
                 for req in files:
                     _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     if (getBooleanValue(cfg.getValue('istempinput'))):
-                        _tempinput = cfg.getValue('tempinput', False)
+                        _tempinput = cfg.getValue(CUSR_TEMPINPUT, False)
                         _tempinput = _tempinput[:-1] if _tempinput.endswith('/') and not self._args.input.endswith('/') else _tempinput
                         _src = _src.replace(_tempinput, self._args.input)
                     g_rpt.addFile(_src)     # prior to this point, rasters get added to g_rpt during the (pull/copy) process if -clouddownload=true && -tempinput is defined.
@@ -3479,7 +3555,7 @@ class Application(object):
             if (is_input_temp == True and
                 is_caching == False):        # if caching is (True), -tempinput is ignored and no deletion of source @ -input takes place.
                 if (len(raster_buff) != 0):
-                    self._base.message ('Removing input rasters at ({})'.format(cfg.getValue('tempinput', False)))
+                    self._base.message ('Removing input rasters at ({})'.format(cfg.getValue(CUSR_TEMPINPUT, False)))
                     for req in raster_buff:
                         (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                         try:
@@ -3521,7 +3597,7 @@ def main():
     parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality');
     parser.add_argument('-prec', help='LERC precision', dest='prec');
     parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only]', dest='pyramids');
-    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest='tempinput');
+    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest=CUSR_TEMPINPUT);
     parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest='tempoutput');
     parser.add_argument('-clouddownload', help='Is -input a cloud storage? [true/false: default:false]', dest='clouddownload');
     parser.add_argument('-cloudupload', help='Is -output a cloud storage? [true/false]', dest='cloudupload');
