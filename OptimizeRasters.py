@@ -58,7 +58,6 @@ CRPT_SOURCE = 'SOURCE'
 CRPT_COPIED = 'COPIED'
 CRPT_PROCESSED = 'PROCESSED'
 CRPT_UPLOADED = 'UPLOADED'
-CRPT_URL_TRUENAME = 'URL_NAME'
 CRPT_HEADER_KEY = 'config'
 
 CRPT_YES = 'yes'
@@ -476,6 +475,7 @@ class Report:
     CHEADER_PREFIX = '#'
     CJOB_EXT = '.orjob'
     CVSCHAR  = '\t'
+    CRPT_URL_TRUENAME = 'URL_NAME'
     def __init__(self, base):
         self._input_list = []
         self._input_list_info = {}
@@ -530,8 +530,8 @@ class Report:
                 (p, e) = os.path.split(_input)
                 for _k in self._input_list_info:
                     if (_k.startswith(p)):
-                        if (CRPT_URL_TRUENAME in self._input_list_info[_k]):
-                            if (self._input_list_info[_k][CRPT_URL_TRUENAME] == e):
+                        if (self.CRPT_URL_TRUENAME in self._input_list_info[_k]):
+                            if (self._input_list_info[_k][self.CRPT_URL_TRUENAME] == e):
                                 _input = _k
                                 break
         _path = os.path.dirname(_input.replace('\\', '/'))
@@ -546,8 +546,8 @@ class Report:
                 break
             (p, e) = os.path.splitext(p)
         if (not e):
-            if (CRPT_URL_TRUENAME in self._input_list_info[_input]):
-                (p, e) = os.path.splitext(self._input_list_info[_input][CRPT_URL_TRUENAME])
+            if (self.CRPT_URL_TRUENAME in self._input_list_info[_input]):
+                (p, e) = os.path.splitext(self._input_list_info[_input][self.CRPT_URL_TRUENAME])
             if (not e): # still no extension?
                 self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_warning_text)
                 return False
@@ -1953,14 +1953,14 @@ class Copy:
                                             if (f != -1):
                                                 e = v.find('\r',  f + len(token))
                                                 if (_mkRemoteURL in _rpt._input_list_info):
-                                                    _rpt._input_list_info[_mkRemoteURL][CRPT_URL_TRUENAME] = v[f + len(token) : e].strip().replace('"', '').replace('?', '_')
+                                                    _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = v[f + len(token) : e].strip().replace('"', '').replace('?', '_')
                                                 isFileNameInHeader = True
                                             break
                                     if (self.m_user_config.getValue(CUSR_TEMPINPUT)):    # we've to dn the file first and save to the name requested.
                                         r = r.replace(self.src, self.m_user_config.getValue(CUSR_TEMPINPUT))
                                         if (not os.path.exists(r)):
                                             os.makedirs(r)
-                                        file = _rpt._input_list_info[_mkRemoteURL][CRPT_URL_TRUENAME] if isFileNameInHeader else file
+                                        file = _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] if isFileNameInHeader else file
                                         with open(os.path.join(r, file), 'wb') as fp:
                                             buff = 2024 * 1024
                                             while True:
@@ -2143,8 +2143,8 @@ class compression:
     def compress(self, input_file, output_file, args_callback = None, build_pyramids = True, post_processing_callback = None, post_processing_callback_args = None):
         if (_rpt):
             if (input_file in _rpt._input_list_info and
-                CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
-                output_file = '{}/{}'.format(os.path.dirname(output_file), _rpt._input_list_info[input_file][CRPT_URL_TRUENAME])
+                Report.CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
+                output_file = '{}/{}'.format(os.path.dirname(output_file), _rpt._input_list_info[input_file][Report.CRPT_URL_TRUENAME])
         _vsicurl_input = self.m_user_config.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
@@ -2636,7 +2636,9 @@ class Application(object):
             return (self._msg_callback(msg, status))
         print (msg)          # log file is not up yet, write to (console)
         return True
-
+    def getReport(self):
+        global _rpt
+        return _rpt if _rpt else None
     def init(self):
         global _rpt, \
         cfg, \
@@ -3577,7 +3579,8 @@ class Application(object):
                 _rpt.hasFailures()):
                 _status = eFAIL
             if (_status == eOK):
-                if (not _rpt.moveJobFileToPath(self._base._m_log.logFolder)):
+                if (self._base.getMessageHandler and
+                    not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
                     _status = eFAIL
         # ends
 
