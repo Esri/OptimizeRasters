@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160317
+# Version: 20160322
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1479,21 +1479,26 @@ class S3Storage:
         if (os.path.exists(flr) == False):
             try:
                 os.makedirs(flr)
-            except Exception as exp:
-                self._base.message ('(%s)' % (str(exp)), const_critical_text)
+            except Exception as e:
+                self._base.message ('(%s)' % (str(e)), const_critical_text)
                 if (_rpt):
                     _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
                 return False
-        #if (is_raster):
-        #    return True
         # let's write remote to local
         fout = None
         try:
             fout = open(mk_path, 'wb')        # can we open for output?
-            fout.write(S3_key.read())
-            fout.flush()
-        except Exception as exp:
-            self._base.message ('({})'.format(str(exp)), const_critical_text);
+            startbyte = 0
+            CCHUNK_SIZE = 1048576 * 5
+            while(startbyte < S3_key.size):
+                endbyte = startbyte + (CCHUNK_SIZE - 1)
+                if (endbyte > S3_key.size):
+                    endbyte = S3_key.size - 1
+                S3_key.get_contents_to_file(fout, headers={'Range': 'bytes={}-{}'.format(startbyte, endbyte)})
+                fout.flush()
+                startbyte = endbyte + 1
+        except Exception as e:
+            self._base.message ('({})'.format(str(e)), const_critical_text);
             if (_rpt):
                 _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
             return False
@@ -2515,7 +2520,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6e'
+    __program_ver__ = 'v1.6f'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
