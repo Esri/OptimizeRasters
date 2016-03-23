@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160322
+# Version: 20160324
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1494,6 +1494,7 @@ class S3Storage:
                 endbyte = startbyte + (CCHUNK_SIZE - 1)
                 if (endbyte > S3_key.size):
                     endbyte = S3_key.size - 1
+                print ('Seek> {}-{}'.format(startbyte, endbyte))         # Note> not routed to the log file.
                 S3_key.get_contents_to_file(fout, headers={'Range': 'bytes={}-{}'.format(startbyte, endbyte)})
                 fout.flush()
                 startbyte = endbyte + 1
@@ -2520,7 +2521,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6f'
+    __program_ver__ = 'v1.6g'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3444,10 +3445,7 @@ class Application(object):
                 s = m
                 if s == files_len or s == 0:
                     break
-            # let's clean up the input-temp if has been used.
-            # ends
         # ends
-
         # block to deal with meta-data ops.
         if (is_caching == True and
             do_pyramids != CCMD_PYRAMIDS_ONLY):
@@ -3493,7 +3491,7 @@ class Application(object):
                     try:
                         shutil.copyfile(input_file, output_file)
                     except Exception as e:
-                        self._base.message ('[CPY] %s (%s)' % (input_file, str(e)))
+                        self._base.message ('[CPY] %s (%s)' % (input_file, str(e)), self._base.const_critical_text)
                         continue
                 # let's deal with ops if the (-cache) folder is defined at the cmd-line
                 input_ = output_file.replace('\\', '/').split('/')
@@ -3503,12 +3501,14 @@ class Application(object):
                 # update .mrf.
                 updateMRF = UpdateMRF(self._base)
                 _output_home_path = self._args.output
-                if (self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
-                    _output_home_path = cfg.getValue('tempoutput', False)
-                if (updateMRF.init(output_file, output_file, cfg.getValue('Mode'),
+                _tempOutput = cfg.getValue('tempoutput', False)
+                if (self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) or
+                    _tempOutput):
+                    _output_home_path = _tempOutput
+                if (updateMRF.init(output_file, _output_home_path, cfg.getValue('Mode'),
                     self._args.cache, _output_home_path, cfg.getValue(COUT_VSICURL_PREFIX, False))):
                     if (not updateMRF.update(output_file)):
-                        self._base.message ('Updating ({}) was not successful!'.format(output_file));
+                        self._base.message ('Updating ({}) was not successful!'.format(output_file), self._base.const_critical_text);
                         continue
                 # ends
         # do we have failed upload files on list?
