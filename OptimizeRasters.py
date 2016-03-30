@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160324
+# Version: 20160330
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -131,6 +131,7 @@ CIN_S3_PARENTFOLDER = 'In_S3_ParentFolder'
 CIN_S3_PREFIX = 'In_S3_Prefix'
 CIN_CLOUD_TYPE = 'In_Cloud_Type'
 COUT_VSICURL_PREFIX = 'Out_VSICURL_Prefix'
+CINOUT_S3_DEFAULT_DOMAIN = 's3.amazonaws.com'
 # ends
 
 # const
@@ -1327,6 +1328,7 @@ class Azure(Store):
 class S3Storage:
     def __init__(self, base):
         self._base = base
+        self._isBucketPublic = False
     def init(self, remote_path, s3_key, s3_secret, direction):
         if (not isinstance(self._base, Base)):
             return False
@@ -1341,18 +1343,14 @@ class S3Storage:
             if (s3_bucket):
                 self.m_bucketname = s3_bucket
             _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
-            if ((not self.CAWS_ACCESS_KEY_ID or
-                 not self.CAWS_ACCESS_KEY_SECRET) and
-                 not _profile_name):
-                    return False
             # setup s3 connection
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
                 _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 else 'boto.s3.connection.OrdinaryCallingFormat')
                 try:
-                    is_bucket_public = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
+                    self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
                     con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID if not _profile_name else None, self.CAWS_ACCESS_KEY_SECRET if not _profile_name else None,
                     profile_name = _profile_name if _profile_name else None, calling_format = _calling_format,
-                    anon = True if is_bucket_public else False)
+                    anon = True if self._isBucketPublic else False)
                 except Exception as e:
                     self._base.message (str(e), self._base.const_critical_text)
                     return False
@@ -2521,7 +2519,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6g'
+    __program_ver__ = 'v1.6h'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3064,9 +3062,7 @@ class Application(object):
 
         if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
             if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
-                if ((s3_output is None and self._args.output is None) or
-                    (s3_id is None and out_s3_profile_name is None) or
-                    (s3_secret is None and out_s3_profile_name is None)):
+                if ((s3_output is None and self._args.output is None)):
                         self._base.message ('Empty/Invalid values detected for keys in the ({}) beginning with (Out_S3|Out_S3_ID|Out_S3_Secret|Out_S3_AWS_ProfileName) or values for command-line args (-outputprofile)'.format(self._args.config), self._base.const_critical_text)
                         return(terminate(self._base, eFAIL))
                 # instance of upload storage.
@@ -3084,8 +3080,8 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format(S3_storage.bucketupload.generate_url(0).split('?')[0].replace('https', 'http'),
-                cfg.getValue(COUT_S3_PARENTFOLDER, False)))
-                pass
+                cfg.getValue(COUT_S3_PARENTFOLDER, False)) if not S3_storage._isBucketPublic else
+                '/vsicurl/http://{}.{}/{}'.format(S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN, cfg.getValue(COUT_S3_PARENTFOLDER, False)))
                 # ends
             elif (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE):
                 _account_name = cfg.getValue(COUT_AZURE_ACCOUNTNAME, False);
@@ -3246,12 +3242,12 @@ class Application(object):
                 if (ret == False):
                     self._base.message ('Unable to initialize S3-storage module!. Quitting..', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
-                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http')) # vsicurl doesn't like 'https'
+                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else
+                '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN)) # vsicurl doesn't like 'https'
                 o_S3_storage.inputPath = self._args.output
                 if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
                     self._base.message ('Unable to read S3-Content', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
-                # =/vsicurl/http://esridatasets.s3.amazonaws.com/
             else:
                 # let's do (Azure) init
                 in_azure_storage = Azure(in_s3_id, in_s3_secret, in_s3_profile_name, self._base);
