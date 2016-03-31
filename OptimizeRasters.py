@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160330
+# Version: 20160331
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -45,7 +45,7 @@ import shutil
 import datetime
 
 import argparse
-
+import math
 # ends
 
 # enum error codes
@@ -304,6 +304,85 @@ class Base(object):
             setUploadRecordStatus (input_file, CRPT_YES)
 
         return (len(ret_buff) > 0)
+
+class GDALInfo(object):
+    CGDAL_ADDO_EXE = 'gdalinfo.exe'
+    CW = 'width'
+    CH = 'height'
+    def __init__ (self, base, msgCallback = None):
+        self._GDALPath =  None
+        self._GDALInfo = []
+        self._propertyNames = [self.CW, self.CH]
+        self._base = base
+        self._m_msg_callback = msgCallback
+    def init(self, GDALPath):
+        if (not GDALPath):
+            return False
+        self._GDALPath = GDALPath.replace('\\', '/')
+        if (not self._GDALPath.endswith('/{}'.format(self.CGDAL_ADDO_EXE))):
+            self._GDALPath = os.path.join(self._GDALPath, self.CGDAL_ADDO_EXE).replace('\\', '/')
+        # check for path existence / e.t.c
+        if (not os.path.exists(self._GDALPath)):
+            self.message('Invalid GDALInfo/Path ({})'.format(self._GDALPath), self._base.const_critical_text)
+            return False
+        if (self._base and
+            not isinstance(self._base, Base)):
+            return False
+        for p in self._propertyNames:       # init-property names
+            setattr(self, p, None)
+        return True
+    def process(self, input):
+        if (not self._GDALPath):
+            self.message('Not initialized!', self._base.const_critical_text)
+            return False
+        if (not input):             # invalid input
+            return False
+        args = [self._GDALPath]
+        args.append (input)
+        self.message('Using GDALInfo..', self._base.const_general_text)
+        return self.__call_external(args)
+    def message(self, msg, status):
+        self._m_msg_callback(msg, status) if self._m_msg_callback else self._base.message(msg, status)
+    @property
+    def pyramidLevels(self):
+        if (not self.width or
+            not self.height):
+                return False        # fn:process not called.
+        _max = max(self.width, self.height)
+        _BS = CCFG_BLOCK_SIZE       # def (512)
+        if (self._base.getUserConfiguration):
+            __BS = self._base.getUserConfiguration.getValue('BlockSize')
+            if (__BS):
+                try:
+                    _BS = int(__BS)     # catch invalid val types
+                except:
+                    pass
+        _levels = int(2 ** math.ceil(math.log(_max / _BS, 2)))
+        _steps = ''
+        while (_levels >= 2):
+            _steps = '{} {}'.format(_levels, _steps)
+            _levels >>= 1
+        _steps = _steps.strip()
+        self.message ('<PyramidFactor> set to ({})'.format(_steps), self._base.const_general_text)
+        return _steps
+    def __call_external(self, args):
+        p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        message = '/'
+        first_pass_ = True
+        while (message):
+            message = p.stdout.readline()
+            if (message):
+                _strip = message.strip()
+                if (_strip.find('Size is') != -1):
+                    wh  = _strip.split('Size is')
+                    if (len(wh) > 1):
+                        wh  = wh[1].split(',')
+                        if (self.CW in self._propertyNames):
+                            self.width = int(wh[0].strip())
+                        if (self.CH in self._propertyNames):
+                            self.height = int(wh[1].strip())
+                self._GDALInfo.append(_strip)
+        return len(self._GDALInfo) > 0
 
 class UpdateMRF:
     def __init__(self, base = None):
@@ -887,8 +966,6 @@ class S3Upload_:
                     upl_blocks += cnt_dead
                     len_buffer = cnt_dead
                     threads = [t for t in threads if t.isAlive()]
-                    ##percent = int((1 - float(tot_blocks - upl_blocks)) * 100)
-                    ##print '{}% complete.'.format(percent)
                     break
             buffer = []
             for i in range(0, len_buffer):
@@ -2090,14 +2167,12 @@ class Copy:
 class compression:
     def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
-
         self.CGDAL_TRANSLATE_EXE = 'gdal_translate.exe'
         self.CGDAL_BUILDVRT_EXE = 'gdalbuildvrt.exe'
         self.CGDAL_ADDO_EXE = 'gdaladdo.exe'
         self.m_id = None
         self.m_user_config = None
         self._base = base
-
     def init(self, id = None):
         if (id != None):
             self.m_id = id
@@ -2254,6 +2329,8 @@ class compression:
             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
     def createaOverview(self, input_file, isBQA = False):
+        m_py_factor = '2'
+        m_py_sampling = 'average'
         get_mode = self.m_user_config.getValue('Mode')
         if (get_mode):
             if (get_mode == 'cachingmrf' or
@@ -2266,13 +2343,16 @@ class compression:
             if (til.find(n)):
                 return True
         # ends
-        self.message('Creating pyramid (%s)' % (input_file))
+        self.message('Creating pyramid ({})'.format(input_file))
         # let's input cfg values..
-        m_py_factor = '2'
-        m_py_sampling = 'average'
         py_factor_ = self.m_user_config.getValue('PyramidFactor')
         if (py_factor_):
-            m_py_factor = py_factor_
+            m_py_factor = py_factor_.replace(',', ' ')  # can be commna sep vals in the cfg file.
+        else:
+            gdalInfo = GDALInfo(self._base, self.message)
+            gdalInfo.init(self.m_gdal_path)
+            if (gdalInfo.process(input_file)):
+                m_py_factor = gdalInfo.pyramidLevels
         py_sampling_ = self.m_user_config.getValue('PyramidSampling')
         if (py_sampling_):
             m_py_sampling = py_sampling_
@@ -2310,7 +2390,7 @@ class compression:
             args.append ('JPEG_QUALITY_OVERVIEW')
             args.append (m_py_quality)
         args.append (input_file)
-        m_ary_factors = m_py_factor.replace(',', ' ').split()
+        m_ary_factors = m_py_factor.split()
         for f in m_ary_factors:
             args.append (f)
         return self.__call_external(args)
@@ -2519,7 +2599,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6h'
+    __program_ver__ = 'v1.6i'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3331,24 +3411,21 @@ class Application(object):
                 self.run()
                 return
             # ends
-
             a = []
             threads = []
-
             batch = cfg_threads
             s = 0
             while 1:
                 m = s + batch
                 if (m >= files_len):
                     m =  files_len
-
                 threads = []
                 for i in range(s, m):
                     req = files[i]
                     (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     f, e = os.path.splitext(output_file)
                     if (cfg_keep_original_ext == False):
-                        output_file = output_file.replace(e, CONST_OUTPUT_EXT)
+                        output_file = output_file.replace(e, '.{}'.format(cfg_mode.split('_')[0]))
                     _build_pyramids = True
                     if (til):
                         if (til.find(req['f'])):
@@ -3360,7 +3437,6 @@ class Application(object):
                     threads.append(t)
                 for t in threads:
                     t.join()
-
                 # process til file if all the associate files have been processed
                 if (til):
                     for _til in til:
