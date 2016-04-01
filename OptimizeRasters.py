@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160331
+# Version: 20160401
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -30,7 +30,6 @@
 #------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-# imports of S3Upload module
 import sys
 import os
 import base64
@@ -46,7 +45,7 @@ import datetime
 
 import argparse
 import math
-# ends
+import ctypes
 
 # enum error codes
 eOK = 0
@@ -154,6 +153,29 @@ CS3_UPLOAD_RETRIES = 3
 CS3STORAGE_IN = 0
 CS3STORAGE_OUT = 1
 # ends
+
+class MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+    def __init__(self):
+        self.dwLength = ctypes.sizeof(self)
+        super(MEMORYSTATUSEX, self).__init__()
+    def memoryStatus(self):
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(self))
+        return self
+    def memoryPerDownloadChunk(self):
+        return int(self.memoryStatus().ullAvailPhys * .01)  # download file isn't split in chunks, for now usage is set to 0.01
+    def memoryPerUploadChunk(self, totalThreads):    # get upload payload size per thread for the total cloud upload threads required.
+        return int(self.memoryStatus().ullAvailPhys * .10 / totalThreads)
 
 class Base(object):
     # log status types enums
@@ -347,7 +369,7 @@ class GDALInfo(object):
     def pyramidLevels(self):
         if (not self.width or
             not self.height):
-                return False        # fn:process not called.
+            return False        # fn/process not called.
         _max = max(self.width, self.height)
         _BS = CCFG_BLOCK_SIZE       # def (512)
         if (self._base.getUserConfiguration):
@@ -369,12 +391,13 @@ class GDALInfo(object):
         p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         message = '/'
         first_pass_ = True
+        CSIZE_PREFIX = 'Size is'
         while (message):
             message = p.stdout.readline()
             if (message):
                 _strip = message.strip()
-                if (_strip.find('Size is') != -1):
-                    wh  = _strip.split('Size is')
+                if (_strip.find(CSIZE_PREFIX) != -1):
+                    wh  = _strip.split(CSIZE_PREFIX)
                     if (len(wh) > 1):
                         wh  = wh[1].split(',')
                         if (self.CW in self._propertyNames):
@@ -904,7 +927,6 @@ class S3Upload_:
         self.m_acl_policy = 'private' if acl_policy is None or acl_policy.strip() == '' else acl_policy
         self.mp = None
         pass;
-
     def init(self):
         # multip-upload test
         try:
@@ -914,10 +936,9 @@ class S3Upload_:
             return False
         return True
         # ends
-
     def upload(self):
-        # read in big-file in chunk
-        CHUNK_MIN_SIZE = 5242880
+        # read in big-file in chunks
+        CHUNK_MIN_SIZE = MEMORYSTATUSEX().memoryStatus().memoryPerUploadChunk(CCLOUD_UPLOAD_THREADS)
 ##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
 ##            return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
@@ -926,7 +947,6 @@ class S3Upload_:
 
         s3upl = S3Upload(self._base);
         idx = 1
-
         f = None
         try:         # see if we can open it
             f = open (self.m_local_file, 'rb')
@@ -1001,9 +1021,7 @@ class S3Upload_:
         finally:
             if (f):
                 f.close()
-
         return True
-
     def __del__(self):
         if (self.mp):
             self.mp = None
@@ -1562,14 +1580,15 @@ class S3Storage:
         # let's write remote to local
         fout = None
         try:
+            memPerChunk = MEMORYSTATUSEX().memoryStatus().memoryPerDownloadChunk()
+            self._base.message('Download block-size is set to ({}) bytes.'.format(memPerChunk))
             fout = open(mk_path, 'wb')        # can we open for output?
             startbyte = 0
-            CCHUNK_SIZE = 1048576 * 5
             while(startbyte < S3_key.size):
-                endbyte = startbyte + (CCHUNK_SIZE - 1)
+                endbyte = startbyte + (memPerChunk - 1)
                 if (endbyte > S3_key.size):
                     endbyte = S3_key.size - 1
-                print ('Seek> {}-{}'.format(startbyte, endbyte))         # Note> not routed to the log file.
+                print ('Seek> {}-{} [{}]'.format(startbyte, endbyte, S3_key.name))         # Note> not routed to the log file.
                 S3_key.get_contents_to_file(fout, headers={'Range': 'bytes={}-{}'.format(startbyte, endbyte)})
                 fout.flush()
                 startbyte = endbyte + 1
@@ -2346,7 +2365,8 @@ class compression:
         self.message('Creating pyramid ({})'.format(input_file))
         # let's input cfg values..
         py_factor_ = self.m_user_config.getValue('PyramidFactor')
-        if (py_factor_):
+        if (py_factor_ and
+            py_factor_.strip()):
             m_py_factor = py_factor_.replace(',', ' ')  # can be commna sep vals in the cfg file.
         else:
             gdalInfo = GDALInfo(self._base, self.message)
@@ -2599,7 +2619,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6i'
+    __program_ver__ = 'v1.6j'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3703,4 +3723,5 @@ def main():
 if __name__ == '__main__':
     ret = main()
     print ('\nDone..')
-    exit(ret) 
+    exit(ret)
+
