@@ -15,7 +15,7 @@
     <Quality>85</Quality>
     <!-- LERC precision to apply for LERC compression -->
     <LERCPrecision></LERCPrecision>
-    <!-- Build pyramids? Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n, only] -->
+    <!-- Build pyramids? Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n, only, external] -->
     <BuildPyramids>true</BuildPyramids>
     <!-- Pyramid levels to create (Def:  2) -->
     <PyramidFactor>2 4 8 16 32 64</PyramidFactor>
