@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160401
+# Version: 20160406
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1715,6 +1715,7 @@ class S3Storage:
 CIDX_USER_CONFIG  = 2
 CCFG_BLOCK_SIZE = 512
 CCMD_PYRAMIDS_ONLY = 'only'
+CCMD_PYRAMIDS_EXTERNAL = 'external'
 CCFG_THREADS = 10
 CCFG_RASTERS_NODE = 'RasterFormatFilter'
 CCFG_EXCLUDE_NODE = 'ExcludeFilter'
@@ -1793,9 +1794,7 @@ def args_Callback(args, user_data = None):
                     if (m_interleave == 'PIXEL' and
                         m_compression == 'deflate'):
                             args.append ('-co')
-                            args.append ('PHOTOMETRIC=YCBCR')
-                            args.append ('-co')
-                            args.append (m_predictor)
+                            args.append (' predictor={}'.format(m_predictor))
         except: # could throw if index isn't found
             pass    # ingnore with defaults.
     args.append ('-of')
@@ -2292,8 +2291,9 @@ class compression:
                         _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                     return ret
             if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
-                if (do_pyramids == 'true' or
-                    do_pyramids == CCMD_PYRAMIDS_ONLY):
+                if (getBooleanValue(do_pyramids) or     # accept any valid boolean value.
+                    do_pyramids == CCMD_PYRAMIDS_ONLY or
+                    do_pyramids == CCMD_PYRAMIDS_EXTERNAL):
                     iss3 = self.m_user_config.getValue('iss3')
                     if (iss3 == True and do_pyramids == CCMD_PYRAMIDS_ONLY):
                         if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
@@ -2389,9 +2389,9 @@ class compression:
             m_py_compression == 'png'):
             if (not get_mode.startswith('mrf')):
                 m_py_external = False
-                py_external_ = self.m_user_config.getValue('CreateExternalPyramids')
+                py_external_ = self.m_user_config.getValue('Pyramids')
                 if (py_external_):
-                    m_py_external = getBooleanValue(py_external_)
+                    m_py_external = py_external_ == CCMD_PYRAMIDS_EXTERNAL
                 if (m_py_external):
                     args.append ('-ro')
                 if (get_mode.startswith('tif') and
@@ -2619,7 +2619,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6j'
+    __program_ver__ = 'v1.6k'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3122,7 +3122,7 @@ class Application(object):
             cfg.setValue('LERCPrecision', self._args.prec)
         if (self._args.pyramids):
             if (self._args.pyramids == CCMD_PYRAMIDS_ONLY):
-                if (not cfg.getValue(CLOAD_RESTORE_POINT)):     # -input, -output path check isn't done if -input points to a job (.csv) file
+                if (not cfg.getValue(CLOAD_RESTORE_POINT)):     # -input, -output path check isn't done if -input points to a job (.orjob) file
                     if (self._args.input != self._args.output):
                         if (isinput_s3 == True):    # in case of input s3, output is used as a temp folder locally.
                             if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) == True):
@@ -3133,7 +3133,8 @@ class Application(object):
                             self._base.message ('-input and -output paths must be the same if the -pyramids=only', const_critical_text);
                             return(terminate(self._base, eFAIL))
         if (getBooleanValue(do_pyramids) == False and
-            do_pyramids != CCMD_PYRAMIDS_ONLY):
+            do_pyramids != CCMD_PYRAMIDS_ONLY and
+            do_pyramids != CCMD_PYRAMIDS_EXTERNAL):
                 do_pyramids = 'false'
         cfg.setValue('Pyramids', do_pyramids)
         cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids))
@@ -3450,7 +3451,7 @@ class Application(object):
                     if (til):
                         if (til.find(req['f'])):
                             til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
-                            _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
+                            _build_pyramids = False             # build pyramids is always turned off for rasters that belong to (.til) files.
                     t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
                     t.daemon = True
                     t.start()
@@ -3538,7 +3539,7 @@ class Application(object):
                 if s == files_len or s == 0:
                     break
         # ends
-        # block to deal with meta-data ops.
+        # block to deal with caching ops.
         if (is_caching == True and
             do_pyramids != CCMD_PYRAMIDS_ONLY):
             self._base.message ('\nProcessing caching operations...')
@@ -3696,7 +3697,7 @@ def main():
     parser.add_argument('-config', help='Configuration file with default settings', dest='config');
     parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality');
     parser.add_argument('-prec', help='LERC precision', dest='prec');
-    parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only]', dest='pyramids');
+    parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only/external]', dest='pyramids');
     parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest=CUSR_TEMPINPUT);
     parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest='tempoutput');
     parser.add_argument('-clouddownload', help='Is -input a cloud storage? [true/false: default:false]', dest='clouddownload');
@@ -3724,4 +3725,3 @@ if __name__ == '__main__':
     ret = main()
     print ('\nDone..')
     exit(ret)
-
