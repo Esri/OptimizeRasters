@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160406
+# Version: 20160407
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -86,6 +86,7 @@ CINC_SUB = 'INC_SUB'
 COP_UPL = 'upload'
 COP_DNL = 'download'
 COP_RPT = 'report'
+COP_NOCONVERT  = 'noconvert'
 # ends
 
 # clone specific
@@ -687,6 +688,11 @@ class Report:
             return False        # no duplicate entires allowed.
         self._input_list.append(_file)
         return True
+    @property
+    def operation(self):
+        if (not 'op' in self._header):
+            return None
+        return self._header['op'].lower() if (self._header['op']) else None
     @property
     def root(self):
         if (not self._input_list):
@@ -1793,8 +1799,8 @@ def args_Callback(args, user_data = None):
                         m_compression  = _JPEG
                     if (m_interleave == 'PIXEL' and
                         m_compression == 'deflate'):
-                            args.append ('-co')
-                            args.append (' predictor={}'.format(m_predictor))
+                        args.append ('-co')
+                        args.append (' predictor={}'.format(m_predictor))
         except: # could throw if index isn't found
             pass    # ingnore with defaults.
     args.append ('-of')
@@ -2072,7 +2078,7 @@ class Copy:
                                         # ends
                                 except Exception as e:
                                     self._base.message('{}'.format(str(e), self._base.const_critical_text))
-                            if (self.cb_list['exclude'](file, r, dst_path) == False):       # skip fruther processing if 'false' returned from the call-back fnc
+                            if (self.cb_list['exclude'](file, r, dst_path) == False):       # skip fruther processing if 'false' returned from the callback fnc
                                 continue
                     continue
                 try:
@@ -2088,17 +2094,17 @@ class Copy:
                     dst_file = os.path.join(dst_path, file)
                     src_file = os.path.join(r, file)
                     do_post_processing_cb = do_copy = True
-                    if (os.path.dirname(src_file.replace('\\','/')) != os.path.dirname(dst_path.replace('\\', '/'))):
+                    if (os.path.dirname(src_file.replace('\\','/')) != os.path.dirname(dst_path.replace('\\', '/')) or
+                        g_is_generate_report):
                         if (pre_processing_callback):
                             do_post_processing_cb = do_copy = pre_processing_callback(src_file, dst_file, self.m_user_config)
-                        if (do_copy == True):
-                             _get_rstr_val  = ''
+                        if (do_copy):
                              if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
-                                _get_rstr_val = _rpt.getRecordStatus(src_file, CRPT_COPIED)
-                                if (_get_rstr_val == CRPT_YES):
-                                    do_copy = False
-                                if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
-                                    do_copy = not _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES
+                                if (_rpt.getRecordStatus(src_file, CRPT_COPIED) == CRPT_YES or
+                                    (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD)) and
+                                     _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES) or
+                                     _rpt.operation == COP_UPL):
+                                     do_copy = False
                              if (do_copy):
                                 shutil.copyfile(src_file, dst_file)
                                 if (self.m_user_config):
@@ -2124,13 +2130,10 @@ class Copy:
                         _rpt.updateRecordStatus (os.path.join(r, file), CRPT_COPIED, CRPT_NO)
                     self.message ('(%s)' % (str(e)), const_critical_text)
                     continue
-
         self.message ('Done.')
         if (log):
             log.CloseCategory()
-
         return True
-
     def get_group_filelist(self, input_source):          # static
         m_input_source = input_source.replace('\\', '/')
         input_path = os.path.dirname(m_input_source)
@@ -2142,7 +2145,6 @@ class Copy:
                 if (mk_path.startswith(p)):
                     file_buff.append(mk_path)
         return file_buff
-
     def batch(self, file_lst, args = None,  pre_copy_callback = None):
         threads = []
         files_len = len(file_lst)
@@ -2152,9 +2154,7 @@ class Copy:
             m = s + batch
             if (m >= files_len):
                 m =  files_len
-
             threads = []
-
             for i in range(s, m):
                 req = file_lst[i]
                 (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], getBooleanValue(cfg.getValue('iss3')))
@@ -2251,8 +2251,10 @@ class compression:
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
             _get_rstr_val = _rpt.getRecordStatus(_input_file, CRPT_PROCESSED)
-            if (_get_rstr_val == CRPT_YES):
-                self.message ('{} {}'.format(CRESUME_MSG_PREFIX, _input_file))
+            if (_get_rstr_val == CRPT_YES or
+                _rpt.operation == COP_UPL):
+                if (_rpt.operation != COP_UPL):
+                    self.message ('{} {}'.format(CRESUME_MSG_PREFIX, _input_file))
                 _do_process = False
         # ends
         post_process_output = output_file
@@ -2269,8 +2271,30 @@ class compression:
                             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
             # ends
+            do_process = _rpt and _rpt.operation != COP_NOCONVERT
+            if (not do_process):
+                if (input_file.startswith('/vsicurl/')):
+                    try:
+                        _dn_vsicurl_ = input_file.split('/vsicurl/')[1]
+                        import urllib2
+                        file_url = urllib2.urlopen(_dn_vsicurl_)
+                        with open(output_file, 'wb') as fp:
+                            buff = 2024 * 1024
+                            while True:
+                                chunk = file_url.read(buff)
+                                if not chunk: break
+                                fp.write(chunk)
+                    except Exception as e:
+                        if (_rpt):
+                            _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
+                            return False
+                else:
+                    if (getBooleanValue(self.m_user_config.getValue('istempinput')) or
+                        not getBooleanValue(cfg.getValue('iss3'))):
+                        shutil.copyfile(input_file, output_file)
             do_pyramids = self.m_user_config.getValue('Pyramids')
-            if (do_pyramids != CCMD_PYRAMIDS_ONLY):
+            if (do_pyramids != CCMD_PYRAMIDS_ONLY and
+                do_process):
                 args = [os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)]
                 if (args_callback is None):      # defaults
                     args.append ('-of')
@@ -2344,7 +2368,8 @@ class compression:
             ret = post_processing_callback(post_process_output, post_processing_callback_args, {'f' : post_process_output, 'cfg' : self.m_user_config})
             self.message('Status: (%s).' % ('OK' if ret == True else 'FAILED'))
         # ends
-        if (_rpt):
+        if (_rpt and
+            _rpt.operation != COP_UPL):
             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
     def createaOverview(self, input_file, isBQA = False):
@@ -2619,7 +2644,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6k'
+    __program_ver__ = 'v1.6l'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2887,36 +2912,41 @@ class Application(object):
             dn_cloud_type = cfg.getValue(CIN_CLOUD_TYPE, True)
         inAmazon = dn_cloud_type == CCLOUD_AMAZON or not dn_cloud_type
         # ends
-
         # let's create a restore point
         if (not self._args.input or        # assume it's a folder from s3/azure
             (self._args.input and
             not os.path.isfile(self._args.input))):
-            self._args.op = COP_RPT
-
+            if (not self._args.op):
+                self._args.op = COP_RPT
         # valid (op/utility) commands
         _utility = {
         COP_UPL : None,
         COP_DNL : None,
-        COP_RPT : None
+        COP_RPT : None,
+        COP_NOCONVERT : None
         }
         # ends
-
         if (self._args.op):
             self._args.op = self._args.op.lower()
             if (not self._args.op in _utility):
                 self._base.message ('Invalid utility operation mode ({})'.format(self._args.op), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
-            if (self._args.op == COP_UPL):
-                self._args.cloudupload = 'true'
-                self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
-            elif(self._args.op == COP_RPT):
+            if(self._args.op == COP_RPT or
+                self._args.op == COP_UPL or
+                self._args.op == COP_NOCONVERT):
                 g_rpt = Report(self._base);
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message ('Unable to init (Report)', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 g_is_generate_report = True
-
+                if (self._args.op == COP_UPL):
+                    self._args.cloudupload = 'true'
+                    self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
+                    if (cfg.getValue(CLOAD_RESTORE_POINT) and
+                        _rpt):
+                        if (not 'input' in _rpt._header):
+                            return(terminate(self._base, eFAIL))
+                        self._args.tempoutput = _rpt._header['input']
         # fix the slashes to force a convention
         if (self._args.input):
             self._args.input = self._base.convertToForwardSlash(self._args.input, not self._args.input.lower().endswith(Report.CJOB_EXT))
@@ -3015,11 +3045,12 @@ class Application(object):
             if (_cloudInput):
                 self._args.input = _cloudInput = _cloudInput.strip().replace('\\', '/')
             cfg.setValue(CIN_S3_PARENTFOLDER, _cloudInput)
-
         if (is_cloud_upload):
             if (not is_output_temp):
                 if ((self._args.op and self._args.op != COP_UPL) or
-                    not self._args.op):
+                    not self._args.op and
+                    (_rpt and
+                    _rpt.operation != COP_UPL)):
                     self._base.message ('-tempoutput must be specified if -cloudupload=true', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
             _access = cfg.getValue(COUT_AZURE_ACCESS)
@@ -3214,62 +3245,13 @@ class Application(object):
         user_args_Callback = {
         USR_ARG_UPLOAD : getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)),
         USR_ARG_DEL : getBooleanValue(cfg.getValue('Out_S3_DeleteAfterUpload'))
-        ##'til' : {'del' : False,
-        ##         'extensions' : ['til', 'imd', 'idx', 'tif', 'tif.aux.xml', 'lrc']
-        ##        }
         }
         # ends
-
-        # handle utility operations
-        if (self._args.op):
-            if (self._args.op == COP_UPL):
-                if (S3_storage):
-                    if (os.path.isfile(self._args.input)):
-                        try:
-                            with open(self._args.input, 'r') as _fptr:
-                                _rd = _fptr.readline()
-                                user_args_Callback[CSIN_UPL] = True         # setup config property
-                                while (_rd):
-                                    _rd = _rd.strip()
-                                    self._base.S3Upl (_rd, user_args_Callback)
-                                    _rd = _fptr.readline()
-                        except Exception as e:
-                            self._base.message ('{}'.format(str(e)), self._base.const_critical_text)
-                    elif (os.path.isdir (self._args.input)):
-                        user_args_Callback[CINC_SUB] = getBooleanValue(cfg.getValue('IncludeSubdirectories'))   # setup config property
-                        self._base.S3Upl('{}/'.format(self._args.input), user_args_Callback)
-                    else:
-                        self._base.message ('Invalid -input. ({})'.format(self._args.input), self._base.const_critical_text)
-                        return(terminate (self._base, eFAIL));
-                    retry_failed_lst  = []
-                    failed_upl_lst = S3_storage.getFailedUploadList()
-                    if (failed_upl_lst):
-                        [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
-                        # write out the upl_err_file
-                        _fptr = None
-                        if (self._log_path):
-                            try:
-                                if (not os.path.isdir(self._log_path)):
-                                    os.makedirs(self._log_path)
-                                ousr_date =  datetime.datetime.now()
-                                err_upl_file = os.path.join(self._log_path,
-                                '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day,
-                                ousr_date.hour, ousr_date.minute, ousr_date.second))
-                                with open(err_upl_file, 'w+') as _fptr:
-                                    for _wl in retry_failed_lst:
-                                        _fptr.write ('{}\n'.format(_wl))
-                            except Exception as e:
-                                self._base.message ('Writing the failed upload file list.\n{}'.format(str(e)), self._base.const_critical_text)
-                        # ends
-        # ends
-
         cpy = Copy(self._base)
-
         list = {
         'copy' : {'*'},
         'exclude' : {}
         }
-
         for i in cfg.getValue(CCFG_RASTERS_NODE) + cfg.getValue(CCFG_EXCLUDE_NODE):
             list['exclude'][i] = ''
 
@@ -3451,7 +3433,7 @@ class Application(object):
                     if (til):
                         if (til.find(req['f'])):
                             til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
-                            _build_pyramids = False             # build pyramids is always turned off for rasters that belong to (.til) files.
+                            _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
                     t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
                     t.daemon = True
                     t.start()
@@ -3659,17 +3641,16 @@ class Application(object):
                     for req in raster_buff:
                         (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                         try:
-                            self._base.message ('[Del] {}'.format(input_file))
-                            os.remove(input_file )
+                            if (os.path.exists(input_file)):
+                                self._base.message ('[Del] {}'.format(input_file))
+                                os.remove(input_file )
                         except Exception as exp:
                             self._base.message ('[Del] {} ({})'.format(input_file, str(exp)), self._base.const_warning_text)
                     self._base.message ('Done.')
         # ends
-
         if (not raster_buff):
             self._base.message ('No input rasters to process..', self._base.const_warning_text);
         # ends
-
         _status = eOK
         # write out the (job file) with updated status.
         if (_rpt):
@@ -3681,11 +3662,8 @@ class Application(object):
                     not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
                     _status = eFAIL
         # ends
-
         self._base.message ('Done..\n')
-
         return(terminate(self._base, _status))
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -3708,7 +3686,7 @@ def main():
     parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest='outputprofile');
     parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket');
     parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket');
-    parser.add_argument('-op', help='Utility operation mode [upload]', dest='op');
+    parser.add_argument('-op', help='Utility operation mode [upload/noconvert]', dest='op');
     parser.add_argument('-job', help='job/log-prefix file name', dest='job');
     parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath');
     parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input');
@@ -3725,3 +3703,4 @@ if __name__ == '__main__':
     ret = main()
     print ('\nDone..')
     exit(ret)
+
