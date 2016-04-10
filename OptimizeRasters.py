@@ -1032,49 +1032,37 @@ class S3Upload_:
         if (self.mp):
             self.mp = None
 
-
 class SlnTMStringIO:
     def __init__(self, size, buf = ''):
         self.m_size = size
         self.m_buff= mmap.mmap(-1, self.m_size)
         self.m_spos = self.m_fsize = 0
-
     def close(self):
         self.m_buff.close()
         del self.m_buff
         pass
-
     def next(self):
         pass
-
     def seek(self, pos, mode = 0):
         if mode == 1:
             pos += self.m_spos
         elif mode == 2:
             pos += len(self.m_buff)
         self.m_spos = max(0, pos)
-
     def tell(self):
         return self.m_spos
-
     def read(self, n = -1):
-
         buff_len = self.m_fsize
-
         nRead = (self.m_spos + n)
         if (nRead > buff_len):
             n = n - (nRead - buff_len)
-
         self.m_buff.seek(self.m_spos, 0)
         self.m_spos += n
-
         return str(self.m_buff.read(n))
-
     def readline(self, length=None):
         pass
     def readlines(self, sizehint = 0):
         pass
-
     def truncate(self, size=None):
         pass
     def write(self, s):
@@ -1087,7 +1075,6 @@ class SlnTMStringIO:
         pass
     def getvalue(self):
         pass
-
 
 class Store(object):
     # log error types
@@ -2644,7 +2631,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6m'
+    __program_ver__ = 'v1.6n'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -2912,6 +2899,9 @@ class Application(object):
             dn_cloud_type = cfg.getValue(CIN_CLOUD_TYPE, True)
         inAmazon = dn_cloud_type == CCLOUD_AMAZON or not dn_cloud_type
         # ends
+
+
+
         # let's create a restore point
         if (not self._args.input or        # assume it's a folder from s3/azure
             (self._args.input and
@@ -3023,8 +3013,10 @@ class Application(object):
             isinput_s3 = getBooleanValue(self._args.clouddownload);
 
         # import boto modules only when required. This allows users to run the program for only local file operations.
-        if (isinput_s3 or
-            getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
+        if ((inAmazon and
+             isinput_s3) or
+            (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) and
+             cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON)):
             cfg.setValue(CCFG_PRIVATE_INC_BOTO, True)
             try:
                 global boto
@@ -3346,8 +3338,7 @@ class Application(object):
                 _azureParentFolder = _azParent = cfg.getValue(CIN_AZURE_PARENTFOLDER, False) if not _rpt else _rpt.root
                 if (_azureParentFolder == '/'):
                     _azureParentFolder = ''
-                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(in_azure_storage.getAccountName, cfg.getValue('In_S3_Bucket')),
-                _azureParentFolder))
+                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format('http://{}.blob.core.windows.net/{}/'.format(in_azure_storage.getAccountName, cfg.getValue('In_S3_Bucket'))))
                 if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal)):
                     return(terminate(self._base, eFAIL))
                 if (not _restored):
@@ -3425,7 +3416,7 @@ class Application(object):
                 threads = []
                 for i in range(s, m):
                     req = files[i]
-                    (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                    (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     f, e = os.path.splitext(output_file)
                     if (cfg_keep_original_ext == False):
                         output_file = output_file.replace(e, '.{}'.format(cfg_mode.split('_')[0]))
