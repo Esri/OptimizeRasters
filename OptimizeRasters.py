@@ -14,18 +14,18 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160410
+# Version: 20160413
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
-# -tempinput -tempoutput -subs -clouddownload -cloudupload -clouduploadtype
+# -tempinput -tempoutput -subs -clouddownload -cloudupload
 # -inputprofile -outputprofile -op -job -inputprofile -outputprofile
-# -inputbucket -outputbucket -clonepath
+# -inputbucket -outputbucket -clonepath -clouddownloadtype -clouduploadtype
 # Usage: python.exe OptimizeRasters.py <arguments>
-# Notes: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
+# Note: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
 # file are case-sensitive and the program will fail if the correct paths are not
-# entered at the cmd-line or in the config file.
+# entered at the cmd-line/UI or in the config file.
 # Author: Esri Imagery Workflows team
 #------------------------------------------------------------------------------
 #!/usr/bin/env python
@@ -261,12 +261,10 @@ class Base(object):
             if(azure_storage is None):
                 self.message (internal_err_msg, const_critical_text)
                 return False
-
             properties = {
             'tempoutput' : cfg.getValue('tempoutput', False),
             'access' : cfg.getValue(COUT_AZURE_ACCESS, True)
             }
-
             if (True in [input_file.endswith(x) for x in cfg.getValue(CCFG_RASTERS_NODE)]):
                 _input_file = input_file.replace('\\', '/')
                 (p, n) = os.path.split(_input_file)
@@ -298,11 +296,9 @@ class Base(object):
                 properties
                 )):
                     ret_buff.append(input_file)
-
         if (CS3_MSG_DETAIL == True):
             self.message ('Following file(s) uploaded to ({})'.format(CCLOUD_AMAZON if upload_cloud_type == CCLOUD_AMAZON else CCLOUD_AZURE))
             [self.message ('{}'.format(f)) for f in ret_buff]
-
         if (user_args != None):
             if (USR_ARG_DEL in user_args):
                 if (user_args[USR_ARG_DEL] and
@@ -322,10 +318,8 @@ class Base(object):
                                 self.message ('[Del] %s' % (f))
                         except Exception as exp:
                             self.message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
-
         if (ret_buff):
             setUploadRecordStatus (input_file, CRPT_YES)
-
         return (len(ret_buff) > 0)
 
 class GDALInfo(object):
@@ -536,7 +530,7 @@ class UpdateMRF:
             if (self._cachePath):
                 cacheSubFolders = self._base.convertToForwardSlash(os.path.dirname(output)).replace(self._output if self._cachePath else self._homePath, '')
             (f, ext) = os.path.splitext(os.path.basename(self._input))
-            rep_data_file = rep_indx_file = '{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)
+            rep_data_file = rep_indx_file = os.path.abspath('{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)).replace('\\', '/') # Get abs path in case the -output was relative for cache to function properly.
             nodeData = nodeIndex = None
             if (comp_val):
                 extensions_lup = {
@@ -571,7 +565,7 @@ class UpdateMRF:
                 c.write(_mrfBody)
         except Exception as e:
             if (self._base):
-                self._base.message('Updating ({}) was not successful!\n{}'.format(output, str(e)), self._base.const_critical_text)
+                self._base.message('Updating ({}) was not successful!\nPlease make sure the input is (MRF) format.\n{}'.format(output, str(e)), self._base.const_critical_text)
             return False
         return True
 
@@ -1229,8 +1223,9 @@ class Azure(Store):
             _azureParentFolder = _user_config.getValue(CIN_AZURE_PARENTFOLDER, False)
             _azurePath = blob_source if _azureParentFolder == '/' else blob_source.replace(_azureParentFolder, '')
             output_path = _user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + _azurePath
-            if ((_user_config.getValue('istempoutput')) == True):
-                output_path = _user_config.getValue('tempoutput', False) + _azurePath
+            if (_user_config.getValue('istempoutput') == True):
+                if (not _user_config.getValue('Mode').endswith('mrf')):
+                    output_path = _user_config.getValue('tempoutput', False) + _azurePath
             is_raster = False
             is_tmp_input = getBooleanValue(_user_config.getValue('istempinput'))
             if (True in [_azurePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
@@ -1539,9 +1534,9 @@ class S3Storage:
             return False
         input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + S3_path
         if ((self.m_user_config.getValue('istempoutput')) == True):
-            input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -s3input=true
+            if (not self.m_user_config.getValue('Mode').endswith('mrf')):
+                input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -cloudinput=true
         is_raster = False
-
         is_tmp_input = getBooleanValue(self.m_user_config.getValue('istempinput'))
         if (True in [S3_path.endswith(x) for x in self.m_user_config.getValue('ExcludeFilter')]):
             return False
@@ -1551,16 +1546,13 @@ class S3Storage:
                 is_raster = True
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
-
         # collect input file names.
         if (fn_collect_input_files(S3_key)):
             return False
         # ends
-
         is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
         mk_path = input_path
         self._base.message ('[S3-Pull] %s' % (mk_path))
-
         flr = os.path.dirname(mk_path)
         if (os.path.exists(flr) == False):
             try:
@@ -2144,7 +2136,7 @@ class Copy:
             threads = []
             for i in range(s, m):
                 req = file_lst[i]
-                (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], getBooleanValue(cfg.getValue('iss3')))
+                (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], False)
                 dst_path = os.path.dirname(output_file)
                 if (os.path.exists(dst_path) == False):
                     os.makedirs(dst_path)
@@ -2326,7 +2318,7 @@ class compression:
                     if (iss3 == True and
                         do_pyramids == CCMD_PYRAMIDS_ONLY):
                         try:
-                            os.remove(output_file)      #*.ext__or__ temp vrt file.
+                            os.remove(output_file)      # *.ext__or__ temp vrt file.
                             in_  = output_file + '.ovr'
                             out_ = in_.replace('.__vrt__' + '.ovr', '.ovr')
                             if (os.path.exists(out_) == True):
@@ -2605,11 +2597,9 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
                         o += '/'
                     dst = (p.replace(t, o))
                     files.append({'src' : p, 'dst' : dst, 'f' : f})
-
     if (len(files) != 0):
         fn_cpy_.batch(files, {'mode' : 'move'}, None)
     return True
-
 
 class Args:
     def __init__(self):
@@ -2631,7 +2621,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.6n'
+    __program_ver__ = 'v1.6o'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3362,7 +3352,6 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
                 if (is_input_temp == True):
                     pass        # no post custom code yet for non-rasters
-
             files = raster_buff
             files_len = len(files)
             if (files_len):
@@ -3515,18 +3504,19 @@ class Application(object):
         # block to deal with caching ops.
         if (is_caching == True and
             do_pyramids != CCMD_PYRAMIDS_ONLY):
-            self._base.message ('\nProcessing caching operations...')
+            if (not g_is_generate_report):
+                self._base.message ('\nProcessing caching operations...')
             if (isinput_s3 == False):
                 raster_buff = []
                 if (cfg_mode == 'splitmrf'):        # set explicit (exclude list) for mode (splitmrf)
                     list['exclude']['idx'] = ''
                 ret = cpy.init(self._args.input, self._args.output, list, callbacks_for_meta, cfg)
                 if  (ret == False):
-                    self._base.message(CONST_CPY_ERR_0, const_critical_text);
+                    self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
                 ret = cpy.processs(pre_processing_callback = fn_pre_process_copy_default)
                 if (ret == False):
-                    self._base.message(CONST_CPY_ERR_1, const_critical_text);
+                    self._base.message(CONST_CPY_ERR_1, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
             if (g_is_generate_report and
                 g_rpt):
@@ -3535,6 +3525,7 @@ class Application(object):
                     _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     g_rpt.addFile(_src)
                 self._base.message ('{}'.format(CRESUME_CREATE_JOB_TEXT).format (_project_path))
+                self._args.cloudupload = 'false'    # Uploading is disabled for modes related to caching.
                 for arg in vars(self._args):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write();
@@ -3544,37 +3535,33 @@ class Application(object):
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
                 return
-
             for req in raster_buff:
                 (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                 (f, ext) = os.path.splitext(req['f'])
                 ext = ext.lower()
                 if (cfg_keep_original_ext == False):
                     output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
+                finalPath = output_file
+                if (is_output_temp):
+                    finalPath = output_file.replace(self._args.tempoutput, self._args.output)
                 if (cfg_mode != 'splitmrf'):     # uses GDAL utilities
-                    ret = comp.compress(input_file, output_file, args_Callback_for_meta)
+                    ret = comp.compress(input_file, output_file, args_Callback_for_meta,
+                    post_processing_callback = fn_copy_temp_dst if is_output_temp else None)    # and not isinput_s3
                 else:
                     try:
-                        shutil.copyfile(input_file, output_file)
+                        shutil.copyfile(input_file, finalPath)
                     except Exception as e:
-                        self._base.message ('[CPY] %s (%s)' % (input_file, str(e)), self._base.const_critical_text)
+                        self._base.message ('[CPY] {} ({})'.format(input_file, str(e)), self._base.const_critical_text)
                         continue
-                # let's deal with ops if the (-cache) folder is defined at the cmd-line
-                input_ = output_file.replace('\\', '/').split('/')
-                f, e = os.path.splitext(input_[len(input_) - 1])
-                if (os.path.exists(output_file) == False):
+                if (not os.path.exists(finalPath)):
                     continue
                 # update .mrf.
                 updateMRF = UpdateMRF(self._base)
                 _output_home_path = self._args.output
-                _tempOutput = cfg.getValue('tempoutput', False)
-                if (self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) or
-                    _tempOutput):
-                    _output_home_path = _tempOutput
-                if (updateMRF.init(output_file, _output_home_path, cfg.getValue('Mode'),
+                if (updateMRF.init(finalPath, _output_home_path, cfg.getValue('Mode'),
                     self._args.cache, _output_home_path, cfg.getValue(COUT_VSICURL_PREFIX, False))):
-                    if (not updateMRF.update(output_file)):
-                        self._base.message ('Updating ({}) was not successful!'.format(output_file), self._base.const_critical_text);
+                    if (not updateMRF.update(finalPath)):
+                        self._base.message ('Updating ({}) was not successful!'.format(finalPath), self._base.const_critical_text);
                         continue
                 # ends
         # do we have failed upload files on list?
@@ -3621,7 +3608,6 @@ class Application(object):
                         _fptr.close()
                         _fptr = None
         # ends
-
         # let's clean-up rasters @ -tempinput path
         dbg_delete = True
         if (dbg_delete == True):
