@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160413
+# Version: 20160419
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -455,13 +455,7 @@ class UpdateMRF:
             r = r.replace('\\', '/')
             if (r == input_folder):
                 for _file in f:
-                    if (_file.lower().endswith('.lrc') or
-                        _file.lower().endswith('.idx') or
-                        _file.lower().endswith('.pjg') or
-                        _file.lower().endswith('.ppng') or
-                        _file.lower().endswith('.pft') or
-                        _file.lower().endswith('.pjp') or
-                        _file.lower().endswith('.pzp')):
+                    if (True in [_file.lower().endswith(x) for x in ['.lrc', '.idx', '.pjg', '.ppng', '.pft', '.pjp', '.pzp']]):
                         continue
                     _mk_path = r + '/' + _file
                     if (_mk_path.startswith(_prefix)):
@@ -944,7 +938,6 @@ class S3Upload_:
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
 ##        return True   # debug. Must be removed before release.
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
-
         s3upl = S3Upload(self._base);
         idx = 1
         f = None
@@ -966,17 +959,11 @@ class S3Upload_:
             if (f):
                 f.close()
             return False
-
         threads = []
-
-        pos_buffer = 0
+        pos_buffer = upl_blocks = 0
         len_buffer = CCLOUD_UPLOAD_THREADS     # set this to no of parallel (chunk) uploads at once.
-
         tot_blocks = (f_size / CHUNK_MIN_SIZE) + 1
-        upl_blocks = 0
-
         self._base.message ('Total blocks to upload ({})'.format(tot_blocks))
-
         while(1):
             len_threads = len(threads)
             while(len_threads > 0):
@@ -994,11 +981,9 @@ class S3Upload_:
                     break
                 buffer.append(SlnTMStringIO(CHUNK_MIN_SIZE))
                 buffer[len(buffer) - 1].write(chunk)
-
             if (len(buffer) == 0 and
                 len(threads) == 0):
                 break
-
             for e in buffer:
                 try:
                     t = threading.Thread(target = s3upl.run,
@@ -1172,7 +1157,9 @@ class Azure(Store):
                     break
                 marker = batch.next_marker
             except:
-                self._base.message('Unable to read from ({}). Check container name.'.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
+                self._base.message('Unable to read from ({}). Check container name ({})/credentials.'.format(CCLOUD_AZURE.capitalize(),
+                self._dn_container_name),
+                self._base.const_critical_text)
                 return False
         parent_folder_ = None
         parent_folder_indx = -1
@@ -1427,17 +1414,24 @@ class S3Storage:
                 self.m_bucketname = s3_bucket
             _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
             # setup s3 connection
-            if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence not need to explicitly convert.
+            if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence no need to explicitly convert.
                 _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 else 'boto.s3.connection.OrdinaryCallingFormat')
                 try:
+                    _servicePoint = self.m_user_config.getValue('{}_S3_ServicePoint'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
                     self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
                     con = boto.connect_s3(self.CAWS_ACCESS_KEY_ID if not _profile_name else None, self.CAWS_ACCESS_KEY_SECRET if not _profile_name else None,
                     profile_name = _profile_name if _profile_name else None, calling_format = _calling_format,
-                    anon = True if self._isBucketPublic else False)
+                    anon = True if self._isBucketPublic else False, host = _servicePoint if _servicePoint else boto.s3.connection.NoHostProvided)
                 except Exception as e:
                     self._base.message (str(e), self._base.const_critical_text)
                     return False
-                self.bucketupload = con.get_bucket(self.m_bucketname, False, None)
+                self.bucketupload = con.lookup(self.m_bucketname, True, None)
+                if (not self.bucketupload):
+                    self._base.message ('Invalid {} S3 bucket ({})/credentials.'.format(
+                    'output' if direction == CS3STORAGE_OUT else 'input',
+                    self.m_bucketname),
+                    self._base.const_critical_text)
+                    return False
             # ends
         _remote_path = remote_path
         if (os.path.isfile(_remote_path)):      # are we reading a file list?
@@ -1448,7 +1442,6 @@ class S3Storage:
             except Exception as e:
                 self._base.message ('Report ({})'.format(str(e)), self._base.const_critical_text)
                 return False
-
         self.remote_path = _remote_path.replace("\\","/")
         if (self.remote_path[-1:] != '/'):
             self.remote_path += '/'
@@ -1508,7 +1501,6 @@ class S3Storage:
         except Exception as e:
             self._base.message (e.message, const_critical_text)
             return False
-
         # Process (til) files once all the associate files have been copied from (cloud) to (local)
         if (til):
             for _til in til:
@@ -1844,7 +1836,6 @@ def args_Callback_for_meta(args, user_data = None):
                 m_lerc_prec = lerc_prec
         except:     # could throw if index isn't found
             pass    # ingnore with defaults.
-
     args.append ('-of')
     args.append ('MRF')
     args.append ('-co')
@@ -2250,17 +2241,25 @@ class compression:
                             _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
             # ends
-            do_process = _rpt and _rpt.operation != COP_NOCONVERT
+            isModeClone = self.m_user_config.getValue('Mode') == 'clonemrf'
+            do_process = (_rpt and _rpt.operation != COP_NOCONVERT) and not isModeClone
             if (not do_process):
+                self.message('CPY {}'.format(_input_file))
                 if (input_file.startswith('/vsicurl/')):
                     try:
                         _dn_vsicurl_ = input_file.split('/vsicurl/')[1]
                         import urllib2
                         file_url = urllib2.urlopen(_dn_vsicurl_)
+                        validateForClone = isModeClone
                         with open(output_file, 'wb') as fp:
                             buff = 2024 * 1024
                             while True:
                                 chunk = file_url.read(buff)
+                                if (validateForClone):
+                                    validateForClone = False
+                                    if (chunk[:10] != '<{}>'.format(CMRF_DOC_ROOT)):
+                                        self.message ('Invalid MRF ({})'.format(_dn_vsicurl_), const_critical_text)
+                                        raise Exception
                                 if not chunk: break
                                 fp.write(chunk)
                     except Exception as e:
@@ -2271,6 +2270,42 @@ class compression:
                     if (getBooleanValue(self.m_user_config.getValue('istempinput')) or
                         not getBooleanValue(cfg.getValue('iss3'))):
                         shutil.copyfile(input_file, output_file)
+                if (isModeClone):
+                    # Simulate the MRF file update (to include the CachedSource) which was earlier done via the GDAL_Translate->MRF driver.
+                    try:
+                        _CDOC_ROOT = 'MRF_META'
+                        _CDOC_CACHED_SOURCE = 'CachedSource'
+                        _CDOC_SOURCE = 'Source'
+                        doc = minidom.parse(output_file)
+                        nodeMeta = doc.getElementsByTagName(_CDOC_ROOT)
+                        nodeRaster = doc.getElementsByTagName('Raster')
+                        if (not nodeMeta or
+                            not nodeRaster):
+                            raise Exception()
+                        cachedNode = doc.getElementsByTagName(_CDOC_CACHED_SOURCE)
+                        if (not cachedNode):
+                            cachedNode.append(doc.createElement(_CDOC_CACHED_SOURCE))
+                        nodeSource = doc.getElementsByTagName(_CDOC_SOURCE)
+                        if (not nodeSource):
+                            nodeSource.append(doc.createElement(_CDOC_SOURCE))
+                        if (nodeSource[0].hasChildNodes()):
+                            nodeSource[0].removeChild(nodeSource[0].firstChild)
+                        nodeSource[0].appendChild(doc.createTextNode(input_file))
+                        cachedNode[0].appendChild(nodeSource[0])
+                        nodeMeta[0].insertBefore(cachedNode[0], nodeRaster[0])
+                        with open (output_file, "w") as c:
+                            _mrfBody = doc.toxml().replace('&quot;', '"')       # GDAL mrf driver can't handle XML entity names.
+                            _indx = _mrfBody.find ('<{}>'.format(_CDOC_ROOT))
+                            if (_indx == -1):
+                                raise Exception()
+                            _mrfBody = _mrfBody[_indx:]
+                            c.write(_mrfBody)
+                    except:
+                        self.message ('Invalid MRF ({})'.format(input_file), const_critical_text)
+                        if (_rpt):
+                            _rpt.updateRecordStatus (_input_file, CRPT_PROCESSED, CRPT_NO)
+                        return False
+                    # ends
             do_pyramids = self.m_user_config.getValue('Pyramids')
             if (do_pyramids != CCMD_PYRAMIDS_ONLY and
                 do_process):
@@ -2619,22 +2654,19 @@ class Args:
             _return_str = _return_str[:len(_return_str) -1]
         return _return_str
 
-
 class Application(object):
-    __program_ver__ = 'v1.6o'
+    __program_ver__ = 'v1.6p'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
     'file are case-sensitive and the program will fail if the correct path/case is not ' + \
     'entered at the cmd-line or in the config file.\n'
-
     def __init__(self, args):
         self._usr_args = args
         self._msg_callback = None
         self._log_path = None
         self._base = None
         self._postMessagesToArcGIS = False
-
     def __load_config__ (self, config):
         global cfg
         if (self._args is None):
@@ -2676,7 +2708,6 @@ class Application(object):
         cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
         # ends
         return True
-
     def __setup_log_support(self):
         log = None
         try:
@@ -2685,14 +2716,12 @@ class Application(object):
                 solutionLib_path = os.path.dirname(solutionLib_path)
             _CLOG_FOLDER = 'logs'
             self._log_path  = os.path.join(solutionLib_path, _CLOG_FOLDER)
-
             sys.path.append(os.path.join(solutionLib_path, 'solutionsLog'))
             import logger
             log = logger.Logger();
             log.Project ('OptimizeRasters')
             log.LogNamePrefix('OR')
             log.StartLog()
-
             cfg_log_path = cfg.getValue('LogPath')
             if (cfg_log_path):
                 if (os.path.isdir(cfg_log_path) == False):
@@ -2700,14 +2729,11 @@ class Application(object):
                     cfg_log_path = None
             if (cfg_log_path):
                 self._log_path = os.path.join(cfg_log_path, _CLOG_FOLDER)
-
             log.SetLogFolder(self._log_path)
             print ('Log-path set to ({})'.format(self._log_path))
-
         except Exception as e:
             print ('Warning: External logging support disabled! ({})'.format(str(e)));
         # ends
-
         # let's write to log (input config file content plus all cmd-line args)
         if (log):
             # inject cmd-line
@@ -2728,7 +2754,6 @@ class Application(object):
             log.Message(' '.join(cmd_line), const_general_text);
             log.CloseCategory()
             # ends
-
             # inject cfg content
             log.CreateCategory('Input-config-values')
             for v in cfg.m_cfgs:
@@ -2736,7 +2761,6 @@ class Application(object):
             log.CloseCategory()
             # ends
         return Base(log, self._msg_callback, cfg)
-
     def writeToConsole(self, msg, status = const_general_text):
         if (self._msg_callback):
             return (self._msg_callback(msg, status))
@@ -2792,12 +2816,10 @@ class Application(object):
                 break
         # ends
         return True
-
     def registerMessageCallback(self, fnptr):
         if (not fnptr):
             return False
         self._msg_callback = fnptr
-
     @property
     def postMessagesToArcGIS(self):
         return self._postMessagesToArcGIS
@@ -2809,7 +2831,6 @@ class Application(object):
             return
         self._postMessagesToArcGIS = self._base.getBooleanValue(value)
         self._base._m_log.isGPRun = self.postMessagesToArcGIS
-
     def __jobContentCallback(self, line):
         if (cfg):
             if (cfg.getValue(CLOAD_RESTORE_POINT)):      # ignore if not called from main()
@@ -2824,7 +2845,6 @@ class Application(object):
                     return True
                 setattr (self._args, _key, _hdr[1].strip())
         return True
-
     def run(self):
         global raster_buff, \
         til, \
@@ -2881,7 +2901,6 @@ class Application(object):
                 _status = self.run()
                 return
         # ends
-
         # detect input cloud type
         inAmazon = CCLOUD_AMAZON
         dn_cloud_type = self._args.clouddownloadtype;
@@ -2889,9 +2908,6 @@ class Application(object):
             dn_cloud_type = cfg.getValue(CIN_CLOUD_TYPE, True)
         inAmazon = dn_cloud_type == CCLOUD_AMAZON or not dn_cloud_type
         # ends
-
-
-
         # let's create a restore point
         if (not self._args.input or        # assume it's a folder from s3/azure
             (self._args.input and
@@ -2935,12 +2951,10 @@ class Application(object):
         if (self._args.cache):
             self._args.cache = self._base.convertToForwardSlash(self._args.cache)
         # ends
-
         # read in (interleave)
         if (cfg.getValue(CCFG_INTERLEAVE) is None):
             cfg.setValue(CCFG_INTERLEAVE, 'PIXEL');
         # ends
-
         # overwrite (Out_CloudUpload, IncludeSubdirectories) with cmd-line args if defined.
         if (self._args.cloudupload or self._args.s3output):
             cfg.setValue(CCLOUD_UPLOAD, getBooleanValue(self._args.cloudupload) if self._args.cloudupload else getBooleanValue(self._args.s3output))
@@ -2948,7 +2962,6 @@ class Application(object):
             if (self._args.clouduploadtype):
                 self._args.clouduploadtype = self._args.clouduploadtype.lower()
                 cfg.setValue(COUT_CLOUD_TYPE, self._args.clouduploadtype)
-
         is_cloud_upload = getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) if cfg.getValue(CCLOUD_UPLOAD) else getBooleanValue(cfg.getValue(CCLOUD_UPLOAD_OLD_KEY))
         # for backward compatibility (-s3output)
         if (not cfg.getValue(CCLOUD_UPLOAD)):
@@ -2956,11 +2969,9 @@ class Application(object):
         if (not cfg.getValue(COUT_CLOUD_TYPE)):
             cfg.setValue(COUT_CLOUD_TYPE, CCLOUD_AMAZON)
         # ends
-
         if (self._args.subs):
             cfg.setValue('IncludeSubdirectories', getBooleanValue(self._args.subs))
         # ends
-
         # do we have -tempinput path to copy rasters first before conversion.
         is_input_temp = False
         if (self._args.tempinput):
@@ -2975,7 +2986,6 @@ class Application(object):
             cfg.setValue('istempinput', is_input_temp)
             cfg.setValue(CUSR_TEMPINPUT, self._args.tempinput)
         # ends
-
         # let's setup -tempoutput
         is_output_temp = False
         if (self._args.tempoutput):
@@ -2995,13 +3005,11 @@ class Application(object):
             cfg.setValue('istempoutput', is_output_temp)
             cfg.setValue('tempoutput', self._args.tempoutput)
         # ends
-
         # are we doing input from S3|Azure?
-        err_init_msg = 'Unable to initialize the ({}) upload module!. Check module setup/credentials. Quitting..'
+        err_init_msg = 'Unable to initialize the ({}) upload module! Check module setup/credentials. Quitting..'
         isinput_s3 = getBooleanValue(self._args.s3input);
         if (self._args.clouddownload):
             isinput_s3 = getBooleanValue(self._args.clouddownload);
-
         # import boto modules only when required. This allows users to run the program for only local file operations.
         if ((inAmazon and
              isinput_s3) or
@@ -3017,7 +3025,6 @@ class Application(object):
                 self._base.message ('\n%s requires the (boto) module to run its S3 specific operations. Please install (boto) for python.' % (self.__program_name__), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
         # ends
-
         # take care of missing -input and -output if -clouddownload==True
         # Note/Warning: S3/Azure inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3/Azure
         if (isinput_s3 == True):
@@ -3056,7 +3063,6 @@ class Application(object):
                     self._args.output = self._args.output.strip().replace('\\', '/')
                 cfg.setValue(COUT_S3_PARENTFOLDER, self._args.output)
         # ends
-
         if (not self._args.output or
             not self._args.input):
             if ((not self._args.op and
@@ -3274,7 +3280,6 @@ class Application(object):
             cfg_threads = CCFG_THREADS
             self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS), self._base.const_warning_text)
         # ends
-
         # let's deal with copying when -input is on s3
         if (isinput_s3 == True):
             cfg.setValue('iss3', True);
@@ -3289,26 +3294,27 @@ class Application(object):
             in_s3_bucket = self._args.inputbucket
             if (not in_s3_bucket):
                 in_s3_bucket = cfg.getValue('In_S3_Bucket' if inAmazon else 'In_Azure_Container', False)
-
             if (in_s3_parent is None or
                 in_s3_bucket is None):
                     self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
             cfg.setValue('In_S3_Bucket', in_s3_bucket)          # update (in s3 bucket name in config)
-
             in_s3_parent = in_s3_parent.replace('\\', '/')
             if (in_s3_parent[:1] == '/'):
                 in_s3_parent = in_s3_parent[1:]
                 cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
-
             if (inAmazon):
                 o_S3_storage = S3Storage(self._base)
                 ret =  o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN)
                 if (ret == False):
-                    self._base.message ('Unable to initialize S3-storage module!. Quitting..', self._base.const_critical_text);
+                    self._base.message ('Unable to initialize S3-storage! Quitting..', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
-                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else
-                '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN)) # vsicurl doesn't like 'https'
+                if (str(o_S3_storage.bucketupload.connection).lower().endswith('.ecstestdrive.com')):   # handles EMC namespace cloud urls differently
+                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.public.ecstestdrive.com/{}/'.format(
+                    o_S3_storage.bucketupload.connection.aws_access_key_id.split('@')[0], o_S3_storage.m_bucketname))
+                else:   # for all other standard cloud urls
+                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else
+                    '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN)) # vsicurl doesn't like 'https'
                 o_S3_storage.inputPath = self._args.output
                 if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
                     self._base.message ('Unable to read S3-Content', self._base.const_critical_text);
@@ -3371,10 +3377,8 @@ class Application(object):
                         })
                         files[i]['src'] = get_dst_path
                     cpy.batch(cpy_files_, None)
-
                 self._base.message('Converting..');
-
-            # collect all the raster input files.
+            # collect all the input raster files.
             if (g_is_generate_report and
                 g_rpt):
                 for req in files:
