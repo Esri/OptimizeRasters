@@ -727,6 +727,10 @@ class OptimizeRasters(object):
                 parameters[11].enabled = True
                 if ((aVal.strip().lower() == 'clonemrf') or (aVal.strip().lower() == 'cachingmrf')):
                     parameters[11].enabled = False
+                    parameters[10].enabled = False
+                else:
+                    parameters[11].enabled = True
+                    parameters[10].enabled = True
 
 
     def updateMessages(self, parameters):
@@ -747,8 +751,9 @@ class OptimizeRasters(object):
                 parameters[6].clearMessage()
                 if (pType == 'Amazon S3') or (pType == 'Microsoft Azure'):
                     if parameters[10].altered == False:
-                        parameters[10].SetWarningMessage('For cloud storage output, a temporary location is required. Specify a cloud storage location.')
-                        #parameters[10].SetWarningMessage('For Cloud storage output, creation of MRF cache files is required. Please specify a location.')
+                        if parameters[10].enabled == True:
+                            parameters[10].SetWarningMessage('For cloud storage output, a temporary location is required. Specify a cloud storage location.')
+                            #parameters[10].SetWarningMessage('For Cloud storage output, creation of MRF cache files is required. Please specify a location.')
                     else:
                         if parameters[10].valueAsText != '':
                             parameters[10].clearMessage()
