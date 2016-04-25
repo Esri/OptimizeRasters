@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# Copyright 2015 Esri
+# Copyright 2016 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160309
+# Version: 20160424
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -205,32 +205,62 @@ def config_Init(parentfolder,filename):
         return config
 
 def config_writeSections(configfileName,peAction,section,option1,value1,option2,value2):
-
     if peAction == 'Overwrite Existing':
-
         appConfig = config
         appConfig.remove_section(section)
         mode = 'w'
-
     elif peAction == 'Delete Existing':
         config.remove_section(section)
         mode = 'w'
         with open(configfileName, mode) as configfile:
             config.write(configfile)
             configfile.close
-        return
-
+        return True
     else:
         appConfig = ConfigParser.RawConfigParser()
         mode = 'a'
-
+    # let's validate the credentials before writing out.
+    if (peAction.lower().startswith('overwrite') or     # update existing or add new but ignore for del.
+        mode == 'a'):
+        try:
+            import OptimizeRasters
+        except Exception as e:
+            arcpy.AddError (str(e))
+            return False
+        storageType = OptimizeRasters.CCLOUD_AMAZON
+        if (option1 and
+            option1.lower().startswith('azure')):
+            storageType = OptimizeRasters.CCLOUD_AZURE
+        profileEditorUI = OptimizeRasters.ProfileEditorUI(section, storageType, value1, value2)
+        ret = profileEditorUI.validateCredentials()
+        if (not ret):
+            [arcpy.AddError(i) for i in profileEditorUI.errors]
+            return False
+        # ends
     appConfig.add_section(section)
     appConfig.set(section, option1, value1)
     appConfig.set(section, option2, value2)
-
     with open(configfileName, mode) as configfile:
         appConfig.write(configfile)
         configfile.close
+    return True
+
+def getAvailableBuckets(ctlProfileType, ctlProfileName):
+    try:
+        import OptimizeRasters
+        if (ctlProfileType.valueAsText):
+            storageType = OptimizeRasters.CCLOUD_AMAZON
+            if (ctlProfileType.valueAsText.lower().startswith('local')):
+                return []
+            elif (ctlProfileType.valueAsText.lower().find('azure') != -1):
+                storageType = OptimizeRasters.CCLOUD_AZURE
+            ORUI = OptimizeRasters.OptimizeRastersUI(ctlProfileName.value, storageType)
+            if (not ORUI):
+                raise Exception()
+            return ORUI.getAvailableBuckets()
+    except:
+        pass
+    return []
 
 class Toolbox(object):
     def __init__(self):
@@ -305,7 +335,6 @@ class ResumeJobs(object):
         return app.run()
         # ends
 
-
 class ProfileEditor(object):
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
@@ -315,9 +344,7 @@ class ProfileEditor(object):
         self.tool = 'ProfileEditor'
 #        self.UI = UI()
         pass
-
     def getParameterInfo(self):
-
         profileType = arcpy.Parameter(
         displayName="Profile Type",
         name="profileType",
@@ -364,9 +391,6 @@ class ProfileEditor(object):
 
         parameters = [profileType,profileName,accessKey,secretAccessKey,action]
         return parameters
-
-        pass
-
     def updateParameters(self, parameters):
         if parameters[0].altered == True:
             pType = parameters[0].valueAsText
@@ -376,19 +400,14 @@ class ProfileEditor(object):
             elif pType == 'Microsoft Azure':
                 pFolder = '.OptimizeRasters'
                 pfileName = 'azure_credentials'
-
             config_Init(pFolder,pfileName)
-
             if parameters[1].altered == True:
                 pName = parameters[1].valueAsText
-
                 if (config.has_section(pName)):
                     parameters[4].enabled = True
                 else:
                     parameters[4].enabled = False
-
         if parameters[4].enabled == True:
-
             if parameters[2].value == None :
                 parameters[2].value = 'None'
             if parameters[3].value == None :
@@ -398,10 +417,6 @@ class ProfileEditor(object):
                 parameters[2].value = ''
             if parameters[3].value == 'None' :
                 parameters[3].value = ''
-
-
-
-
     def updateMessages(self, parameters):
         if parameters[0].altered == True:
             pType = parameters[0].valueAsText
@@ -414,41 +429,30 @@ class ProfileEditor(object):
             if parameters[1].altered == True:
                 pType = parameters[0].valueAsText
                 pName = parameters[1].valueAsText
-
                 if (config.has_section(pName)):
                     parameters[1].setWarningMessage('Profile name already exists. Select the appropriate action.')
                 else:
                     parameters[1].clearMessage()
-
-
     def isLicensed(parameters):
         """Set whether tool is licensed to execute."""
         return True
-
     def execute(self, parameters, messages):
-
         pType = parameters[0].valueAsText
-
         homedrive =  os.getenv('HOMEDRIVE')
         homepath =  os.getenv('HOMEPATH')
         homefolder = os.path.join(homedrive,homepath)
-
         if pType == 'Amazon S3':
             pFolder = '.aws'
             pfileName = 'credentials'
             option1 = 'aws_access_key_id'
             option2 = 'aws_secret_access_key'
-
         elif pType == 'Microsoft Azure':
             pFolder = '.OptimizeRasters'
             pfileName = 'azure_credentials'
             option1 = 'azure_account_name'
             option2 = 'azure_account_key'
-
-
         awsfolder = os.path.join(homefolder,pFolder)
         #awsfile = os.path.join(awsfolder,pfileName)
-
         pName = parameters[1].valueAsText
         accessKeyID = parameters[2].valueAsText
         accessSeceretKey = parameters[3].valueAsText
@@ -456,13 +460,9 @@ class ProfileEditor(object):
             peAction = ''
         else:
             peAction = parameters[4].valueAsText
-
         config_writeSections(awsfile,peAction,pName,option1,accessKeyID,option2,accessSeceretKey)
-        # debug
-
 
 class OptimizeRasters(object):
-
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
         self.label = "OptimizeRasters"
@@ -509,6 +509,7 @@ class OptimizeRasters(object):
         datatype="GPString",
         parameterType="Required",
         direction="Input")
+        inBucket.filter.type = "ValueList"
         #inBucket.category = 'Input Parameters'
 
         inPath = arcpy.Parameter(
@@ -658,9 +659,7 @@ class OptimizeRasters(object):
                 parameters[3].value = 'Local'
                 parameters[2].enabled = False
                 parameters[3].enabled = False
-
             else:
-
                 if parameters[1].valueAsText == 'Amazon S3':
                     pFolder = '.aws'
                     pfileName = 'credentials'
@@ -681,9 +680,17 @@ class OptimizeRasters(object):
 
                 p2Config = config_Init(pFolder,pfileName)
                 p2List = p2Config.sections()
-
                 parameters[2].filter.list = p2List
 
+        if parameters[2].altered == True:
+            # fetch the list of bucket names available for the selected input profile
+            availableBuckets = getAvailableBuckets(parameters[1], parameters[2])
+            if (availableBuckets):
+                parameters[3].filter.list = availableBuckets        # 3 == bucket names
+            else:
+                parameters[3].filter.list = []
+                parameters[3].value = ''
+            # ends
 
         if parameters[6].altered == True:
             if parameters[6].valueAsText == 'Local':
@@ -720,7 +727,15 @@ class OptimizeRasters(object):
 
                 parameters[7].filter.list = p6List
 
-
+        if parameters[7].altered == True:
+            # fetch the list of bucket names available for the selected output profile
+            availableBuckets = getAvailableBuckets(parameters[6], parameters[7])
+            if (availableBuckets):
+                parameters[8].filter.list = availableBuckets        # 8 == bucket names
+            else:
+                parameters[8].filter.list = []
+                parameters[8].value = ''
+            # ends
         if parameters[14].altered == True:
                 configValList = parameters[14].value
                 aVal = configValList[0][1]
@@ -731,7 +746,6 @@ class OptimizeRasters(object):
                 else:
                     parameters[11].enabled = True
                     parameters[10].enabled = True
-
 
     def updateMessages(self, parameters):
         if parameters[1].altered == True:
@@ -752,8 +766,7 @@ class OptimizeRasters(object):
                 if (pType == 'Amazon S3') or (pType == 'Microsoft Azure'):
                     if parameters[10].altered == False:
                         if parameters[10].enabled == True:
-                            parameters[10].SetWarningMessage('For cloud storage output, a temporary location is required. Specify a cloud storage location.')
-                            #parameters[10].SetWarningMessage('For Cloud storage output, creation of MRF cache files is required. Please specify a location.')
+                            parameters[10].SetWarningMessage('For cloud storage output, a temporary output location is required.')
                     else:
                         if parameters[10].valueAsText != '':
                             parameters[10].clearMessage()
