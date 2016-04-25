@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160419
+# Version: 20160421
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -107,7 +107,6 @@ CRESUME_HDR_INPUT = 'input'
 CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
 
 # const node-names in the config file
-
 CCLOUD_AMAZON = 'amazon'
 CCLOUD_AZURE = 'azure'
 
@@ -154,6 +153,50 @@ CS3_UPLOAD_RETRIES = 3
 CS3STORAGE_IN = 0
 CS3STORAGE_OUT = 1
 # ends
+
+class UI(object):
+    def __init__(self, profileName = None):
+        self._profileName = profileName
+        self._errorText = []
+        self._availableBuckets = []
+    @property
+    def errors(self):
+        return iter(self._errorText)
+
+class ProfileEditorUI(UI):
+    def __init__(self, profileName, storageType, accessKey, secretkey, credentialProfile = None):
+        super(ProfileEditorUI, self).__init__(profileName)
+        self._accessKey = accessKey
+        self._secretKey = secretkey
+        self._storageType = storageType
+        self._credentialProfile = credentialProfile
+    def validateCredentials(self):
+        try:
+            if (self._storageType == CCLOUD_AMAZON):
+                import boto
+                con = boto.connect_s3(self._accessKey, self._secretKey,
+                profile_name = self._credentialProfile if self._credentialProfile else None)
+                [self._availableBuckets.append(i.name) for i in con.get_all_buckets()]  # this will throw if credentials are invalid.
+            elif(self._storageType == CCLOUD_AZURE):
+                azure_storage = Azure(self._accessKey, self._secretKey, self._credentialProfile, None);
+                azure_storage.init()
+                [self._availableBuckets.append(i.name) for i in azure_storage._blob_service.list_containers()]  # this will throw.
+            else:
+                raise Exception('Invalid storage type')
+        except Exception as e:
+            self._errorText.append ('Invalid Credentials>')
+            self._errorText.append (str(e))
+            return False
+        return True
+
+class OptimizeRastersUI(ProfileEditorUI):
+    def __init__(self, profileName, storageType):
+        super(OptimizeRastersUI, self).__init__(profileName, storageType, None, None, profileName)
+    def getAvailableBuckets(self):
+        ret = self.validateCredentials()
+        if (not ret):
+            return None
+        return self._availableBuckets
 
 class MEMORYSTATUSEX(ctypes.Structure):
     _fields_ = [
@@ -2655,7 +2698,7 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6p'
+    __program_ver__ = 'v1.6q'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3049,7 +3092,6 @@ class Application(object):
                         return(terminate(self._base, eFAIL))
                 if (_access == 'private'):      # private is not recognized by Azure, used internally only for clarity
                     cfg.setValue(COUT_AZURE_ACCESS, None)       # None == private container
-
             if (self._args.output is None):
                 _cloud_upload_type = cfg.getValue(COUT_CLOUD_TYPE, True)
                 if (_cloud_upload_type == CCLOUD_AMAZON):
@@ -3668,7 +3710,7 @@ def main():
     parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket');
     parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket');
     parser.add_argument('-op', help='Utility operation mode [upload/noconvert]', dest='op');
-    parser.add_argument('-job', help='job/log-prefix file name', dest='job');
+    parser.add_argument('-job', help='Name output job/log-prefix file name', dest='job');
     parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath');
     parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input');
     parser.add_argument('-s3output', help='Deprecated. Use (-cloudupload)', dest='s3output');
@@ -3684,4 +3726,3 @@ if __name__ == '__main__':
     ret = main()
     print ('\nDone..')
     exit(ret)
-
