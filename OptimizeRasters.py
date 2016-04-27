@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160421
+# Version: 20160426
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2528,32 +2528,25 @@ class compression:
 class Config:
     def __init__(self):
         pass
-
     def init(self, config, root):
         try:
             self.m_doc = minidom.parse(config)
         except:
             return False
-
         nodes = self.m_doc.getElementsByTagName(root)
         if (len(nodes) == 0):
             return False
-
         node = nodes[0].firstChild
         self.m_cfgs = {}
-
         while (node != None):
             if (node.hasChildNodes() == False):
                 node = node.nextSibling
                 continue
-
             if ((node.nodeName in self.m_cfgs) == False):
                 self.m_cfgs[node.nodeName] = node.firstChild.nodeValue
-
             node = node.nextSibling
             pass
         return True
-
     def getValue(self, key, toLower = True):  # returns (value) or None
         if ((key in self.m_cfgs) == True):
             if (toLower == True):
@@ -2563,7 +2556,6 @@ class Config:
                     pass
             return self.m_cfgs[key]
         return None
-
     def setValue(self, key, value):
         if (key in self.m_cfgs):
             if (hasattr(self.m_cfgs[key], '__setitem__') == True):
@@ -2574,6 +2566,11 @@ class Config:
 def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     input_file = os.path.join(inputfldr, file)
     output_file = os.path.join(outputfldr, file)
+    ifile_toLower = input_file.lower()
+    if (ifile_toLower.startswith('http://') or
+        ifile_toLower.startswith('https://')):
+        cfg.setValue(CIN_S3_PREFIX, '/vsicurl/')
+        isinput_s3 = True
     if (isinput_s3):
         input_file = cfg.getValue(CIN_S3_PREFIX, False) + input_file
         output_file = outputfldr
@@ -2698,7 +2695,7 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6q'
+    __program_ver__ = 'v1.6r'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
