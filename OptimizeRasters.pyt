@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160424
+# Version: 20160428
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -654,9 +654,8 @@ class OptimizeRasters(object):
         if parameters[1].altered == True:
             if parameters[1].valueAsText == 'Local':
                 parameters[2].filter.list = []
-                parameters[3].filter.list = []
+                parameters[3].filter.list =  []
                 parameters[2].value = 'Profile'
-                parameters[3].value = 'Local'
                 parameters[2].enabled = False
                 parameters[3].enabled = False
             else:
@@ -665,19 +664,15 @@ class OptimizeRasters(object):
                     pfileName = 'credentials'
                     parameters[2].enabled = True
                     parameters[3].enabled = True
-
                 elif parameters[1].valueAsText =='Microsoft Azure':
                     pFolder = '.OptimizeRasters'
                     pfileName = 'azure_credentials'
                     parameters[2].enabled = True
                     parameters[3].enabled = True
-
                 if parameters[3].value == 'Local':
                     parameters[3].value = ''
-
                 if parameters[2].value == 'Profile':
                     parameters[2].value = ''
-
                 p2Config = config_Init(pFolder,pfileName)
                 p2List = p2Config.sections()
                 parameters[2].filter.list = p2List
@@ -688,8 +683,13 @@ class OptimizeRasters(object):
             if (availableBuckets):
                 parameters[3].filter.list = availableBuckets        # 3 == bucket names
             else:
-                parameters[3].filter.list = []
-                parameters[3].value = ''
+                if (parameters[1].value == 'Local'):
+                    parameters[3].filter.list = [' ']
+                    parameters[3].enabled = False
+                    parameters[3].value = ' '
+                else:
+                    parameters[3].filter.list = []
+                    parameters[3].value = ''
             # ends
 
         if parameters[6].altered == True:
@@ -709,7 +709,6 @@ class OptimizeRasters(object):
                     pfileName = 'credentials'
                     parameters[7].enabled = True
                     parameters[8].enabled = True
-
                 elif parameters[6].valueAsText =='Microsoft Azure':
                     pFolder = '.OptimizeRasters'
                     pfileName = 'azure_credentials'
@@ -722,6 +721,7 @@ class OptimizeRasters(object):
                 if parameters[7].value == 'Profile':
                     parameters[7].value = ''
 
+
                 p6Config = config_Init(pFolder,pfileName)
                 p6List = p6Config.sections()
 
@@ -733,8 +733,13 @@ class OptimizeRasters(object):
             if (availableBuckets):
                 parameters[8].filter.list = availableBuckets        # 8 == bucket names
             else:
-                parameters[8].filter.list = []
-                parameters[8].value = ''
+                if (parameters[6].value == 'Local'):
+                    parameters[8].filter.list = [' ']
+                    parameters[8].value = ' '
+                    parameters[8].enabled = False
+                else:
+                    parameters[8].filter.list = []
+                    parameters[8].value = ''
             # ends
         if parameters[14].altered == True:
                 configValList = parameters[14].value
