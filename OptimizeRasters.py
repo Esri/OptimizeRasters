@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160426
+# Version: 20160501
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1458,7 +1458,7 @@ class S3Storage:
             _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
             # setup s3 connection
             if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO) == True):    # return type is a boolean hence no need to explicitly convert.
-                _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 else 'boto.s3.connection.OrdinaryCallingFormat')
+                _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 and self.m_bucketname.find('.') == -1 else 'boto.s3.connection.OrdinaryCallingFormat')
                 try:
                     _servicePoint = self.m_user_config.getValue('{}_S3_ServicePoint'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
                     self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
@@ -2695,7 +2695,7 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6r'
+    __program_ver__ = 'v1.6s'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
