@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160501
+# Version: 20160503
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -278,6 +278,10 @@ class Base(object):
             self._m_log.WriteLog('#all')   #persist information/errors collected.
     def S3Upl(self, input_file, user_args, *args):
         global _rpt
+        internal_err_msg = 'Internal error at [S3Upl]'
+        if (not self._m_user_config):
+            self.message (internal_err_msg, self.const_critical_text)
+            return False
         if (_rpt):
             _source_path = getSourcePathUsingTempOutput(input_file)
             if (_source_path):
@@ -285,11 +289,10 @@ class Base(object):
                 if (_ret_val == CRPT_YES):
                     return True
         ret_buff = []
-        internal_err_msg = 'Internal error at [S3Upl]'
-        upload_cloud_type = cfg.getValue(COUT_CLOUD_TYPE, True)
+        upload_cloud_type = self._m_user_config.getValue(COUT_CLOUD_TYPE, True)
         if (upload_cloud_type == CCLOUD_AMAZON):
             if (S3_storage is None):    # globally declared: S3_storage
-                self.message (internal_err_msg, const_critical_text)
+                self.message (internal_err_msg, self.const_critical_text)
                 return False
             _single_upload = _include_subs = False    # def
             if (user_args):
@@ -302,43 +305,34 @@ class Base(object):
                 return False
         elif (upload_cloud_type == CCLOUD_AZURE):
             if(azure_storage is None):
-                self.message (internal_err_msg, const_critical_text)
+                self.message (internal_err_msg, self.const_critical_text)
                 return False
             properties = {
-            'tempoutput' : cfg.getValue('tempoutput', False),
-            'access' : cfg.getValue(COUT_AZURE_ACCESS, True)
+            'tempoutput' : self._m_user_config.getValue('tempoutput', False),
+            'access' : self._m_user_config.getValue(COUT_AZURE_ACCESS, True)
             }
-            if (True in [input_file.endswith(x) for x in cfg.getValue(CCFG_RASTERS_NODE)]):
-                _input_file = input_file.replace('\\', '/')
-                (p, n) = os.path.split(_input_file)
-                indx = n.find('.')
-                file_name_prefix = n
-                if (indx >= 0): file_name_prefix = file_name_prefix[:indx]
-                input_folder = os.path.dirname(_input_file)
-                for r,d,f in os.walk(input_folder):
-                    r = r.replace('\\', '/')
-                    if (r == input_folder):
-                        for _file in f:
-    ##                        if (_file.endswith('.lrc')):
-    ##                            continue
-                            if (_file.startswith(file_name_prefix)):
-                                file_to_upload = os.path.join(r, _file)
-                                if (azure_storage.upload(
-                                file_to_upload,
-                                cfg.getValue (COUT_AZURE_CONTAINER, False),
-                                cfg.getValue (CCFG_PRIVATE_OUTPUT, False),
-                                properties
-                                )):
-                                    ret_buff.append(file_to_upload)
-                        break
-            else:
-                if (azure_storage.upload(
-                input_file,
-                cfg.getValue (COUT_AZURE_CONTAINER, False),
-                cfg.getValue (CCFG_PRIVATE_OUTPUT, False),
-                properties
-                )):
-                    ret_buff.append(input_file)
+            _input_file = input_file.replace('\\', '/')
+            (p, n) = os.path.split(_input_file)
+            indx = n.find('.')
+            file_name_prefix = n
+            if (indx >= 0): file_name_prefix = file_name_prefix[:indx]
+            input_folder = os.path.dirname(_input_file)
+            for r,d,f in os.walk(input_folder):
+                r = r.replace('\\', '/')
+                if (r == input_folder):
+                    for _file in f:
+##                        if (_file.endswith('.lrc')):
+##                            continue
+                        if (_file.startswith(file_name_prefix)):
+                            file_to_upload = os.path.join(r, _file)
+                            if (azure_storage.upload(
+                            file_to_upload,
+                            self._m_user_config.getValue (COUT_AZURE_CONTAINER, False),
+                            self._m_user_config.getValue (CCFG_PRIVATE_OUTPUT, False),
+                            properties
+                            )):
+                                ret_buff.append(file_to_upload)
+                    break
         if (CS3_MSG_DETAIL == True):
             self.message ('Following file(s) uploaded to ({})'.format(CCLOUD_AMAZON if upload_cloud_type == CCLOUD_AMAZON else CCLOUD_AZURE))
             [self.message ('{}'.format(f)) for f in ret_buff]
@@ -359,8 +353,8 @@ class Base(object):
                                     time.sleep(CDEL_DELAY_SECS)
                                     os.remove(f)
                                 self.message ('[Del] %s' % (f))
-                        except Exception as exp:
-                            self.message ('[Del] Err. (%s)' % (str(exp)), const_critical_text)
+                        except Exception as e:
+                            self.message ('[Del] Err. (%s)' % (str(e)), self.const_critical_text)
         if (ret_buff):
             setUploadRecordStatus (input_file, CRPT_YES)
         return (len(ret_buff) > 0)
@@ -1321,18 +1315,15 @@ class Azure(Store):
                 _tempoutput = properties['tempoutput']
                 _parent_folder = os.path.dirname(input_path.replace('\\', '/').replace(_tempoutput, _parent_folder))
         super(Azure, self).upload(input_path, container_name, _parent_folder, properties)
-
         blob_path = self._input_file_path
         blob_name = os.path.join(self._upl_parent_folder, os.path.basename(blob_path))
 ##        if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
 ##            return True                          #  "
 ##        return True     # debug. Must be removed before release.
         isContainerCreated = False
-
         t0 = datetime.datetime.now()
         time_to_wait_before_retry = 3
         max_time_to_wait = 60
-
         self.message ('Accessing container ({})..'.format(self._upl_container_name))
         while(True):
             try:
@@ -1359,7 +1350,6 @@ class Azure(Store):
             self.message ('Unable to create the container ({})'.format(self._upl_container_name), self.const_critical_text)
             exit(1)
         self.message ('Done.')
-
         f = None
         try:         # see if we can open it
             f = open (blob_path, 'rb')
@@ -1369,22 +1359,15 @@ class Azure(Store):
             if (f):
                 f.close()
             return False
-
         threads = []
         block_ids = []
-
-        pos_buffer = 0
+        pos_buffer = upl_blocks = 0
         len_buffer = CCLOUD_UPLOAD_THREADS     # set this to no of parallel (chunk) uploads at once.
-
         tot_blocks = (f_size / Azure.CHUNK_MIN_SIZE) + 1
-        upl_blocks = 0
         idx = 1
-
         self.message ('Uploading ({})'.format(blob_path))
         self.message ('Total blocks to upload ({})'.format(tot_blocks))
-
         st = datetime.datetime.now()
-
         while(1):
             len_threads = len(threads)
             while(len_threads > 0):
@@ -1402,11 +1385,9 @@ class Azure(Store):
                     break
                 buffer.append(SlnTMStringIO(len(chunk)))
                 buffer[len(buffer) - 1].write(chunk)
-
             if (len(buffer) == 0 and
                 len(threads) == 0):
                 break
-
             for e in buffer:
                 try:
                     block_id = base64.b64encode(str(idx))
@@ -1432,10 +1413,8 @@ class Azure(Store):
         finally:
             if (f):
                 f.close()
-
         self.message ('Duration. ({} sec)'.format((datetime.datetime.now() - st).seconds))
         self.message ('Done.')
-
         return True
 
 class S3Storage:
@@ -1772,6 +1751,9 @@ def args_Callback(args, user_data = None):
     m_interleave = 'PIXELS'
     if (user_data):
         try:
+            userParameters = user_data[CIDX_USER_CONFIG].getValue('GDAL_Translate_UserParameters')
+            if (userParameters):
+                [args.append(i) for i in userParameters.split()]
             compression_ = user_data[CIDX_USER_CONFIG].getValue('Compression')
             if (compression_):
                 m_compression = compression_
@@ -1815,7 +1797,7 @@ def args_Callback(args, user_data = None):
                         m_compression == 'deflate'):
                         args.append ('-co')
                         args.append (' predictor={}'.format(m_predictor))
-        except: # could throw if index isn't found
+        except:     # could throw if index isn't found
             pass    # ingnore with defaults.
     args.append ('-of')
     args.append (m_mode)
@@ -2695,7 +2677,7 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6s'
+    __program_ver__ = 'v1.6t'
     __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
