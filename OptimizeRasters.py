@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160503
+# Version: 20160509
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -608,7 +608,9 @@ class Report:
     def __init__(self, base):
         self._input_list = []
         self._input_list_info = {}
-        self._header = {}
+        self._header = {
+        'version' : '{}/{}'.format(Application.__program_ver__, Application.__program_date__)
+        }
         self._base = base
         self._isInputHTTP = False
     def init(self, report_file, root = None):
@@ -666,7 +668,8 @@ class Report:
         _path = os.path.dirname(_input.replace('\\', '/'))
         if (not _path.endswith('/')):
             _path += '/'
-        if (_path == self._header['output']):
+        if ('output' in self._header and
+            _path == self._header['output']):
             _input  = _input.replace(_path, self._header[CRESUME_HDR_INPUT])
         (p, e) = os.path.splitext(_input)
         while(e):
@@ -1239,6 +1242,8 @@ class Azure(Store):
             _resumeReporter = _user_config.getValue('handler_resume_reporter')
             # what does the restore point say about the (S3_key) status?
             if (_resumeReporter):
+                if (not blob_source in _resumeReporter._input_list_info):   # if -subs=true but not on .orjob/internal list, bail out early
+                    return True
                 _get_rstr_val = _resumeReporter.getRecordStatus(blob_source, CRPT_COPIED)
                 if (_get_rstr_val == CRPT_YES):
                     self._base.message ('{} {}'.format(CRESUME_MSG_PREFIX, blob_source))
@@ -1247,9 +1252,10 @@ class Azure(Store):
             _azureParentFolder = _user_config.getValue(CIN_AZURE_PARENTFOLDER, False)
             _azurePath = blob_source if _azureParentFolder == '/' else blob_source.replace(_azureParentFolder, '')
             output_path = _user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + _azurePath
-            if (_user_config.getValue('istempoutput') == True):
-                if (not _user_config.getValue('Mode').endswith('mrf')):
-                    output_path = _user_config.getValue('tempoutput', False) + _azurePath
+            isUpload = getBooleanValue(_user_config.getValue(CCLOUD_UPLOAD))
+            if (_user_config.getValue('istempoutput') and
+                isUpload):
+                output_path = _user_config.getValue('tempoutput', False) + _azurePath
             is_raster = False
             is_tmp_input = getBooleanValue(_user_config.getValue('istempinput'))
             if (True in [_azurePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
@@ -1276,7 +1282,7 @@ class Azure(Store):
                 if (not is_tmp_input):
                     return True
             writeTo = output_path
-            self._base.message ('[S3-Pull] {}'.format(blob_source))
+            self._base.message ('[Azure-Pull] {}'.format(blob_source))
             self._blob_service.get_blob_to_path(self._dn_container_name, blob_source, writeTo)
             if (self._event_postCopyToLocal):
                 self._event_postCopyToLocal(writeTo);
@@ -1285,7 +1291,7 @@ class Azure(Store):
                 _resumeReporter.updateRecordStatus (blob_source, CRPT_COPIED, CRPT_YES)
             # ends
             # Handle any post-processing, if the final destination is to S3, upload right away.
-            if (getBooleanValue(_user_config.getValue(CCLOUD_UPLOAD))):
+            if (isUpload):
                 if (getBooleanValue(_user_config.getValue('istempinput'))):
                     if (is_raster):
                         return True
@@ -1544,12 +1550,13 @@ class S3Storage:
                 return True
         # ends
         if (self.m_user_config is None):     # shouldn't happen
-            self._base.message ('Intenal/User config not initialized.', const_critical_text)
+            self._base.message ('Internal/User config not initialized.', self._base.const_critical_text)
             return False
         input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + S3_path
-        if ((self.m_user_config.getValue('istempoutput')) == True):
-            if (not self.m_user_config.getValue('Mode').endswith('mrf')):
-                input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -cloudinput=true
+        is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
+        if ((self.m_user_config.getValue('istempoutput')) and
+            is_cpy_to_s3):
+            input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -cloudinput=true
         is_raster = False
         is_tmp_input = getBooleanValue(self.m_user_config.getValue('istempinput'))
         if (True in [S3_path.endswith(x) for x in self.m_user_config.getValue('ExcludeFilter')]):
@@ -1564,7 +1571,6 @@ class S3Storage:
         if (fn_collect_input_files(S3_key)):
             return False
         # ends
-        is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
         mk_path = input_path
         self._base.message ('[S3-Pull] %s' % (mk_path))
         flr = os.path.dirname(mk_path)
@@ -1572,7 +1578,7 @@ class S3Storage:
             try:
                 os.makedirs(flr)
             except Exception as e:
-                self._base.message ('(%s)' % (str(e)), const_critical_text)
+                self._base.message ('(%s)' % (str(e)), self._base.const_critical_text)
                 if (_rpt):
                     _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
                 return False
@@ -1592,7 +1598,7 @@ class S3Storage:
                 fout.flush()
                 startbyte = endbyte + 1
         except Exception as e:
-            self._base.message ('({})'.format(str(e)), const_critical_text);
+            self._base.message ('({}\n{})'.format(str(e), mk_path), self._base.const_critical_text);
             if (_rpt):
                 _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_NO)
             return False
@@ -2114,7 +2120,7 @@ class Copy:
                                     # ends
                              if (self._input_flist):
                                 _rpt.updateRecordStatus (src_file, CRPT_COPIED, CRPT_YES)
-                             self.message ('{} {}'.format(CRESUME_MSG_PREFIX if not do_copy else 'CPY', src_file.replace(self.src, '')))
+                             self.message ('{} {}'.format(CRESUME_MSG_PREFIX if not do_copy else '[CPY]', src_file.replace(self.src, '')))
                     # copy post-processing
                     if (do_post_processing_cb):
                         if (post_processing_callback):
@@ -2269,7 +2275,7 @@ class compression:
             isModeClone = self.m_user_config.getValue('Mode') == 'clonemrf'
             do_process = (_rpt and _rpt.operation != COP_NOCONVERT) and not isModeClone
             if (not do_process):
-                self.message('CPY {}'.format(_input_file))
+                self.message('[CPY] {}'.format(_input_file))
                 if (input_file.startswith('/vsicurl/')):
                     try:
                         _dn_vsicurl_ = input_file.split('/vsicurl/')[1]
@@ -2677,8 +2683,9 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6t'
-    __program_name__ = 'OptimizeRasters.py %s' % __program_ver__
+    __program_ver__ = 'v1.6u'
+    __program_date__ = '20160509'
+    __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
     'file are case-sensitive and the program will fail if the correct path/case is not ' + \
@@ -2758,10 +2765,11 @@ class Application(object):
         # ends
         # let's write to log (input config file content plus all cmd-line args)
         if (log):
+            log.Message('version={}/{}'.format(Application.__program_ver__, Application.__program_date__), const_general_text)
             # inject cmd-line
             log.CreateCategory('Cmd-line')
             cmd_line  = []
-            _args_text = str(self._args).lower().replace('namespace(', '').replace('\\\\', '/')
+            _args_text = str(self._args).replace('Namespace(', '').replace('\\\\', '/')
             _args_text_len = len(_args_text)
             _args = _args_text[:_args_text_len - 1 if _args_text[-1:] == ')' else _args_text_len].split(',')
             for arg in _args:
@@ -2770,9 +2778,8 @@ class Application(object):
                 except:
                     log.Message('Invalid arg at cmd-line (%s)' % (arg.strip()), const_critical_text)
                     continue
-                if (v != 'none'):
+                if (v != 'None'):
                     cmd_line.append('-{}'.format(arg.replace('\'', '"').strip()))
-
             log.Message(' '.join(cmd_line), const_general_text);
             log.CloseCategory()
             # ends
@@ -3352,9 +3359,9 @@ class Application(object):
                 if (not _restored):
                     in_azure_storage._mode = in_azure_storage.CMODE_SCAN_ONLY
                     cfg.setValue(CIN_AZURE_PARENTFOLDER, in_s3_parent if in_s3_parent.endswith('/') else in_s3_parent + '/')
-                _azureParentFolder = _azParent = cfg.getValue(CIN_AZURE_PARENTFOLDER, False) if not _rpt else _rpt.root
-                if (_azureParentFolder == '/'):
-                    _azureParentFolder = ''
+                _azParent = cfg.getValue(CIN_AZURE_PARENTFOLDER, False) if not _rpt else _rpt.root
+                if (not cfg.getValue(CIN_AZURE_PARENTFOLDER)):
+                    cfg.setValue(CIN_AZURE_PARENTFOLDER, _azParent)
                 cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format('http://{}.blob.core.windows.net/{}/'.format(in_azure_storage.getAccountName, cfg.getValue('In_S3_Bucket'))))
                 if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal)):
                     return(terminate(self._base, eFAIL))
@@ -3439,7 +3446,7 @@ class Application(object):
                         if (til.find(req['f'])):
                             til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
                             _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
-                    t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and isinput_s3 == False else None, user_args_Callback))
+                    t = threading.Thread(target = comp.compress, args = (input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload == True else fn_copy_temp_dst if is_output_temp == True and is_cloud_upload == False else None, user_args_Callback))
                     t.daemon = True
                     t.start()
                     threads.append(t)
