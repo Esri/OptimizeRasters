@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160509
+# Version: 20160525
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -46,6 +46,7 @@ import datetime
 import argparse
 import math
 import ctypes
+import urllib
 
 # enum error codes
 eOK = 0
@@ -77,8 +78,6 @@ CPRJ_NAME = 'ProjectName'
 CLOAD_RESTORE_POINT = '__LOAD_RESTORE_POINT__'
 CCMD_ARG_INPUT = '__CMD_ARG_INPUT__'
 
-CUSR_TEMPINPUT = 'tempinput'
-
 # utility const
 CSIN_UPL = 'SIN_UPL'
 CINC_SUB = 'INC_SUB'
@@ -105,6 +104,8 @@ CRESUME_HDR_INPUT = 'input'
 # ends
 
 CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
+CTEMPOUTPUT = 'tempoutput'
+CTEMPINPUT = 'tempinput'
 
 # const node-names in the config file
 CCLOUD_AMAZON = 'amazon'
@@ -219,7 +220,48 @@ class MEMORYSTATUSEX(ctypes.Structure):
     def memoryPerDownloadChunk(self):
         return int(self.memoryStatus().ullAvailPhys * .01)  # download file isn't split in chunks, for now usage is set to 0.01
     def memoryPerUploadChunk(self, totalThreads):    # get upload payload size per thread for the total cloud upload threads required.
-        return int(self.memoryStatus().ullAvailPhys * .10 / totalThreads)
+        memPerChunk = int(self.memoryStatus().ullAvailPhys * .10 / totalThreads)
+        CMINSIZEALLOWED = 5242880
+        if (memPerChunk < CMINSIZEALLOWED):
+            memPerChunk = CMINSIZEALLOWED
+        return memPerChunk
+
+class RasterAssociates(object):
+    def __init__(self):
+        self._info = {}
+    def _stripExtensions(self, relatedExts):
+        return ';'.join([x.strip() for x in relatedExts.split(';') if x.strip()])
+    def addRelatedExtensions(self, primaryExt, relatedExts):    # relatedExts can be a ';' delimited list.
+        if (not primaryExt or
+            not primaryExt.strip() or
+            not relatedExts):
+            return False
+        if (primaryExt in self._info):
+            self._info[primaryExt] += ';{}'.format(self._stripExtensions(relatedExts))
+            return True
+        self._info[primaryExt] = self._stripExtensions(relatedExts)
+        return True
+    def findExtension(self, path):
+        if (not path):
+            return False
+        pos = path.rfind('.')
+        ext = None
+        while(pos != -1):
+            ext  = path[pos+1:]
+            pos = path[:pos].rfind('.')
+        return ext
+    def findPrimaryExtension(self, relatedExt):
+        _relatedExt = self.findExtension(relatedExt)
+        if (not _relatedExt):
+            return False
+        for primaryExt in self._info:
+            if (self._info[primaryExt].find (_relatedExt) != -1):
+                splt = self._info[primaryExt].split(';')
+                if (_relatedExt in splt):
+                    return primaryExt
+        return None
+    def getInfo(self):
+        return self._info
 
 class Base(object):
     # log status types enums
@@ -251,6 +293,17 @@ class Base(object):
              not _input.lower().startswith('http')):
             _input += '/'
         return _input
+    def urlEncode(self, url):
+        if (not url):
+            return ''
+        _url = url.strip().replace('\\', '/')
+        _storePaths = []
+        for path in _url.split('/'):
+            if (path.find(':') != -1):
+                _storePaths.append(path)
+                continue
+            _storePaths.append(urllib.urlencode({'url': path}).split('=')[1])
+        return '/'.join(_storePaths)
     def getBooleanValue(self, value):        # helper function
         if (value is None):
             return False
@@ -276,6 +329,27 @@ class Base(object):
     def close(self):
         if (self._m_log):
             self._m_log.WriteLog('#all')   #persist information/errors collected.
+    def copyMetadataToClonePath(self, sourcePath):
+        if (not self.getUserConfiguration):
+            return False
+        _clonePath = self.getUserConfiguration.getValue(CCLONE_PATH, False)
+        if (not _clonePath):
+            return True     # not an error.
+        presentMetaLocation = self.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT)
+        if (self.getUserConfiguration.getValue(CTEMPOUTPUT) and
+            getBooleanValue(self.getUserConfiguration.getValue(CCLOUD_UPLOAD))):
+            presentMetaLocation = self.getUserConfiguration.getValue(CTEMPOUTPUT)
+        _cloneDstFile = sourcePath.replace(presentMetaLocation, _clonePath)
+        _cloneDirs = os.path.dirname(_cloneDstFile)
+        try:
+            if (not os.path.exists(_cloneDirs)):
+                os.makedirs(_cloneDirs)
+            if (sourcePath != _cloneDstFile):
+                shutil.copyfile(sourcePath, _cloneDstFile)
+        except Exception as e:
+            self.message (str(e), self.const_critical_text)
+            return False
+        return True
     def S3Upl(self, input_file, user_args, *args):
         global _rpt
         internal_err_msg = 'Internal error at [S3Upl]'
@@ -308,7 +382,7 @@ class Base(object):
                 self.message (internal_err_msg, self.const_critical_text)
                 return False
             properties = {
-            'tempoutput' : self._m_user_config.getValue('tempoutput', False),
+            CTEMPOUTPUT : self._m_user_config.getValue(CTEMPOUTPUT, False),
             'access' : self._m_user_config.getValue(COUT_AZURE_ACCESS, True)
             }
             _input_file = input_file.replace('\\', '/')
@@ -321,8 +395,6 @@ class Base(object):
                 r = r.replace('\\', '/')
                 if (r == input_folder):
                     for _file in f:
-##                        if (_file.endswith('.lrc')):
-##                            continue
                         if (_file.startswith(file_name_prefix)):
                             file_to_upload = os.path.join(r, _file)
                             if (azure_storage.upload(
@@ -525,9 +597,16 @@ class UpdateMRF:
             comp_val =  None         # for (splitmrf)
             doc = minidom.parse(self._input)
             _rasterSource = self._input
-            if (self._outputURLPrefix and
+            if (self._outputURLPrefix and   # -cloudupload?
                 self._homePath):
                 _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
+                if (_rasterSource.startswith('/vsicurl/')):
+                    _rasterSource = self._base.urlEncode(_rasterSource)
+            else:   # if -tempoutput is set, readjust the CachedSource/Source path to point to -output.
+                if (self._base.getUserConfiguration.getValue(CTEMPOUTPUT)):
+                    _output = self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT)
+                    if (_output):
+                        _rasterSource = _rasterSource.replace(self._homePath, _output)
             nodeMeta = doc.getElementsByTagName(_CDOC_ROOT)
             nodeRaster = doc.getElementsByTagName('Raster')
             if (not nodeMeta or
@@ -613,6 +692,8 @@ class Report:
         }
         self._base = base
         self._isInputHTTP = False
+        self._m_rasterAssociates = RasterAssociates()
+        self._m_rasterAssociates.addRelatedExtensions('img', 'ige')
     def init(self, report_file, root = None):
         if (not self._base or
             not isinstance(self._base, Base)):
@@ -655,9 +736,9 @@ class Report:
             value is None):
             return False
         _input = input.strip()
-        if (CUSR_TEMPINPUT in self._header):
-            if (_input.startswith(self._header[CUSR_TEMPINPUT])):
-                _input = _input.replace(self._header[CUSR_TEMPINPUT], self.root)
+        if (CTEMPINPUT in self._header):
+            if (_input.startswith(self._header[CTEMPINPUT])):
+                _input = _input.replace(self._header[CTEMPINPUT], self.root)
                 (p, e) = os.path.split(_input)
                 for _k in self._input_list_info:
                     if (_k.startswith(p)):
@@ -962,19 +1043,17 @@ class S3Upload_:
         self.mp = None
         pass;
     def init(self):
-        # multip-upload test
         try:
             self.mp = self.m_s3_bucket.initiate_multipart_upload(self.m_s3_path, policy=self.m_acl_policy)
-        except Exception as exp:
-            self._base.message('({})'.format(str(exp)), self._base.const_critical_text)
+        except Exception as e:
+            self._base.message('({})'.format(str(e)), self._base.const_critical_text)
             return False
         return True
-        # ends
     def upload(self):
         # read in big-file in chunks
         CHUNK_MIN_SIZE = MEMORYSTATUSEX().memoryStatus().memoryPerUploadChunk(CCLOUD_UPLOAD_THREADS)
-##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
-##            return True                                 # "
+        #if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
+        #    return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
 ##        return True   # debug. Must be removed before release.
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
@@ -1185,7 +1264,7 @@ class Azure(Store):
         return False
     def getBrowseContent(self):
         return self._browsecontent
-    def browseContent(self, container_name, parent_folder, cb = None):
+    def browseContent(self, container_name, parent_folder, cb = None, precb = None):
         super(Azure, self).setSource(container_name, parent_folder)
         blobs = []
         marker = None
@@ -1229,7 +1308,13 @@ class Azure(Store):
                         passed = True
             if (not parent_folder_ or
                 passed):
-                self._addBrowseContent(blob_name)
+                self._addBrowseContent(blob_name)   # chs
+                if (precb and
+                    self._base.getUserConfiguration):
+                    _resumeReporter = self._base.getUserConfiguration.getValue('handler_resume_reporter')
+                    if (_resumeReporter):
+                        remotePath = _resumeReporter._header['input']
+                        precb(blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header['output'])
                 if (cb and
                     self._mode != self.CMODE_SCAN_ONLY):
                     cb(blob_name)
@@ -1240,7 +1325,7 @@ class Azure(Store):
                 return False
             _user_config = self._base.getUserConfiguration
             _resumeReporter = _user_config.getValue('handler_resume_reporter')
-            # what does the restore point say about the (S3_key) status?
+            # what does the restore point say about the (blob_source) status?
             if (_resumeReporter):
                 if (not blob_source in _resumeReporter._input_list_info):   # if -subs=true but not on .orjob/internal list, bail out early
                     return True
@@ -1255,14 +1340,19 @@ class Azure(Store):
             isUpload = getBooleanValue(_user_config.getValue(CCLOUD_UPLOAD))
             if (_user_config.getValue('istempoutput') and
                 isUpload):
-                output_path = _user_config.getValue('tempoutput', False) + _azurePath
-            is_raster = False
+                output_path = _user_config.getValue(CTEMPOUTPUT, False) + _azurePath
+            is_raster = False   # chs
             is_tmp_input = getBooleanValue(_user_config.getValue('istempinput'))
+            primaryRaster = None
+            if (_resumeReporter and
+                is_tmp_input):
+                primaryRaster = _resumeReporter._m_rasterAssociates.findPrimaryExtension(_azurePath)
             if (True in [_azurePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
                 return False
-            elif (True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
+            elif (primaryRaster or  # if the _azurePath is an associated raster file, consider it as a raster.
+                True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
                 if (is_tmp_input):
-                    output_path = _user_config.getValue(CUSR_TEMPINPUT, False) + _azurePath
+                    output_path = _user_config.getValue(CTEMPINPUT, False) + _azurePath
                 is_raster = True
             if (_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
                 return False
@@ -1289,6 +1379,10 @@ class Azure(Store):
             # mark download/copy status
             if (_resumeReporter):
                 _resumeReporter.updateRecordStatus (blob_source, CRPT_COPIED, CRPT_YES)
+            # ends
+            # copy metadata files to -clonepath if set
+            if (not primaryRaster): # do not copy raster associated files to clone path.
+                self._base.copyMetadataToClonePath(output_path)
             # ends
             # Handle any post-processing, if the final destination is to S3, upload right away.
             if (isUpload):
@@ -1317,8 +1411,8 @@ class Azure(Store):
         elif (_parent_folder == '/'):
             _parent_folder = ''
         if (properties):
-            if ('tempoutput' in properties):
-                _tempoutput = properties['tempoutput']
+            if (CTEMPOUTPUT in properties):
+                _tempoutput = properties[CTEMPOUTPUT]
                 _parent_folder = os.path.dirname(input_path.replace('\\', '/').replace(_tempoutput, _parent_folder))
         super(Azure, self).upload(input_path, container_name, _parent_folder, properties)
         blob_path = self._input_file_path
@@ -1483,7 +1577,7 @@ class S3Storage:
     def getFailedUploadList(self):
         return self.__m_failed_upl_lst;
     # code to iterate a S3 bucket/folder
-    def getS3Content(self, prefix, cb = None, precb = None):
+    def getS3Content(self, prefix, cb = None, precb = None):    # chs
         is_link = not self._input_flist is None;
         keys = self.bucketupload.list(prefix) if not is_link else _rpt
         root_only = True
@@ -1518,7 +1612,7 @@ class S3Storage:
                         if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
                             continue
                     if (cb):
-                        if (precb):
+                        if (precb): # chs
                             if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath) == True):     # if raster/exclude list, do not proceed.
                                 if (getBooleanValue(self.m_user_config.getValue('istempinput')) == False):
                                     continue
@@ -1537,7 +1631,7 @@ class S3Storage:
         return True
     # ends
     # code to deal with s3-local-cpy
-    def S3_copy_to_local(self, S3_key, S3_path):
+    def S3_copy_to_local(self, S3_key, S3_path):    # chs
         err_msg_0 = 'S3/Local path is invalid'
         if (S3_key is None):   # get rid of invalid args.
                 self._base.message (err_msg_0)
@@ -1556,14 +1650,20 @@ class S3Storage:
         is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
         if ((self.m_user_config.getValue('istempoutput')) and
             is_cpy_to_s3):
-            input_path = self.m_user_config.getValue('tempoutput', False) + S3_path  # -tempoutput must be set with -cloudinput=true
+            input_path = self.m_user_config.getValue(CTEMPOUTPUT, False) + S3_path  # -tempoutput must be set with -cloudinput=true
         is_raster = False
         is_tmp_input = getBooleanValue(self.m_user_config.getValue('istempinput'))
+        # chs
+        primaryRaster = None
+        if (_rpt and
+            is_tmp_input):
+            primaryRaster = _rpt._m_rasterAssociates.findPrimaryExtension(S3_path)
         if (True in [S3_path.endswith(x) for x in self.m_user_config.getValue('ExcludeFilter')]):
             return False
-        elif (True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
+        elif (primaryRaster or  # if the S3_Path is an associated raster file, consider it as a raster.
+            True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
             if (is_tmp_input == True):
-                input_path = self.m_user_config.getValue(CUSR_TEMPINPUT, False) + S3_path
+                input_path = self.m_user_config.getValue(CTEMPINPUT, False) + S3_path
                 is_raster = True
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
@@ -1617,6 +1717,10 @@ class S3Storage:
         # mark download/copy status
         if (_rpt):
             _rpt.updateRecordStatus (S3_key.name, CRPT_COPIED, CRPT_YES)
+        # ends
+        # copy metadata files to -clonepath if set
+        if (not primaryRaster): # do not copy raster associated files to clone path.
+            self._base.copyMetadataToClonePath(mk_path)
         # ends
         # Handle any post-processing, if the final destination is to S3, upload right away.
         if (is_cpy_to_s3 == True):
@@ -1682,7 +1786,7 @@ class S3Storage:
                             if (rep.endswith('/') == False):
                                 rep += '/'
                             if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
-                                rep = self.m_user_config.getValue('tempoutput', False)
+                                rep = self.m_user_config.getValue(CTEMPOUTPUT, False)
                             upl_file = mk_path.replace(rep, self.remote_path if self.m_user_config.getValue('iss3') == True else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
                         S3 = S3Upload_(self._base, self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None);
                         if (S3.init() == False):
@@ -1918,7 +2022,7 @@ def getSourcePathUsingTempOutput(input):
     if (not _rpt or
         not getBooleanValue(cfg.getValue('istempoutput'))):
         return None
-    _mk_path = input.replace(cfg.getValue('tempoutput', False), '')
+    _mk_path = input.replace(cfg.getValue(CTEMPOUTPUT, False), '')
     _indx  = -1
     if (True in [_mk_path.lower().endswith(i) for i in ['.idx', '.lrc', '.pjg', '.pzp', '.pft', '.ppng', '.pjp', '.aux.xml']]):       # if any one of these extensions fails,
         _indx = _mk_path.rfind('.')                                                          # the main (raster) file upload entry in (Reporter) would be set to (no) denoting a failure in one of its associated files.
@@ -1940,7 +2044,6 @@ def setUploadRecordStatus (input, rpt_status):
 class Copy:
     def __init__(self, base = None):
         self._base = base
-
     def init(self, src, dst, copy_list, cb_list, user_config = None):
         if (not dst or
             not src):
@@ -1960,35 +2063,29 @@ class Copy:
                 return False
         if (self.src[-1:] != '/'):
                 self.src += '/'
-
         self.dst = dst.replace('\\', '/')
         if (self.dst[-1:] != '/'):
             self.dst += '/'
         self.format = copy_list
         self.cb_list = cb_list
-
         self.m_user_config = None
         self.__m_include_subs = True
-
         if (user_config != None):
             self.m_user_config = user_config
             include_subs = self.m_user_config.getValue('IncludeSubdirectories')
             if (include_subs is not None):    # if there's a value either (!None), take it else defaults to (True)
                 self.__m_include_subs = getBooleanValue(include_subs)
         return True
-
     def message(self, msg, msgType = None):
         if (self._base):
             return (self._base.message(msg, msgType))
         print (msg)
-
     def processs(self, post_processing_callback = None, post_processing_callback_args = None, pre_processing_callback = None):
         log = None
         if (self._base):
            log = self._base.getMessageHandler
         if (log):
             log.CreateCategory('Copy')
-
         self.message ('Copying non rasters/aux files (%s=>%s)..' % (self.src, self.dst))
         # init - TIL files
         is_link = not self._input_flist is None;
@@ -2039,12 +2136,12 @@ class Copy:
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
                                 if (getBooleanValue(self.m_user_config.getValue('istempoutput')) == True):
-                                    dst_path = r.replace(self.src, self.m_user_config.getValue('tempoutput', False))    # no checks on temp-output validty done here. It's assumed it has been prechecked at the time of its assignment.
+                                    dst_path = r.replace(self.src, self.m_user_config.getValue(CTEMPOUTPUT, False))    # no checks on temp-output validty done here. It's assumed it has been prechecked at the time of its assignment.
                             _r  = r
                             if (self.m_user_config):
                                 if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
                                     if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
-                                        r = r.replace(self.src, self.m_user_config.getValue(CUSR_TEMPINPUT))
+                                        r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
                             if (_rpt and
                                 _rpt._isInputHTTP):
                                 _mkRemoteURL = os.path.join(_r, file)
@@ -2062,8 +2159,8 @@ class Copy:
                                                     _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = v[f + len(token) : e].strip().replace('"', '').replace('?', '_')
                                                 isFileNameInHeader = True
                                             break
-                                    if (self.m_user_config.getValue(CUSR_TEMPINPUT)):    # we've to dn the file first and save to the name requested.
-                                        r = r.replace(self.src, self.m_user_config.getValue(CUSR_TEMPINPUT))
+                                    if (self.m_user_config.getValue(CTEMPINPUT)):    # we've to dn the file first and save to the name requested.
+                                        r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
                                         if (not os.path.exists(r)):
                                             os.makedirs(r)
                                         file = _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] if isFileNameInHeader else file
@@ -2087,11 +2184,9 @@ class Copy:
                         if (self.cb_list['copy'] is not None):
                             if (self.cb_list['copy'](file, r, dst_path) == False):       # skip fruther processing if 'false' returned
                                 continue
-
                     if (not g_is_generate_report):              # do not create folders for op==reporting only.
                         if (os.path.exists(dst_path) == False):
                             os.makedirs(dst_path)
-
                     dst_file = os.path.join(dst_path, file)
                     src_file = os.path.join(r, file)
                     do_post_processing_cb = do_copy = True
@@ -2106,18 +2201,20 @@ class Copy:
                                      _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES) or
                                      _rpt.operation == COP_UPL):
                                      do_copy = False
-                             if (do_copy):
+                             if (do_copy):  # chs
+                                primaryRaster = _rpt._m_rasterAssociates.findPrimaryExtension(src_file)
+                                if (primaryRaster):
+                                    _ext = _rpt._m_rasterAssociates.findExtension(src_file)
+                                    if (_ext):
+                                        _mkPrimaryRaster = '{}{}'.format(src_file[:len(src_file) - len(_ext)], primaryRaster)
+                                        if (_mkPrimaryRaster in _rpt._input_list_info):
+                                            if (CTEMPINPUT in _rpt._header):
+                                                dst_file = dst_file.replace(_rpt._header['output'], _rpt._header[CTEMPINPUT])
                                 shutil.copyfile(src_file, dst_file)
-                                if (self.m_user_config):
-                                    # Clone folder will get all the metadata files by default.
-                                    _clonePath = self.m_user_config.getValue(CCLONE_PATH, False)
-                                    if (_clonePath):
-                                        _cloneDstFile = dst_file.replace(self.dst, _clonePath)
-                                        _cloneDirs = os.path.dirname(_cloneDstFile)
-                                        if (not os.path.exists(_cloneDirs)):
-                                            os.makedirs(_cloneDirs)
-                                        shutil.copyfile(src_file, _cloneDstFile)
-                                    # ends
+                                # Clone folder will get all the metadata files by default.
+                                if (not primaryRaster): # do not copy raster associated files to clone path.
+                                    self._base.copyMetadataToClonePath(dst_file)
+                                # ends
                              if (self._input_flist):
                                 _rpt.updateRecordStatus (src_file, CRPT_COPIED, CRPT_YES)
                              self.message ('{} {}'.format(CRESUME_MSG_PREFIX if not do_copy else '[CPY]', src_file.replace(self.src, '')))
@@ -2247,7 +2344,8 @@ class compression:
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
             if (_rpt):
-                _input_file = _input_file.replace(self.m_user_config.getValue(CUSR_TEMPINPUT, False), '' if  _rpt.root == '/' else _rpt.root)
+                _input_file = _input_file.replace(self.m_user_config.getValue(CTEMPINPUT, False), '' if  _rpt.root == '/' else _rpt.root)
+        # chs
         _do_process = ret = True
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
@@ -2350,7 +2448,7 @@ class compression:
                     args.append ('BLOCKSIZE=512')
                 else:
                     args = args_callback(args, [input_file, output_file, self.m_user_config])      # callback user function to get arguments.
-                args.append (input_file)
+                args.append (self._base.urlEncode(input_file) if _vsicurl_input else input_file)
                 args.append (output_file)
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self.__call_external(args)
@@ -2400,8 +2498,9 @@ class compression:
         if (self.m_user_config.getValue(CCLONE_PATH)):
             updateMRF = UpdateMRF(self._base)
             _output_home_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)
-            if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
-                _output_home_path = self.m_user_config.getValue('tempoutput', False)
+            _tempOutputPath = self.m_user_config.getValue(CTEMPOUTPUT, False)
+            if (_tempOutputPath):
+                _output_home_path = _tempOutputPath
             if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH), self.m_user_config.getValue('Mode'),
                 self.m_user_config.getValue(CCACHE_PATH), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
                 updateMRF.copyInputMRFFilesToOutput();
@@ -2566,9 +2665,9 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
             getBooleanValue(cfg.getValue('istempoutput')) == True):
             output_file = os.path.join(output_file, file)
             if (getBooleanValue(cfg.getValue('istempinput')) == True):
-                input_file = os.path.join(cfg.getValue(CUSR_TEMPINPUT, False), file)
+                input_file = os.path.join(cfg.getValue(CTEMPINPUT, False), file)
             if (getBooleanValue(cfg.getValue('istempoutput')) == True):
-                output_file = os.path.join(cfg.getValue('tempoutput', False), file)
+                output_file = os.path.join(cfg.getValue(CTEMPOUTPUT, False), file)
             return (input_file, output_file)
         output_file = os.path.join(output_file, file)
     return (input_file, output_file)
@@ -2652,7 +2751,7 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
                     if (getBooleanValue(args[0]['cfg'].getValue('istempoutput')) == False):
                         return False    # no copying..
                     p += '/'
-                    t = args[0]['cfg'].getValue('tempoutput', False).replace('\\', '/')    # safety check
+                    t = args[0]['cfg'].getValue(CTEMPOUTPUT, False).replace('\\', '/')    # safety check
                     if (t.endswith('/') == False): # making sure, replace will work fine.
                         t += '/'
                     o = args[0]['cfg'].getValue(CCFG_PRIVATE_OUTPUT, False).replace('\\', '/') # safety check
@@ -2683,8 +2782,8 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6u'
-    __program_date__ = '20160509'
+    __program_ver__ = 'v1.6v'
+    __program_date__ = '20160525'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3013,7 +3112,7 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
             is_input_temp = True         # flag flows to deal with -tempinput
             cfg.setValue('istempinput', is_input_temp)
-            cfg.setValue(CUSR_TEMPINPUT, self._args.tempinput)
+            cfg.setValue(CTEMPINPUT, self._args.tempinput)
         # ends
         # let's setup -tempoutput
         is_output_temp = False
@@ -3032,7 +3131,7 @@ class Application(object):
                 # ends
             is_output_temp = True
             cfg.setValue('istempoutput', is_output_temp)
-            cfg.setValue('tempoutput', self._args.tempoutput)
+            cfg.setValue(CTEMPOUTPUT, self._args.tempoutput)
         # ends
         # are we doing input from S3|Azure?
         err_init_msg = 'Unable to initialize the ({}) upload module! Check module setup/credentials. Quitting..'
@@ -3344,7 +3443,7 @@ class Application(object):
                     cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else
                     '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN)) # vsicurl doesn't like 'https'
                 o_S3_storage.inputPath = self._args.output
-                if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
+                if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False): # chs
                     self._base.message ('Unable to read S3-Content', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
             else:
@@ -3356,14 +3455,16 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
                 in_azure_storage._include_subFolders = getBooleanValue(cfg.getValue('IncludeSubdirectories'))
                 _restored = cfg.getValue(CLOAD_RESTORE_POINT)
+                _azParent = self._args.input
                 if (not _restored):
                     in_azure_storage._mode = in_azure_storage.CMODE_SCAN_ONLY
-                    cfg.setValue(CIN_AZURE_PARENTFOLDER, in_s3_parent if in_s3_parent.endswith('/') else in_s3_parent + '/')
-                _azParent = cfg.getValue(CIN_AZURE_PARENTFOLDER, False) if not _rpt else _rpt.root
-                if (not cfg.getValue(CIN_AZURE_PARENTFOLDER)):
-                    cfg.setValue(CIN_AZURE_PARENTFOLDER, _azParent)
+                else:
+                    _azParent = '/' if not _rpt else _rpt.root
+                if (not _azParent.endswith('/')):
+                    _azParent += '/'
+                cfg.setValue(CIN_AZURE_PARENTFOLDER, _azParent)
                 cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format('http://{}.blob.core.windows.net/{}/'.format(in_azure_storage.getAccountName, cfg.getValue('In_S3_Bucket'))))
-                if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal)):
+                if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal, exclude_callback)):
                     return(terminate(self._base, eFAIL))
                 if (not _restored):
                     _files = in_azure_storage.getBrowseContent()
@@ -3393,10 +3494,10 @@ class Application(object):
                     isinput_s3 == False and
                     not cfg.getValue(CLOAD_RESTORE_POINT)):
                     # if the -tempinput path is defined, we first copy rasters from the source path to -tempinput before any conversion.
-                    self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue(CUSR_TEMPINPUT, False)))
+                    self._base.message ('Copying files to -tempinput path (%s)' % (cfg.getValue(CTEMPINPUT, False)))
                     cpy_files_ = []
                     for i in range(0, len(files)):
-                        get_dst_path = files[i]['dst'].replace(self._args.output if cfg.getValue('tempoutput', False) is None else cfg.getValue('tempoutput', False), cfg.getValue(CUSR_TEMPINPUT, False))
+                        get_dst_path = files[i]['dst'].replace(self._args.output if cfg.getValue(CTEMPOUTPUT, False) is None else cfg.getValue(CTEMPOUTPUT, False), cfg.getValue(CTEMPINPUT, False))
                         cpy_files_.append(
                         {
                         'src' : files[i]['src'],
@@ -3412,7 +3513,7 @@ class Application(object):
                 for req in files:
                     _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     if (getBooleanValue(cfg.getValue('istempinput'))):
-                        _tempinput = cfg.getValue(CUSR_TEMPINPUT, False)
+                        _tempinput = cfg.getValue(CTEMPINPUT, False)
                         _tempinput = _tempinput[:-1] if _tempinput.endswith('/') and not self._args.input.endswith('/') else _tempinput
                         _src = _src.replace(_tempinput, self._args.input)
                     g_rpt.addFile(_src)     # prior to this point, rasters get added to g_rpt during the (pull/copy) process if -clouddownload=true && -tempinput is defined.
@@ -3641,21 +3742,40 @@ class Application(object):
                         _fptr = None
         # ends
         # let's clean-up rasters @ -tempinput path
-        dbg_delete = True
-        if (dbg_delete == True):
-            if (is_input_temp == True and
-                is_caching == False):        # if caching is (True), -tempinput is ignored and no deletion of source @ -input takes place.
-                if (len(raster_buff) != 0):
-                    self._base.message ('Removing input rasters at ({})'.format(cfg.getValue(CUSR_TEMPINPUT, False)))
-                    for req in raster_buff:
-                        (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
-                        try:
-                            if (os.path.exists(input_file)):
-                                self._base.message ('[Del] {}'.format(input_file))
-                                os.remove(input_file )
-                        except Exception as exp:
-                            self._base.message ('[Del] {} ({})'.format(input_file, str(exp)), self._base.const_warning_text)
-                    self._base.message ('Done.')
+        if (is_input_temp == True and
+            is_caching == False):        # if caching is (True), -tempinput is ignored and no deletion of source @ -input takes place.
+            if (len(raster_buff) != 0):
+                self._base.message ('Removing input rasters at ({})'.format(cfg.getValue(CTEMPINPUT, False)))
+                for req in raster_buff:
+                    doRemove = True     # chs
+                    (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
+                    try:
+                        if (_rpt):
+                            if (_rpt.getRecordStatus('{}{}'.format(req['src'], req['f']), CRPT_PROCESSED) == CRPT_NO):
+                                doRemove = False
+                        if (doRemove and
+                            os.path.exists(input_file)):
+                            self._base.message ('[Del] {}'.format(input_file))
+                            os.remove(input_file )
+                    except Exception as e:
+                        self._base.message ('[Del] {} ({})'.format(input_file, str(e)), self._base.const_warning_text)
+                    if (_rpt and
+                        doRemove):
+                        primaryExt = _rpt._m_rasterAssociates.findExtension(input_file)
+                        if (primaryExt):
+                            raInfo = _rpt._m_rasterAssociates.getInfo()
+                            if (raInfo and
+                                primaryExt in raInfo):
+                                self._base.message('Removing associated files for ({})'.format(input_file))
+                                for relatedExt in raInfo[primaryExt].split(';'):
+                                    try:
+                                        _mkPrimaryRaster = '{}{}'.format(input_file[:len(input_file) - len(primaryExt)], relatedExt)
+                                        if (os.path.exists(_mkPrimaryRaster)):
+                                            self._base.message ('[Del] {}'.format(_mkPrimaryRaster))
+                                            os.remove(_mkPrimaryRaster)
+                                    except Exception as e:
+                                        self._base.message ('[Del] {} ({})'.format(_mkPrimaryRaster, str(e)), self._base.const_warning_text)
+                self._base.message ('Done.')
         # ends
         if (not raster_buff):
             self._base.message ('No input rasters to process..', self._base.const_warning_text);
@@ -3685,8 +3805,8 @@ def main():
     parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality');
     parser.add_argument('-prec', help='LERC precision', dest='prec');
     parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only/external]', dest='pyramids');
-    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest=CUSR_TEMPINPUT);
-    parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest='tempoutput');
+    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest=CTEMPINPUT);
+    parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest=CTEMPOUTPUT);
     parser.add_argument('-clouddownload', help='Is -input a cloud storage? [true/false: default:false]', dest='clouddownload');
     parser.add_argument('-cloudupload', help='Is -output a cloud storage? [true/false]', dest='cloudupload');
     parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype');
