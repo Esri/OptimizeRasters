@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160607
+# Version: 20160613
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -47,6 +47,12 @@ import argparse
 import math
 import ctypes
 import urllib
+import ConfigParser
+
+# lambda
+import boto.sns
+import json
+# ends
 
 # enum error codes
 eOK = 0
@@ -86,6 +92,7 @@ COP_UPL = 'upload'
 COP_DNL = 'download'
 COP_RPT = 'report'
 COP_NOCONVERT  = 'noconvert'
+COP_LAMBDA = 'lambda'
 # ends
 
 # clone specific
@@ -225,6 +232,145 @@ class MEMORYSTATUSEX(ctypes.Structure):
         if (memPerChunk < CMINSIZEALLOWED):
             memPerChunk = CMINSIZEALLOWED
         return memPerChunk
+
+class Lambda:
+    account_name = 'aws_access_key_id'
+    account_key = 'aws_secret_access_key'
+    account_region = 'region'
+    account_sns = 'sns_arn'
+    def __init__(self, base = None):
+        self._sns_aws_access_key = \
+        self._sns_aws_secret_access_key = None
+        self._sns_region = 'us-east-1'
+        self._sns_ARN = None
+        self._sns_connection = None
+        self._aws_credentials = None    # aws credential file.
+        self._base = base
+    def initSNS(self, keyProfileName):
+        if (not keyProfileName):
+            return False
+        self._aws_credentials = ConfigParser.RawConfigParser()
+        userHome = '{}/{}/{}'.format(os.path.join(os.getenv('HOMEDRIVE'),os.getenv('HOMEPATH')).replace('\\', '/'), '.aws', 'credentials')
+        with open (userHome) as fptr:
+            self._aws_credentials.readfp(fptr)
+        if (not self._aws_credentials.has_section(keyProfileName)):
+            return False
+        self._sns_aws_access_key = self._aws_credentials.get (keyProfileName, self.account_name) if self._aws_credentials.has_option (keyProfileName, self.account_name) else None
+        self._sns_aws_secret_access_key = self._aws_credentials.get (keyProfileName, self.account_key) if self._aws_credentials.has_option (keyProfileName, self.account_key) else None
+        if (self._aws_credentials.has_option (keyProfileName, self.account_region)):
+            self._sns_region = self._aws_credentials.get (keyProfileName, self.account_region)
+        self._sns_ARN = self._aws_credentials.get (keyProfileName, self.account_sns) if self._aws_credentials.has_option (keyProfileName, self.account_sns) else None
+        if (not self._sns_aws_access_key or
+            not self._sns_aws_secret_access_key):
+            return False
+        self._sns_connection = boto.sns.connect_to_region(self._sns_region, aws_access_key_id = self._sns_aws_access_key, aws_secret_access_key = self._sns_aws_secret_access_key)
+        try:
+            self._sns_connection.get_topic_attributes(self._sns_ARN)
+        except:
+            return False
+        return True
+    def _updateCredentials(self, doc, direction = 'In'):
+        inProfileNode = doc.getElementsByTagName('{}_S3_AWS_ProfileName'.format(direction))
+        inKeyIDNode = doc.getElementsByTagName('{}_S3_ID'.format(direction))
+        inKeySecretNode = doc.getElementsByTagName('{}_S3_Secret'.format(direction))
+        CERR_MSG = 'Credential keys don\'t exist/invalid'
+        if (not len(inProfileNode) or
+            not inProfileNode[0].hasChildNodes() or
+            not inProfileNode[0].firstChild):
+            if (not len(inKeyIDNode) or
+                not len(inKeySecretNode)):
+                self._base.message(CERR_MSG, self._base.const_critical_text)
+                return False
+            if (not inKeyIDNode[0].hasChildNodes() or
+                not inKeyIDNode[0].firstChild):
+                self._base.message(CERR_MSG, self._base.const_critical_text)
+                return False
+        else:
+            keyProfileName = inProfileNode[0].firstChild.nodeValue
+            if (not self._aws_credentials.has_section(keyProfileName)):
+                return False
+            parentNode = doc.getElementsByTagName('Defaults')
+            if (not len(parentNode)):
+                self._base.message('Unable to update credentials', self._base.const_critical_text)
+                return False
+            _sns_aws_access_key = self._aws_credentials.get (keyProfileName, self.account_name) if self._aws_credentials.has_option (keyProfileName, self.account_name) else None
+            _sns_aws_secret_access_key = self._aws_credentials.get (keyProfileName, self.account_key) if self._aws_credentials.has_option (keyProfileName, self.account_key) else None
+            if (len(inKeyIDNode)):
+                if (inKeyIDNode[0].hasChildNodes() and
+                    inKeyIDNode[0].firstChild.nodeValue):
+                    _sns_aws_access_key = inKeyIDNode[0].firstChild.nodeValue
+                parentNode[0].removeChild(inKeyIDNode[0])
+            inKeyIDNode = doc.createElement('{}_S3_ID'.format(direction))
+            inKeyIDNode.appendChild(doc.createTextNode(str(_sns_aws_access_key)))
+            parentNode[0].appendChild(inKeyIDNode)
+            if (len(inKeySecretNode)):
+                if (inKeySecretNode[0].hasChildNodes() and
+                    inKeySecretNode[0].firstChild.nodeValue):
+                    _sns_aws_secret_access_key = inKeySecretNode[0].firstChild.nodeValue
+                parentNode[0].removeChild(inKeySecretNode[0])
+            inKeySecretNode = doc.createElement('{}_S3_Secret'.format(direction))
+            inKeySecretNode.appendChild(doc.createTextNode(str(_sns_aws_secret_access_key)))
+            parentNode[0].appendChild(inKeySecretNode)
+            parentNode[0].removeChild(inProfileNode[0])
+            if (not _sns_aws_access_key or
+                not _sns_aws_secret_access_key):
+                self._base.message(CERR_MSG, self._base.const_critical_text)
+                return False
+        return True
+    def submitJob(self, orjob):
+        if (not self._sns_connection or
+            not orjob):
+            return False
+        _orjob = Report(Base())
+        if (not _orjob.init(orjob) or
+            not _orjob.read()):
+            self._base.message('Job file read error', self._base.const_critical_text)
+            return False
+        orjobName = os.path.basename(orjob)
+        orjobWOExt = orjobName.lower().replace(Report.CJOB_EXT, '')
+        configPath = _orjob._header['config']
+        configName = '{}.xml'.format(orjobWOExt)
+        if (CTEMPINPUT in _orjob._header):
+            _orjob._header[CTEMPINPUT] = '/tmp/{}/tempinput'.format(orjobWOExt)
+        if (CTEMPOUTPUT in _orjob._header):
+            _orjob._header[CTEMPOUTPUT] = '/tmp/{}/tempoutput'.format(orjobWOExt)
+        if ('config' in _orjob._header):
+            _orjob._header['config'] = '/tmp/{}'.format(configName)
+        configContent = ''
+        try:
+            with open(configPath) as f:
+                configContent = f.read()
+        except Exception as e:
+            self._base.message('{}'.format(str(e)), self._base.const_critical_text)
+            return False
+        try:
+            doc = minidom.parseString(configContent)
+            self._updateCredentials(doc, 'In')
+            self._updateCredentials(doc, 'Out')
+            configContent = doc.toprettyxml(indent="\t", encoding="utf-8")
+        except Exception as e:
+            self._base.message(str(e), self._base.const_critical_text)
+            return False
+        orjobContent = ''
+        for hdr in _orjob._header:
+            orjobContent += '# {}={}\n'.format(hdr, _orjob._header[hdr])
+        for f in _orjob._input_list:
+            orjobContent += '{}\n'.format(f)
+        store = {'orjob' : {'file' : orjobName, 'content' : orjobContent}, 'config' : {'file' : configName, 'content' : configContent}}
+        message = json.dumps(store)
+        publish = None
+        try:
+            publish = self._sns_connection.publish(self._sns_ARN, message, subject='OR')
+            CPUBLISH_RESP = 'PublishResponse'
+            CPUBLISH_META = 'ResponseMetadata'
+            if (CPUBLISH_RESP in publish and
+                CPUBLISH_META in publish[CPUBLISH_RESP] and
+                'RequestId' in publish[CPUBLISH_RESP][CPUBLISH_META]):
+                self._base.message('Lambda working on the (RequestID) [{}]...'.format(publish[CPUBLISH_RESP][CPUBLISH_META]['RequestId']))
+        except Exception as e:
+            self._base.message('{}'.format(str(e)), self._base.const_critical_text)
+            return False
+        return True
 
 class RasterAssociates(object):
     def __init__(self):
@@ -469,6 +615,15 @@ class GDALInfo(object):
         return self.__call_external(args)
     def message(self, msg, status):
         self._m_msg_callback(msg, status) if self._m_msg_callback else self._base.message(msg, status)
+    @property
+    def bandInfo(self):
+        if (not len(self._GDALInfo)):
+            return None
+        retInfo = []
+        for v in self._GDALInfo:
+            if (v.startswith('Band ')):
+                retInfo.append(v)
+        return retInfo
     @property
     def pyramidLevels(self):
         if (not self.width or
@@ -1211,7 +1366,6 @@ class Store(object):
         self._dn_properties = properties
         return True
     def readProfile (self, account_name, account_key):
-        import ConfigParser
         config = ConfigParser.RawConfigParser()
         userHome = '{}/{}/{}'.format(os.path.join(os.getenv('HOMEDRIVE'),os.getenv('HOMEPATH')).replace('\\', '/'), '.optimizerasters', 'azure_credentials')
         with open (userHome) as fptr:
@@ -1312,7 +1466,7 @@ class Azure(Store):
                         passed = True
             if (not parent_folder_ or
                 passed):
-                self._addBrowseContent(blob_name)   # chs
+                self._addBrowseContent(blob_name)
                 if (precb and
                     self._base.getUserConfiguration):
                     _resumeReporter = self._base.getUserConfiguration.getValue('handler_resume_reporter')
@@ -1345,7 +1499,7 @@ class Azure(Store):
             if (_user_config.getValue('istempoutput') and
                 isUpload):
                 output_path = _user_config.getValue(CTEMPOUTPUT, False) + _azurePath
-            is_raster = False   # chs
+            is_raster = False
             is_tmp_input = getBooleanValue(_user_config.getValue('istempinput'))
             primaryRaster = None
             if (_resumeReporter and
@@ -1581,7 +1735,7 @@ class S3Storage:
     def getFailedUploadList(self):
         return self.__m_failed_upl_lst;
     # code to iterate a S3 bucket/folder
-    def getS3Content(self, prefix, cb = None, precb = None):    # chs
+    def getS3Content(self, prefix, cb = None, precb = None):
         is_link = not self._input_flist is None;
         keys = self.bucketupload.list(prefix) if not is_link else _rpt
         root_only = True
@@ -1616,7 +1770,7 @@ class S3Storage:
                         if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
                             continue
                     if (cb):
-                        if (precb): # chs
+                        if (precb):
                             if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath) == True):     # if raster/exclude list, do not proceed.
                                 if (getBooleanValue(self.m_user_config.getValue('istempinput')) == False):
                                     continue
@@ -1635,7 +1789,7 @@ class S3Storage:
         return True
     # ends
     # code to deal with s3-local-cpy
-    def S3_copy_to_local(self, S3_key, S3_path):    # chs
+    def S3_copy_to_local(self, S3_key, S3_path):
         err_msg_0 = 'S3/Local path is invalid'
         if (S3_key is None):   # get rid of invalid args.
                 self._base.message (err_msg_0)
@@ -1657,7 +1811,6 @@ class S3Storage:
             input_path = self.m_user_config.getValue(CTEMPOUTPUT, False) + S3_path  # -tempoutput must be set with -cloudinput=true
         is_raster = False
         is_tmp_input = getBooleanValue(self.m_user_config.getValue('istempinput'))
-        # chs
         primaryRaster = None
         if (_rpt and
             is_tmp_input):
@@ -1825,7 +1978,9 @@ class S3Storage:
         return upload_buff       # this could be empty.
 # ends
 
+CIDX_USER_INPUTFILE  = 0
 CIDX_USER_CONFIG  = 2
+CIDX_USER_CLSBASE  = 3
 CCFG_BLOCK_SIZE = 512
 CCMD_PYRAMIDS_ONLY = 'only'
 CCMD_PYRAMIDS_EXTERNAL = 'external'
@@ -1901,8 +2056,16 @@ def args_Callback(args, user_data = None):
                     m_mode = 'GTiff'   # so that gdal_translate can understand.
                     if (m_interleave == 'PIXEL' and
                         m_compression.startswith(_JPEG)):
-                        args.append ('-co')
-                        args.append ('PHOTOMETRIC=YCBCR')
+                        _base = user_data[CIDX_USER_CLSBASE]
+                        if (_base):
+                            gdalInfo = GDALInfo(_base)
+                            gdalInfo.init(user_data[CIDX_USER_CONFIG].getValue(CCFG_GDAL_PATH))
+                            if (gdalInfo.process(user_data[CIDX_USER_INPUTFILE])):
+                                ret = gdalInfo.bandInfo
+                                if (ret and
+                                    len(ret) != 1):
+                                    args.append ('-co')
+                                    args.append ('PHOTOMETRIC=YCBCR')
                         if (m_compression == _JPEG12):
                             args.append ('-co')
                             args.append ('NBITS=12')
@@ -2205,7 +2368,7 @@ class Copy:
                                      _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES) or
                                      _rpt.operation == COP_UPL):
                                      do_copy = False
-                             if (do_copy):  # chs
+                             if (do_copy):
                                 primaryRaster = _rpt._m_rasterAssociates.findPrimaryExtension(src_file)
                                 if (primaryRaster):
                                     _ext = _rpt._m_rasterAssociates.findExtension(src_file)
@@ -2302,7 +2465,6 @@ class compression:
             Message ('Err/Internal. (Compression) instance is not initialized with a valid (Base) instance.', const_critical_text)
             return False
         self.m_user_config = self._base.getUserConfiguration
-
         # intenal gdal_pathc could get modified here.
         if (not self.m_gdal_path or
             os.path.isdir(self.m_gdal_path) == False):
@@ -2312,6 +2474,7 @@ class compression:
             if (not os.path.isdir(self.m_gdal_path)):
                 self.message('GDAL not found at ({}).'.format(self.m_gdal_path), self._base.const_critical_text)
                 return False
+            self.m_user_config.setValue(CCFG_GDAL_PATH, self.m_gdal_path)
         # ends
         # set gdal_data enviornment path
         os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
@@ -2349,7 +2512,6 @@ class compression:
         if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
             if (_rpt):
                 _input_file = _input_file.replace(self.m_user_config.getValue(CTEMPINPUT, False), '' if  _rpt.root == '/' else _rpt.root)
-        # chs
         _do_process = ret = True
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
@@ -2451,7 +2613,7 @@ class compression:
                     args.append ('-co')
                     args.append ('BLOCKSIZE=512')
                 else:
-                    args = args_callback(args, [input_file, output_file, self.m_user_config])      # callback user function to get arguments.
+                    args = args_callback(args, [input_file, output_file, self.m_user_config, self._base])      # callback user function to get arguments.
                 args.append (self._base.urlEncode(input_file) if _vsicurl_input else input_file)
                 args.append (output_file)
                 self.message('Applying compression (%s)' % (input_file))
@@ -2786,8 +2948,8 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6w'
-    __program_date__ = '20160607'
+    __program_ver__ = 'v1.6x'
+    __program_date__ = '20160613'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3051,7 +3213,8 @@ class Application(object):
         COP_UPL : None,
         COP_DNL : None,
         COP_RPT : None,
-        COP_NOCONVERT : None
+        COP_NOCONVERT : None,
+        COP_LAMBDA : None
         }
         # ends
         if (self._args.op):
@@ -3061,7 +3224,8 @@ class Application(object):
                 return(terminate(self._base, eFAIL))
             if(self._args.op == COP_RPT or
                 self._args.op == COP_UPL or
-                self._args.op == COP_NOCONVERT):
+                self._args.op == COP_NOCONVERT or
+                self._args.op == COP_LAMBDA):
                 g_rpt = Report(self._base);
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message ('Unable to init (Report)', self._base.const_critical_text)
@@ -3427,11 +3591,12 @@ class Application(object):
                 in_s3_bucket = cfg.getValue('In_S3_Bucket' if inAmazon else 'In_Azure_Container', False)
             if (in_s3_parent is None or
                 in_s3_bucket is None):
-                    self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFodler, In_S3_Bucket]', self._base.const_critical_text)
+                    self._base.message ('Invalid/empty value(s) found in node(s) [In_S3_ParentFolder, In_S3_Bucket]', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
             cfg.setValue('In_S3_Bucket', in_s3_bucket)          # update (in s3 bucket name in config)
             in_s3_parent = in_s3_parent.replace('\\', '/')
-            if (in_s3_parent[:1] == '/'):
+            if (in_s3_parent[:1] == '/' and
+                not in_s3_parent.lower().endswith(Report.CJOB_EXT)):
                 in_s3_parent = in_s3_parent[1:]
                 cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
             if (inAmazon):
@@ -3447,7 +3612,7 @@ class Application(object):
                     cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else
                     '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN)) # vsicurl doesn't like 'https'
                 o_S3_storage.inputPath = self._args.output
-                if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False): # chs
+                if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) == False):
                     self._base.message ('Unable to read S3-Content', self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
             else:
@@ -3485,7 +3650,7 @@ class Application(object):
                 if  (ret == False):
                     self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
-                ret = cpy.processs(self._base.S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy_default)
+                ret =   cpy.processs(self._base.S3Upl if is_cloud_upload == True else None, user_args_Callback, fn_pre_process_copy_default)
                 if (ret == False):
                     self._base.message(CONST_CPY_ERR_1, self._base.const_critical_text);
                     return(terminate(self._base, eFAIL))
@@ -3525,6 +3690,21 @@ class Application(object):
                 for arg in vars(self._args):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write();
+                # process @ lambda?
+                if (self._args.op and
+                    self._args.op == COP_LAMBDA):
+                    if (getBooleanValue(self._args.clouddownload) and
+                        getBooleanValue(self._args.cloudupload)):
+                        self._base.message('Using AWS Lambda..');
+                        sns = Lambda(self._base);
+                        if (not sns.initSNS('aws_lambda')):
+                            self._base.message('Unable to initialize', self._base.const_critical_text);
+                            return(terminate(self._base, eFAIL))
+                        if (not sns.submitJob (g_rpt._report_file)):
+                            self._base.message('Unable to submit job.', self._base.const_critical_text);
+                            return(terminate(self._base, eFAIL))
+                        return(terminate(self._base, eOK))
+                # ends
                 self._args.op = None
                 self._args.input = _project_path
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
@@ -3751,7 +3931,7 @@ class Application(object):
             if (len(raster_buff) != 0):
                 self._base.message ('Removing input rasters at ({})'.format(cfg.getValue(CTEMPINPUT, False)))
                 for req in raster_buff:
-                    doRemove = True     # chs
+                    doRemove = True
                     (input_file , output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     try:
                         if (_rpt):
