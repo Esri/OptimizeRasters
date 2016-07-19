@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160705
+# Version: 20160710
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -48,9 +48,6 @@ import math
 import ctypes
 import urllib
 import ConfigParser
-
-# lambda
-import boto.sns
 import json
 # ends
 
@@ -1214,7 +1211,7 @@ class S3Upload_:
         #if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
         #    return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
-##        return True   # debug. Must be removed before release.
+        #return True   # debug. Must be removed before release.
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
         s3upl = S3Upload(self._base);
         idx = 1
@@ -2465,7 +2462,7 @@ class compression:
             Message ('Err/Internal. (Compression) instance is not initialized with a valid (Base) instance.', const_critical_text)
             return False
         self.m_user_config = self._base.getUserConfiguration
-        # intenal gdal_pathc could get modified here.
+        # internal gdal_path could get modified here.
         if (not self.m_gdal_path or
             os.path.isdir(self.m_gdal_path) == False):
             if (self.m_gdal_path):
@@ -2948,8 +2945,8 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6y'
-    __program_date__ = '20160705'
+    __program_ver__ = 'v1.6z'
+    __program_date__ = '20160710'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3259,6 +3256,9 @@ class Application(object):
                 self._args.clouduploadtype = self._args.clouduploadtype.lower()
                 cfg.setValue(COUT_CLOUD_TYPE, self._args.clouduploadtype)
         is_cloud_upload = getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) if cfg.getValue(CCLOUD_UPLOAD) else getBooleanValue(cfg.getValue(CCLOUD_UPLOAD_OLD_KEY))
+        if (is_cloud_upload):
+            if (self._args.output.startswith('/')): # remove any leading '/' for http -output
+                self._args.output = self._args.output[1:]
         # for backward compatibility (-s3output)
         if (not cfg.getValue(CCLOUD_UPLOAD)):
             cfg.setValue(CCLOUD_UPLOAD, is_cloud_upload)
@@ -3315,6 +3315,7 @@ class Application(object):
             try:
                 global boto
                 import boto
+                import boto.sns
                 from boto.s3.key import Key
                 from boto.s3.connection import OrdinaryCallingFormat
             except:
