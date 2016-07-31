@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!--Please note: Paths and extensions defined herein are considered as case-sensitive in OptimizeRasters.py-->
 <OptimizeRasters>
 	<Description>This is similar to caching MRF</Description>
@@ -19,10 +19,10 @@
 		<Quality></Quality>
 			<!--LERC precision to apply for LERC compression (Def: 0.5 for int data and 0.001 for float data)-->
 		<LERCPrecision></LERCPrecision>
-			<!--Build pyramids? Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n, only]-->
+			<!--Build pyramids? Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n, only, external]-->
 		<BuildPyramids>true</BuildPyramids>
 			<!--Pyramid levels to create (Def:  2)-->
-		<PyramidFactor>2 4 8 16 32 64</PyramidFactor>
+		<PyramidFactor></PyramidFactor>
 			<!--Pyramid sampling [nearest,avg,average,gauss,cubic,cubicspline,lanczos,average_mp,average_magphase,mode] (Def: average)-->
 			<!--The avg sampling method is only supported by mrf format, which is similar to average, but is a pure averaging of every 2x2 pixels from top left, which is slightly faster -->
 		<PyramidSampling>avg</PyramidSampling>
