@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160710
+# Version: 20160731
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -379,10 +379,14 @@ class RasterAssociates(object):
             not primaryExt.strip() or
             not relatedExts):
             return False
-        if (primaryExt in self._info):
-            self._info[primaryExt] += ';{}'.format(self._stripExtensions(relatedExts))
-            return True
-        self._info[primaryExt] = self._stripExtensions(relatedExts)
+        for p in primaryExt.split(';'):
+            p = p.strip()
+            if (not p):
+                continue
+            if (p in self._info):
+                self._info[p] += ';{}'.format(self._stripExtensions(relatedExts))
+                continue
+            self._info[p] = self._stripExtensions(relatedExts)
         return True
     def findExtension(self, path):
         if (not path):
@@ -472,6 +476,15 @@ class Base(object):
     def close(self):
         if (self._m_log):
             self._m_log.WriteLog('#all')   #persist information/errors collected.
+    def renameMetaFileToMatchRasterExtension(self, metaFile):
+        updatedMetaFile = metaFile
+        if (self.getUserConfiguration and
+            not self.getBooleanValue(self.getUserConfiguration.getValue('KeepExtension'))):
+            rasterExtension = RasterAssociates().findExtension(updatedMetaFile)
+            firstExtension = rasterExtension.split('.')[0]
+            if (True in [firstExtension.endswith(x) for x in self.getUserConfiguration.getValue(CCFG_RASTERS_NODE)]):
+                updatedMetaFile = updatedMetaFile.replace('.{}'.format(firstExtension), '.mrf')
+        return updatedMetaFile
     def copyMetadataToClonePath(self, sourcePath):
         if (not self.getUserConfiguration):
             return False
@@ -635,12 +648,18 @@ class GDALInfo(object):
                     _BS = int(__BS)     # catch invalid val types
                 except:
                     pass
-        _levels = int(2 ** math.ceil(math.log(_max / _BS, 2)))
+        _value = (_max / _BS)
+        if (_value <= 0):
+            return ''
+        _levels = int(2 ** math.ceil(math.log(_value, 2)))
+        CDEFPYRAMID_LEV = '2'
         _steps = ''
         while (_levels >= 2):
             _steps = '{} {}'.format(_levels, _steps)
             _levels >>= 1
         _steps = _steps.strip()
+        if (not _steps):
+            _steps = CDEFPYRAMID_LEV
         self.message ('<PyramidFactor> set to ({})'.format(_steps), self._base.const_general_text)
         return _steps
     def __call_external(self, args):
@@ -849,7 +868,8 @@ class Report:
         self._base = base
         self._isInputHTTP = False
         self._m_rasterAssociates = RasterAssociates()
-        self._m_rasterAssociates.addRelatedExtensions('img', 'ige')
+        self._m_rasterAssociates.addRelatedExtensions('img;IMG', 'ige;IGE') # To copy files required by raster formats to the primary raster copy location (-tempinput?) before any conversion could take place.
+        self._m_rasterAssociates.addRelatedExtensions('tif;TIF', 'RPB;rpb') # certain associated files need to be present alongside rasters for GDAL to work successfully.
     def init(self, report_file, root = None):
         if (not self._base or
             not isinstance(self._base, Base)):
@@ -915,7 +935,8 @@ class Report:
                 break
             (p, e) = os.path.splitext(p)
         if (not e):
-            if (self.CRPT_URL_TRUENAME in self._input_list_info[_input]):
+            if (_input in self._input_list_info and
+                self.CRPT_URL_TRUENAME in self._input_list_info[_input]):
                 (p, e) = os.path.splitext(self._input_list_info[_input][self.CRPT_URL_TRUENAME])
             if (not e): # still no extension?
                 self._base.message('Invalid input ({}) at (Reporter)'.format (_input), self._base.const_warning_text)
@@ -1469,7 +1490,7 @@ class Azure(Store):
                     _resumeReporter = self._base.getUserConfiguration.getValue('handler_resume_reporter')
                     if (_resumeReporter):
                         remotePath = _resumeReporter._header['input']
-                        precb(blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header['output'])
+                        precb(blob_name if remotePath == '/' else blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header['output'])
                 if (cb and
                     self._mode != self.CMODE_SCAN_ONLY):
                     cb(blob_name)
@@ -1523,11 +1544,12 @@ class Azure(Store):
                 except Exception as e:
                     raise
             if (is_raster):
-                exclude_callback(_azurePath, _azureParentFolder, _user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
                 if (not is_tmp_input):
                     return True
             writeTo = output_path
             self._base.message ('[Azure-Pull] {}'.format(blob_source))
+            if (not is_raster):
+                writeTo = self._base.renameMetaFileToMatchRasterExtension(writeTo)
             self._blob_service.get_blob_to_path(self._dn_container_name, blob_source, writeTo)
             if (self._event_postCopyToLocal):
                 self._event_postCopyToLocal(writeTo);
@@ -1827,6 +1849,7 @@ class S3Storage:
         # ends
         mk_path = input_path
         self._base.message ('[S3-Pull] %s' % (mk_path))
+        mk_path = self._base.renameMetaFileToMatchRasterExtension(mk_path)
         flr = os.path.dirname(mk_path)
         if (os.path.exists(flr) == False):
             try:
@@ -2374,6 +2397,7 @@ class Copy:
                                         if (_mkPrimaryRaster in _rpt._input_list_info):
                                             if (CTEMPINPUT in _rpt._header):
                                                 dst_file = dst_file.replace(_rpt._header['output'], _rpt._header[CTEMPINPUT])
+                                dst_file = self._base.renameMetaFileToMatchRasterExtension(dst_file)
                                 shutil.copyfile(src_file, dst_file)
                                 # Clone folder will get all the metadata files by default.
                                 if (not primaryRaster): # do not copy raster associated files to clone path.
@@ -2705,6 +2729,9 @@ class compression:
             gdalInfo.init(self.m_gdal_path)
             if (gdalInfo.process(input_file)):
                 m_py_factor = gdalInfo.pyramidLevels
+                if (not m_py_factor):
+                    self.message('Pyramid creation skipped for file ({}). Image size too small.'.format(input_file), const_warning_text)
+                    return True
         py_sampling_ = self.m_user_config.getValue('PyramidSampling')
         if (py_sampling_):
             m_py_sampling = py_sampling_
@@ -2945,8 +2972,8 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.6z'
-    __program_date__ = '20160710'
+    __program_ver__ = 'v1.7'
+    __program_date__ = '20160731'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
