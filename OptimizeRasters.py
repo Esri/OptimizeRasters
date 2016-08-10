@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160731
+# Version: 20160810
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -56,12 +56,15 @@ eOK = 0
 eFAIL = 1
 # ends
 
+CEXEEXT = '.exe'
+
 # const related to (Reporter) class
 CRPT_SOURCE = 'SOURCE'
 CRPT_COPIED = 'COPIED'
 CRPT_PROCESSED = 'PROCESSED'
 CRPT_UPLOADED = 'UPLOADED'
 CRPT_HEADER_KEY = 'config'
+CPRT_HANDLER = 'handler_resume_reporter'
 
 CRPT_YES = 'yes'
 CRPT_NO = 'no'
@@ -247,7 +250,7 @@ class Lambda:
         if (not keyProfileName):
             return False
         self._aws_credentials = ConfigParser.RawConfigParser()
-        userHome = '{}/{}/{}'.format(os.path.join(os.getenv('HOMEDRIVE'),os.getenv('HOMEPATH')).replace('\\', '/'), '.aws', 'credentials')
+        userHome = '{}/{}/{}'.format(os.path.expanduser('~').replace('\\', '/'), '.aws', 'credentials')
         with open (userHome) as fptr:
             self._aws_credentials.readfp(fptr)
         if (not self._aws_credentials.has_section(keyProfileName)):
@@ -431,6 +434,8 @@ class Base(object):
             self._m_log.Message(msg, status)
         if (self._m_msg_callback):
             self._m_msg_callback(msg, status)
+    def isLinux(self):
+        return True if sys.platform.lower().startswith('linux') else False
     def convertToForwardSlash(self, input, endSlash = True):
         if (not input):
             return None
@@ -475,13 +480,16 @@ class Base(object):
         return self._m_msg_callback
     def close(self):
         if (self._m_log):
-            self._m_log.WriteLog('#all')   #persist information/errors collected.
+            self._m_log.WriteLog('#all')   # persist information/errors collected.
     def renameMetaFileToMatchRasterExtension(self, metaFile):
         updatedMetaFile = metaFile
         if (self.getUserConfiguration and
             not self.getBooleanValue(self.getUserConfiguration.getValue('KeepExtension'))):
             rasterExtension = RasterAssociates().findExtension(updatedMetaFile)
-            firstExtension = rasterExtension.split('.')[0]
+            inputExtensions = rasterExtension.split('.')
+            firstExtension = inputExtensions[0]
+            if (len(inputExtensions) == 1):  # no changes to extension if the input has only one extension.
+                return metaFile
             if (True in [firstExtension.endswith(x) for x in self.getUserConfiguration.getValue(CCFG_RASTERS_NODE)]):
                 updatedMetaFile = updatedMetaFile.replace('.{}'.format(firstExtension), '.mrf')
         return updatedMetaFile
@@ -588,7 +596,7 @@ class Base(object):
         return (len(ret_buff) > 0)
 
 class GDALInfo(object):
-    CGDAL_ADDO_EXE = 'gdalinfo.exe'
+    CGDAL_ADDO_EXE = 'gdalinfo'
     CW = 'width'
     CH = 'height'
     def __init__ (self, base, msgCallback = None):
@@ -600,15 +608,17 @@ class GDALInfo(object):
     def init(self, GDALPath):
         if (not GDALPath):
             return False
+        if (self._base and
+            not isinstance(self._base, Base)):
+            return False
+        if (not self._base.isLinux()):
+            self.CGDAL_ADDO_EXE += CEXEEXT
         self._GDALPath = GDALPath.replace('\\', '/')
         if (not self._GDALPath.endswith('/{}'.format(self.CGDAL_ADDO_EXE))):
             self._GDALPath = os.path.join(self._GDALPath, self.CGDAL_ADDO_EXE).replace('\\', '/')
         # check for path existence / e.t.c
         if (not os.path.exists(self._GDALPath)):
             self.message('Invalid GDALInfo/Path ({})'.format(self._GDALPath), self._base.const_critical_text)
-            return False
-        if (self._base and
-            not isinstance(self._base, Base)):
             return False
         for p in self._propertyNames:       # init-property names
             setattr(self, p, None)
@@ -663,7 +673,7 @@ class GDALInfo(object):
         self.message ('<PyramidFactor> set to ({})'.format(_steps), self._base.const_general_text)
         return _steps
     def __call_external(self, args):
-        p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE)
         message = '/'
         first_pass_ = True
         CSIZE_PREFIX = 'Size is'
@@ -735,6 +745,10 @@ class UpdateMRF:
             return False
         _prefix  = self._input[:self._input.rfind('.')]
         input_folder = os.path.dirname(self._input)
+        _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
+        if (_resumeReporter and
+            not 'output' in _resumeReporter._header):
+            _resumeReporter = None
         for r,d,f in os.walk(input_folder):
             r = r.replace('\\', '/')
             if (r == input_folder):
@@ -746,7 +760,10 @@ class UpdateMRF:
                         try:
                             _output_path = self._output
                             if (self._homePath):
-                                _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath, '')))
+                                userInput = self._homePath
+                                if (_resumeReporter):
+                                    userInput = _resumeReporter._header['output']
+                                _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath if self._input.startswith(self._homePath) else userInput, '')))    #
                             if (not os.path.exists(_output_path)):
                                 os.makedirs(_output_path)
                             _mk_copy_path = os.path.join(_output_path, _file).replace('\\', '/')
@@ -1229,10 +1246,10 @@ class S3Upload_:
     def upload(self):
         # read in big-file in chunks
         CHUNK_MIN_SIZE = MEMORYSTATUSEX().memoryStatus().memoryPerUploadChunk(CCLOUD_UPLOAD_THREADS)
-        #if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
-        #    return True                                 # "
+##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
+##            return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
-        #return True   # debug. Must be removed before release.
+##        return True   # debug. Must be removed before release.
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
         s3upl = S3Upload(self._base);
         idx = 1
@@ -1385,7 +1402,7 @@ class Store(object):
         return True
     def readProfile (self, account_name, account_key):
         config = ConfigParser.RawConfigParser()
-        userHome = '{}/{}/{}'.format(os.path.join(os.getenv('HOMEDRIVE'),os.getenv('HOMEPATH')).replace('\\', '/'), '.optimizerasters', 'azure_credentials')
+	userHome = '{}/{}/{}'.format(os.path.expanduser('~').replace('\\', '/'), '.optimizerasters', 'azure_credentials')
         with open (userHome) as fptr:
             config.readfp(fptr)
         if (not config.has_section(self._profile_name)):
@@ -1487,7 +1504,7 @@ class Azure(Store):
                 self._addBrowseContent(blob_name)
                 if (precb and
                     self._base.getUserConfiguration):
-                    _resumeReporter = self._base.getUserConfiguration.getValue('handler_resume_reporter')
+                    _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
                     if (_resumeReporter):
                         remotePath = _resumeReporter._header['input']
                         precb(blob_name if remotePath == '/' else blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header['output'])
@@ -1500,7 +1517,7 @@ class Azure(Store):
             if (not blob_source):
                 return False
             _user_config = self._base.getUserConfiguration
-            _resumeReporter = _user_config.getValue('handler_resume_reporter')
+            _resumeReporter = _user_config.getValue(CPRT_HANDLER)
             # what does the restore point say about the (blob_source) status?
             if (_resumeReporter):
                 if (not blob_source in _resumeReporter._input_list_info):   # if -subs=true but not on .orjob/internal list, bail out early
@@ -2079,7 +2096,7 @@ def args_Callback(args, user_data = None):
                         _base = user_data[CIDX_USER_CLSBASE]
                         if (_base):
                             gdalInfo = GDALInfo(_base)
-                            gdalInfo.init(user_data[CIDX_USER_CONFIG].getValue(CCFG_GDAL_PATH))
+                            gdalInfo.init(user_data[CIDX_USER_CONFIG].getValue(CCFG_GDAL_PATH, False))
                             if (gdalInfo.process(user_data[CIDX_USER_INPUTFILE])):
                                 ret = gdalInfo.bandInfo
                                 if (ret and
@@ -2471,9 +2488,9 @@ class Copy:
 class compression:
     def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
-        self.CGDAL_TRANSLATE_EXE = 'gdal_translate.exe'
-        self.CGDAL_BUILDVRT_EXE = 'gdalbuildvrt.exe'
-        self.CGDAL_ADDO_EXE = 'gdaladdo.exe'
+        self.CGDAL_TRANSLATE_EXE = 'gdal_translate'
+        self.CGDAL_BUILDVRT_EXE = 'gdalbuildvrt'
+        self.CGDAL_ADDO_EXE = 'gdaladdo'
         self.m_id = None
         self.m_user_config = None
         self._base = base
@@ -2485,13 +2502,17 @@ class compression:
             not isinstance(self._base.getUserConfiguration, Config)):
             Message ('Err/Internal. (Compression) instance is not initialized with a valid (Base) instance.', const_critical_text)
             return False
+        if (not self._base.isLinux()):
+            self.CGDAL_TRANSLATE_EXE += CEXEEXT
+            self.CGDAL_ADDO_EXE += CEXEEXT
+            self.CGDAL_BUILDVRT_EXE += CEXEEXT
         self.m_user_config = self._base.getUserConfiguration
         # internal gdal_path could get modified here.
         if (not self.m_gdal_path or
             os.path.isdir(self.m_gdal_path) == False):
             if (self.m_gdal_path):
                 self.message('Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path), const_warning_text)
-            self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'gdal/bin')
+            self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'GDAL/bin')
             if (not os.path.isdir(self.m_gdal_path)):
                 self.message('GDAL not found at ({}).'.format(self.m_gdal_path), self._base.const_critical_text)
                 return False
@@ -2972,8 +2993,8 @@ class Args:
         return _return_str
 
 class Application(object):
-    __program_ver__ = 'v1.7'
-    __program_date__ = '20160731'
+    __program_ver__ = 'v1.7a'
+    __program_date__ = '20160810'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
     '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3126,7 +3147,7 @@ class Application(object):
             if (not _rpt.read(self.__jobContentCallback)):
                 self._base.message('Unable to read the -input job file.', self._base.const_critical_text)
                 return False
-        self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
+        self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
         # do we need to process (til) files?
         for x in self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE):
             if (x.lower() == 'til'):
@@ -3194,7 +3215,7 @@ class Application(object):
                 self._base.message ('Unable to read the -input report file ({})'.format(self._args.input), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
             self._args.job = os.path.basename(self._args.input)
-            self._base.getUserConfiguration.setValue('handler_resume_reporter', _rpt)
+            self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
         # ends
 
         # Get the default (project name)
@@ -3483,7 +3504,7 @@ class Application(object):
         # ends
 
         # read in the gdal_path from config.
-        gdal_path = cfg.getValue(CCFG_GDAL_PATH)      # note: validity is checked within (compression-mod)
+        gdal_path = cfg.getValue(CCFG_GDAL_PATH, False)      # note: validity is checked within (compression-mod)
         # ends
 
         comp = compression(gdal_path, base = self._base)
@@ -3799,7 +3820,7 @@ class Application(object):
                                 # update .ovr file updates at -clonepath
                                 try:
                                     if (self._args.clonepath):
-                                        _clonePath = til_output_path.replace(self._args.output, '')
+                                        _clonePath = til_output_path.replace(self._args.output if not self._args.tempoutput or (self._args.tempoutput and not self._base.getBooleanValue(self._args.cloudupload)) else self._args.tempoutput, '')
                                         _mk_input_path = os.path.join(self._args.clonepath, '{}.mrf'.format(_clonePath))
                                         doc = minidom.parse(_mk_input_path)
                                         xmlString = doc.toxml()
