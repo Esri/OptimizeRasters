@@ -1,4 +1,4 @@
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Copyright 2016 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,10 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160810
+# Version: 20160901
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -22,14 +22,13 @@
 # -inputprofile -outputprofile -op -job -inputprofile -outputprofile
 # -inputbucket -outputbucket -clonepath -clouddownloadtype -clouduploadtype
 # Usage: python.exe OptimizeRasters.py <arguments>
-# Note: OptimizeRasters.xml (config) file is placed alongside
-# OptimizeRasters.py
+# Note: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
-# file are case-sensitive and the program will fail if the correct paths are
-# not entered at the cmd-line/UI or in the config file.
+# file are case-sensitive and the program will fail if the correct paths are not
+# entered at the cmd-line/UI or in the config file.
 # Author: Esri Imagery Workflows team
-#------------------------------------------------------------------------------
-#!/usr/bin/env python
+# ------------------------------------------------------------------------------
+# !/usr/bin/env python
 
 import sys
 import os
@@ -50,6 +49,8 @@ import ctypes
 import urllib
 import ConfigParser
 import json
+import md5
+import binascii
 # ends
 
 # enum error codes
@@ -112,8 +113,10 @@ CRESUME_HDR_INPUT = 'input'
 # ends
 
 CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
+CUSR_TEXT_IN_PATH = 'hashkey'
 CTEMPOUTPUT = 'tempoutput'
 CTEMPINPUT = 'tempinput'
+CHASH_DEF_INSERT_POS = 2
 
 # const node-names in the config file
 CCLOUD_AMAZON = 'amazon'
@@ -165,6 +168,7 @@ CS3STORAGE_OUT = 1
 
 
 class UI(object):
+
     def __init__(self, profileName=None):
         self._profileName = profileName
         self._errorText = []
@@ -176,12 +180,8 @@ class UI(object):
 
 
 class ProfileEditorUI(UI):
-    def __init__(self,
-                 profileName,
-                 storageType,
-                 accessKey,
-                 secretkey,
-                 credentialProfile=None):
+
+    def __init__(self, profileName, storageType, accessKey, secretkey, credentialProfile=None):
         super(ProfileEditorUI, self).__init__(profileName)
         self._accessKey = accessKey
         self._secretKey = secretkey
@@ -192,21 +192,13 @@ class ProfileEditorUI(UI):
         try:
             if (self._storageType == CCLOUD_AMAZON):
                 import boto
-                con = boto.connect_s3(self._accessKey,
-                                      self._secretKey,
+                con = boto.connect_s3(self._accessKey, self._secretKey,
                                       profile_name=self._credentialProfile if self._credentialProfile else None)
-                # this will throw if credentials are invalid.
-                [self._availableBuckets.append(i.name) for i in
-                 con.get_all_buckets()]
+                [self._availableBuckets.append(i.name) for i in con.get_all_buckets()]  # this will throw if credentials are invalid.
             elif(self._storageType == CCLOUD_AZURE):
-                azure_storage = Azure(self._accessKey,
-                                      self._secretKey,
-                                      self._credentialProfile,
-                                      None)
+                azure_storage = Azure(self._accessKey, self._secretKey, self._credentialProfile, None)
                 azure_storage.init()
-                # this will throw.
-                [self._availableBuckets.append(i.name) for i in
-                 azure_storage._blob_service.list_containers()]
+                [self._availableBuckets.append(i.name) for i in azure_storage._blob_service.list_containers()]  # this will throw.
             else:
                 raise Exception('Invalid storage type')
         except Exception as e:
@@ -217,12 +209,9 @@ class ProfileEditorUI(UI):
 
 
 class OptimizeRastersUI(ProfileEditorUI):
+
     def __init__(self, profileName, storageType):
-        super(OptimizeRastersUI, self).__init__(profileName,
-                                                storageType,
-                                                None,
-                                                None,
-                                                profileName)
+        super(OptimizeRastersUI, self).__init__(profileName, storageType, None, None, profileName)
 
     def getAvailableBuckets(self):
         ret = self.validateCredentials()
@@ -247,23 +236,29 @@ class MEMORYSTATUSEX(ctypes.Structure):
     def __init__(self):
         self.dwLength = ctypes.sizeof(self)
         super(MEMORYSTATUSEX, self).__init__()
+        self.isLinux = os.name == 'posix'
+        self.CMINSIZEALLOWED = 5242880
 
     def memoryStatus(self):
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(self))
+        if (not self.isLinux):
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(self))
         return self
 
-    def memoryPerDownloadChunk(self):
-        # download file isn't split in chunks, for now usage is set to 0.01
-        return int(self.memoryStatus().ullAvailPhys * 0.01)
+    def getFreeMem(self):
+        if (self.isLinux):
+            try:
+                return int(int(os.popen("free -b").readlines()[1].split()[2]) * .01)
+            except Exception as e:
+                return self.CMINSIZEALLOWED
+        return int(self.memoryStatus().ullAvailPhys * .01)  # download file isn't split in chunks, for now usage is set to 0.01
 
-    def memoryPerUploadChunk(self, totalThreads):
-        # get upload payload size per thread for the total cloud upload
-        # threads required.
-        memPerChunk = int(self.memoryStatus().ullAvailPhys * 0.10
-                          / totalThreads)
-        CMINSIZEALLOWED = 5242880
-        if (memPerChunk < CMINSIZEALLOWED):
-            memPerChunk = CMINSIZEALLOWED
+    def memoryPerDownloadChunk(self):
+        return self.getFreeMem()
+
+    def memoryPerUploadChunk(self, totalThreads):   # get upload payload size per thread for the total cloud upload threads required.
+        memPerChunk = self.getFreeMem() / totalThreads
+        if (memPerChunk < self.CMINSIZEALLOWED):
+            memPerChunk = self.CMINSIZEALLOWED
         return memPerChunk
 
 
@@ -274,8 +269,8 @@ class Lambda:
     account_sns = 'sns_arn'
 
     def __init__(self, base=None):
-        self._sns_aws_access_key = None
-        self._sns_aws_secret_access_key = None
+        self._sns_aws_access_key = \
+            self._sns_aws_secret_access_key = None
         self._sns_region = 'us-east-1'
         self._sns_ARN = None
         self._sns_connection = None
@@ -286,22 +281,18 @@ class Lambda:
         if (not keyProfileName):
             return False
         self._aws_credentials = ConfigParser.RawConfigParser()
-        userHome = '{}/{}/{}'.format(os.path.expanduser('~')
-                                     .replace('\\', '/'),
-                                     '.aws',
-                                     'credentials')
+        userHome = '{}/{}/{}'.format(os.path.expanduser('~').replace('\\', '/'), '.aws', 'credentials')
         with open(userHome) as fptr:
             self._aws_credentials.readfp(fptr)
         if (not self._aws_credentials.has_section(keyProfileName)):
             return False
         self._sns_aws_access_key = self._aws_credentials.get(keyProfileName, self.account_name) if self._aws_credentials.has_option(keyProfileName, self.account_name) else None
         self._sns_aws_secret_access_key = self._aws_credentials.get(keyProfileName, self.account_key) if self._aws_credentials.has_option(keyProfileName, self.account_key) else None
-        if (self._aws_credentials.has_option(keyProfileName,
-                                             self.account_region)):
-            self._sns_region = self._aws_credentials.get(keyProfileName,
-                                                         self.account_region)
+        if (self._aws_credentials.has_option(keyProfileName, self.account_region)):
+            self._sns_region = self._aws_credentials.get(keyProfileName, self.account_region)
         self._sns_ARN = self._aws_credentials.get(keyProfileName, self.account_sns) if self._aws_credentials.has_option(keyProfileName, self.account_sns) else None
-        if (not self._sns_aws_access_key or not self._sns_aws_secret_access_key):
+        if (not self._sns_aws_access_key or
+                not self._sns_aws_secret_access_key):
             return False
         self._sns_connection = boto.sns.connect_to_region(self._sns_region, aws_access_key_id=self._sns_aws_access_key, aws_secret_access_key=self._sns_aws_secret_access_key)
         try:
@@ -315,13 +306,15 @@ class Lambda:
         inKeyIDNode = doc.getElementsByTagName('{}_S3_ID'.format(direction))
         inKeySecretNode = doc.getElementsByTagName('{}_S3_Secret'.format(direction))
         CERR_MSG = 'Credential keys don\'t exist/invalid'
-        if ((not len(inProfileNode) or
-             not inProfileNode[0].hasChildNodes() or
-             not inProfileNode[0].firstChild)):
-            if (not len(inKeyIDNode) or not len(inKeySecretNode)):
+        if (not len(inProfileNode) or
+            not inProfileNode[0].hasChildNodes() or
+                not inProfileNode[0].firstChild):
+            if (not len(inKeyIDNode) or
+                    not len(inKeySecretNode)):
                 self._base.message(CERR_MSG, self._base.const_critical_text)
                 return False
-            if (not inKeyIDNode[0].hasChildNodes() or not inKeyIDNode[0].firstChild):
+            if (not inKeyIDNode[0].hasChildNodes() or
+                    not inKeyIDNode[0].firstChild):
                 self._base.message(CERR_MSG, self._base.const_critical_text)
                 return False
         else:
@@ -335,30 +328,35 @@ class Lambda:
             _sns_aws_access_key = self._aws_credentials.get(keyProfileName, self.account_name) if self._aws_credentials.has_option(keyProfileName, self.account_name) else None
             _sns_aws_secret_access_key = self._aws_credentials.get(keyProfileName, self.account_key) if self._aws_credentials.has_option(keyProfileName, self.account_key) else None
             if (len(inKeyIDNode)):
-                if (inKeyIDNode[0].hasChildNodes() and inKeyIDNode[0].firstChild.nodeValue):
+                if (inKeyIDNode[0].hasChildNodes() and
+                        inKeyIDNode[0].firstChild.nodeValue):
                     _sns_aws_access_key = inKeyIDNode[0].firstChild.nodeValue
                 parentNode[0].removeChild(inKeyIDNode[0])
             inKeyIDNode = doc.createElement('{}_S3_ID'.format(direction))
             inKeyIDNode.appendChild(doc.createTextNode(str(_sns_aws_access_key)))
             parentNode[0].appendChild(inKeyIDNode)
             if (len(inKeySecretNode)):
-                if (inKeySecretNode[0].hasChildNodes() and inKeySecretNode[0].firstChild.nodeValue):
+                if (inKeySecretNode[0].hasChildNodes() and
+                        inKeySecretNode[0].firstChild.nodeValue):
                     _sns_aws_secret_access_key = inKeySecretNode[0].firstChild.nodeValue
                 parentNode[0].removeChild(inKeySecretNode[0])
             inKeySecretNode = doc.createElement('{}_S3_Secret'.format(direction))
             inKeySecretNode.appendChild(doc.createTextNode(str(_sns_aws_secret_access_key)))
             parentNode[0].appendChild(inKeySecretNode)
             parentNode[0].removeChild(inProfileNode[0])
-            if (not _sns_aws_access_key or not _sns_aws_secret_access_key):
+            if (not _sns_aws_access_key or
+                    not _sns_aws_secret_access_key):
                 self._base.message(CERR_MSG, self._base.const_critical_text)
                 return False
         return True
 
     def submitJob(self, orjob):
-        if (not self._sns_connection or not orjob):
+        if (not self._sns_connection or
+                not orjob):
             return False
         _orjob = Report(Base())
-        if (not _orjob.init(orjob) or not _orjob.read()):
+        if (not _orjob.init(orjob) or
+                not _orjob.read()):
             self._base.message('Job file read error', self._base.const_critical_text)
             return False
         orjobName = os.path.basename(orjob)
@@ -391,38 +389,35 @@ class Lambda:
             orjobContent += '# {}={}\n'.format(hdr, _orjob._header[hdr])
         for f in _orjob._input_list:
             orjobContent += '{}\n'.format(f)
-        store = {'orjob': {'file': orjobName, 'content': orjobContent},
-                 'config': {'file': configName, 'content': configContent}}
+        store = {'orjob': {'file': orjobName, 'content': orjobContent}, 'config': {'file': configName, 'content': configContent}}
         message = json.dumps(store)
         publish = None
         try:
             publish = self._sns_connection.publish(self._sns_ARN, message, subject='OR')
             CPUBLISH_RESP = 'PublishResponse'
             CPUBLISH_META = 'ResponseMetadata'
-            if ((CPUBLISH_RESP in publish and
-                 CPUBLISH_META in publish[CPUBLISH_RESP] and
-                 'RequestId' in publish[CPUBLISH_RESP][CPUBLISH_META])):
+            if (CPUBLISH_RESP in publish and
+                CPUBLISH_META in publish[CPUBLISH_RESP] and
+                    'RequestId' in publish[CPUBLISH_RESP][CPUBLISH_META]):
                 self._base.message('Lambda working on the (RequestID) [{}]...'.format(publish[CPUBLISH_RESP][CPUBLISH_META]['RequestId']))
         except Exception as e:
-            self._base.message('{}'.format(str(e)),
-                               self._base.const_critical_text)
+            self._base.message('{}'.format(str(e)), self._base.const_critical_text)
             return False
         return True
 
 
 class RasterAssociates(object):
+
     def __init__(self):
         self._info = {}
 
     def _stripExtensions(self, relatedExts):
-        return ';'.join([x.strip() for x in
-                         relatedExts.split(';') if x.strip()])
+        return ';'.join([x.strip() for x in relatedExts.split(';') if x.strip()])
 
-    def addRelatedExtensions(self, primaryExt, relatedExts):
-        # relatedExts can be a ';' delimited list.
-        if ((not primaryExt or
-             not primaryExt.strip() or
-             not relatedExts)):
+    def addRelatedExtensions(self, primaryExt, relatedExts):    # relatedExts can be a ';' delimited list.
+        if (not primaryExt or
+            not primaryExt.strip() or
+                not relatedExts):
             return False
         for p in primaryExt.split(';'):
             p = p.strip()
@@ -439,8 +434,8 @@ class RasterAssociates(object):
             return False
         pos = path.rfind('.')
         ext = None
-        while(pos != - 1):
-            ext = path[pos+1:]
+        while(pos != -1):
+            ext = path[pos + 1:]
             pos = path[:pos].rfind('.')
         return ext
 
@@ -476,6 +471,7 @@ class Base(object):
                 self._m_log.isPrint = False
 
     def init(self):
+        self.hashInfo = {}
         return True
 
     def message(self, msg, status=const_general_text):
@@ -491,10 +487,40 @@ class Base(object):
         if (not input):
             return None
         _input = input.replace('\\', '/').strip()
-        if ((endSlash and not _input.endswith('/') and
-             not _input.lower().startswith('http'))):
+        if (endSlash and
+            not _input.endswith('/') and
+                not _input.lower().startswith('http')):
             _input += '/'
         return _input
+
+    def insertUserTextToOutputPath(self, path, text, pos):
+        if (not path):
+            return None
+        if (not text):
+            return path
+        try:
+            _pos = int(pos)
+        except:
+            _pos = CHASH_DEF_INSERT_POS
+        _path = path.split('/')
+        _pos -= 1
+        lenPath = len(_path)
+        if (_pos >= lenPath):
+            _pos = lenPath - 1
+        p = os.path.dirname(path)
+        if (p not in self.hashInfo):
+            if (text == '#'):
+                text = binascii.hexlify(os.urandom(4))
+            else:
+                m = md5.new()
+                m.update('{}/{}'.format(p, text))
+                text = m.hexdigest()
+            text = '{}_@'.format(text[:8])    # take only the fist 8 chars
+            self.hashInfo[p] = text
+        else:
+            text = self.hashInfo[p]
+        _path.insert(_pos, text)
+        return '/'.join(_path)
 
     def urlEncode(self, url):
         if (not url):
@@ -514,11 +540,11 @@ class Base(object):
         if (isinstance(value, bool)):
             return value
         val = value.lower()
-        if ((val == 'true' or
-             val == 'yes' or
-             val == 't' or
-             val == '1' or
-             val == 'y')):
+        if (val == 'true' or
+            val == 'yes' or
+            val == 't' or
+            val == '1' or
+                val == 'y'):
             return True
         return False
 
@@ -536,22 +562,18 @@ class Base(object):
 
     def close(self):
         if (self._m_log):
-            # persist information/errors collected.
-            self._m_log.WriteLog('#all')
+            self._m_log.WriteLog('#all')   # persist information/errors collected.
 
     def renameMetaFileToMatchRasterExtension(self, metaFile):
         updatedMetaFile = metaFile
-        if ((self.getUserConfiguration and
-             not self.getBooleanValue(self.getUserConfiguration
-                                      .getValue('KeepExtension')))):
+        if (self.getUserConfiguration and
+                not self.getBooleanValue(self.getUserConfiguration.getValue('KeepExtension'))):
             rasterExtension = RasterAssociates().findExtension(updatedMetaFile)
             inputExtensions = rasterExtension.split('.')
             firstExtension = inputExtensions[0]
-            if (len(inputExtensions) == 1):
-                # no changes to extension if the input has only one extension.
+            if (len(inputExtensions) == 1):  # no changes to extension if the input has only one extension.
                 return metaFile
-            if (True in [firstExtension.endswith(x) for x in
-                         self.getUserConfiguration.getValue(CCFG_RASTERS_NODE)]):
+            if (True in [firstExtension.endswith(x) for x in self.getUserConfiguration.getValue(CCFG_RASTERS_NODE)]):
                 updatedMetaFile = updatedMetaFile.replace('.{}'.format(firstExtension), '.mrf')
         return updatedMetaFile
 
@@ -562,8 +584,8 @@ class Base(object):
         if (not _clonePath):
             return True     # not an error.
         presentMetaLocation = self.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False)
-        if ((self.getUserConfiguration.getValue(CTEMPOUTPUT) and
-             getBooleanValue(self.getUserConfiguration.getValue(CCLOUD_UPLOAD)))):
+        if (self.getUserConfiguration.getValue(CTEMPOUTPUT) and
+                getBooleanValue(self.getUserConfiguration.getValue(CCLOUD_UPLOAD))):
             presentMetaLocation = self.getUserConfiguration.getValue(CTEMPOUTPUT, False)
         _cloneDstFile = sourcePath.replace(presentMetaLocation, _clonePath)
         _cloneDirs = os.path.dirname(_cloneDstFile)
@@ -601,9 +623,7 @@ class Base(object):
                     _single_upload = getBooleanValue(user_args[CSIN_UPL])
                 if (CINC_SUB in user_args):
                     _include_subs = getBooleanValue(user_args[CINC_SUB])
-            ret_buff = S3_storage.upload_group(input_file,
-                                               single_upload=_single_upload,
-                                               include_subs=_include_subs)
+            ret_buff = S3_storage.upload_group(input_file, single_upload=_single_upload, include_subs=_include_subs)
             if (len(ret_buff) == 0):
                 return False
         elif (upload_cloud_type == CCLOUD_AZURE):
@@ -627,18 +647,21 @@ class Base(object):
                     for _file in f:
                         if (_file.startswith(file_name_prefix)):
                             file_to_upload = os.path.join(r, _file)
-                            if (azure_storage.upload(file_to_upload,
-                                                     self._m_user_config.getValue(COUT_AZURE_CONTAINER, False),
-                                                     self._m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False),
-                                                     properties)):
+                            if (azure_storage.upload(
+                                file_to_upload,
+                                self._m_user_config.getValue(COUT_AZURE_CONTAINER, False),
+                                self._m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False),
+                                properties
+                            )):
                                 ret_buff.append(file_to_upload)
                     break
         if (CS3_MSG_DETAIL):
             self.message('Following file(s) uploaded to ({})'.format(CCLOUD_AMAZON if upload_cloud_type == CCLOUD_AMAZON else CCLOUD_AZURE))
             [self.message('{}'.format(f)) for f in ret_buff]
-        if (user_args is not None):
+        if (user_args):
             if (USR_ARG_DEL in user_args):
-                if (user_args[USR_ARG_DEL] and user_args[USR_ARG_DEL]):
+                if (user_args[USR_ARG_DEL] and
+                        user_args[USR_ARG_DEL]):
                     for f in ret_buff:
                         try:
                             _is_remove = True
@@ -653,8 +676,7 @@ class Base(object):
                                     os.remove(f)
                                 self.message('[Del] %s' % (f))
                         except Exception as e:
-                            self.message('[Del] Err. (%s)' % (str(e)),
-                                         self.const_critical_text)
+                            self.message('[Del] Err. (%s)' % (str(e)), self.const_critical_text)
         if (ret_buff):
             setUploadRecordStatus(input_file, CRPT_YES)
         return (len(ret_buff) > 0)
@@ -675,14 +697,14 @@ class GDALInfo(object):
     def init(self, GDALPath):
         if (not GDALPath):
             return False
-        if (self._base and not isinstance(self._base, Base)):
+        if (self._base and
+                not isinstance(self._base, Base)):
             return False
         if (not self._base.isLinux()):
             self.CGDAL_ADDO_EXE += CEXEEXT
         self._GDALPath = GDALPath.replace('\\', '/')
         if (not self._GDALPath.endswith('/{}'.format(self.CGDAL_ADDO_EXE))):
-            self._GDALPath = os.path.join(self._GDALPath,
-                                          self.CGDAL_ADDO_EXE).replace('\\', '/')
+            self._GDALPath = os.path.join(self._GDALPath, self.CGDAL_ADDO_EXE).replace('\\', '/')
         # check for path existence / e.t.c
         if (not os.path.exists(self._GDALPath)):
             self.message('Invalid GDALInfo/Path ({})'.format(self._GDALPath), self._base.const_critical_text)
@@ -717,7 +739,8 @@ class GDALInfo(object):
 
     @property
     def pyramidLevels(self):
-        if (not self.width or not self.height):
+        if (not self.width or
+                not self.height):
             return False        # fn/process not called.
         _max = max(self.width, self.height)
         _BS = CCFG_BLOCK_SIZE       # def (512)
@@ -740,13 +763,11 @@ class GDALInfo(object):
         _steps = _steps.strip()
         if (not _steps):
             _steps = CDEFPYRAMID_LEV
-        self.message('<PyramidFactor> set to ({})'.format(_steps),
-                     self._base.const_general_text)
+        self.message('<PyramidFactor> set to ({})'.format(_steps), self._base.const_general_text)
         return _steps
 
     def __call_external(self, args):
-        p = subprocess.Popen(' '.join(args), shell=True,
-                             stdout=subprocess.PIPE)
+        p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE)
         message = '/'
         first_pass_ = True
         CSIZE_PREFIX = 'Size is'
@@ -767,41 +788,40 @@ class GDALInfo(object):
 
 
 class UpdateMRF:
+
     def __init__(self, base=None):
-        self._mode = None
-        self._cachePath = None
-        self._input = None
-        self._output = None
-        self._homePath = None
-        self._outputURLPrefix = None
+        self._mode = \
+            self._cachePath = \
+            self._input = \
+            self._output = \
+            self._homePath = \
+            self._outputURLPrefix = None
         self._base = base
 
     def init(self, input, output, mode=None,
              cachePath=None, homePath=None, outputURLPrefix=None):
-        if (not input or not output):
+        if (not input or
+                not output):
             return False
         if (not os.path.exists(output)):
             try:
                 os.makedirs(output)
             except Exception as e:
                 self._base.message(str(e), self._base.const_critical_text)
-                return False
+            return False
         if (input.rfind('.') == -1):
             return False
-        if (self._base and not isinstance(self._base, Base)):
+        if (self._base and
+                not isinstance(self._base, Base)):
             return False
-
-        # mode/output
-        self._or_mode = self._base.getUserConfiguration.getValue('Mode')
+        self._or_mode = self._base.getUserConfiguration.getValue('Mode')    # mode/output
         if (not self._or_mode):
-            self._base.message('UpdateMRF> (Mode) not defined.',
-                               self._base.const_critical_text)
+            self._base.message('UpdateMRF> (Mode) not defined.', self._base.const_critical_text)
             return False
         _type = self._or_mode.split('_')
         if (len(_type) > 1):
             self._or_mode = _type[0]
-        if (self._or_mode.endswith('mrf')):
-            # to trap modes (cachingmrf/clonemrf).
+        if (self._or_mode.endswith('mrf')):         # to trap modes (cachingmrf/clonemrf).
             self._or_mode = 'mrf'
         self._mode = mode
         self._input = self._convertToForwardSlash(input)
@@ -817,15 +837,16 @@ class UpdateMRF:
         return input.replace('\\', '/')
 
     def copyInputMRFFilesToOutput(self, doUpdate=True):
-        if (not self._input or not self._output):
+        if (not self._input or
+                not self._output):
             if (self._base):
-                self._base.message('Not initialized!',
-                                   self._base.const_critical_text)
+                self._base.message('Not initialized!', self._base.const_critical_text)
             return False
         _prefix = self._input[:self._input.rfind('.')]
         input_folder = os.path.dirname(self._input)
         _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
-        if (_resumeReporter and not 'output' in _resumeReporter._header):
+        if (_resumeReporter and
+                'output' not in _resumeReporter._header):
             _resumeReporter = None
         for r, d, f in os.walk(input_folder):
             r = r.replace('\\', '/')
@@ -841,7 +862,7 @@ class UpdateMRF:
                                 userInput = self._homePath
                                 if (_resumeReporter):
                                     userInput = _resumeReporter._header['output']
-                                _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath if self._input.startswith(self._homePath) else userInput, '')))
+                                _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath if self._input.startswith(self._homePath) else userInput, '')))    #
                             if (not os.path.exists(_output_path)):
                                 os.makedirs(_output_path)
                             _mk_copy_path = os.path.join(_output_path, _file).replace('\\', '/')
@@ -851,8 +872,8 @@ class UpdateMRF:
                                         if (self._base):
                                             self._base.message('Updating ({}) failed!'.format(_mk_copy_path), self._base.const_critical_text)
                                 continue
-                            if ((_mk_path.lower().endswith(self._or_mode) or
-                                 _mk_path.lower().endswith('.ovr'))):
+                            if (_mk_path.lower().endswith(self._or_mode) or
+                                    _mk_path.lower().endswith('.ovr')):
                                 continue
                             if (not os.path.exists(_mk_copy_path)):
                                 shutil.copy(_mk_path, _mk_copy_path)
@@ -868,23 +889,29 @@ class UpdateMRF:
             comp_val = None         # for (splitmrf)
             doc = minidom.parse(self._input)
             _rasterSource = self._input
-            if ((self._outputURLPrefix and   # -cloudupload?
-                 self._homePath)):
-                _rasterSource = '{}{}'.format(self._outputURLPrefix,
-                                              _rasterSource.replace(self._homePath, ''))
+            if (self._outputURLPrefix and   # -cloudupload?
+                    self._homePath):
+                usrPath = self._base.getUserConfiguration.getValue(CUSR_TEXT_IN_PATH, False)
+                usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos (sub-folder loc) for user text in output path
+                if (usrPath):
+                    (usrPath, usrPathPos) = usrPath.split('@')
+                _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
                 if (_rasterSource.startswith('/vsicurl/')):
                     _rasterSource = self._base.urlEncode(_rasterSource)
-            else:
-                # if -tempoutput is set, readjust the CachedSource/Source
-                # path to point to -output.
+                if (usrPath):
+                    _idx = _rasterSource.find(self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False))
+                    if (_idx != -1):
+                        suffix = self._base.insertUserTextToOutputPath(_rasterSource[_idx:], usrPath, usrPathPos)
+                        _rasterSource = _rasterSource[:_idx] + suffix
+            else:   # if -tempoutput is set, readjust the CachedSource/Source path to point to -output.
                 if (self._base.getUserConfiguration.getValue(CTEMPOUTPUT)):
                     _output = self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT)
                     if (_output):
-                        _rasterSource = _rasterSource.replace(self._homePath,
-                                                              _output)
+                        _rasterSource = _rasterSource.replace(self._homePath, _output)
             nodeMeta = doc.getElementsByTagName(_CDOC_ROOT)
             nodeRaster = doc.getElementsByTagName('Raster')
-            if (not nodeMeta or not nodeRaster):
+            if (not nodeMeta or
+                    not nodeRaster):
                 raise Exception('Err. Invalid header')
             cachedNode = doc.getElementsByTagName('CachedSource')
             if (not cachedNode):
@@ -894,7 +921,8 @@ class UpdateMRF:
                 cachedNode[0].appendChild(nodeSource)
                 nodeMeta[0].insertBefore(cachedNode[0], nodeRaster[0])
             if (self._mode):
-                if (self._mode.startswith('mrf') or self._mode == 'clonemrf'):
+                if (self._mode.startswith('mrf') or
+                        self._mode == 'clonemrf'):
                     node = doc.getElementsByTagName('Source')
                     if (node):
                         node[0].setAttribute('clone', 'true')
@@ -913,10 +941,7 @@ class UpdateMRF:
             if (self._cachePath):
                 cacheSubFolders = self._base.convertToForwardSlash(os.path.dirname(output)).replace(self._output if self._cachePath else self._homePath, '')
             (f, ext) = os.path.splitext(os.path.basename(self._input))
-
-            # Get abs path in case the -output was relative for cache
-            # to function properly.
-            rep_data_file = rep_indx_file = os.path.abspath('{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)).replace('\\', '/')
+            rep_data_file = rep_indx_file = os.path.abspath('{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)).replace('\\', '/')  # Get abs path in case the -output was relative for cache to function properly.
             nodeData = nodeIndex = None
             if (comp_val):
                 extensions_lup = {
@@ -933,18 +958,17 @@ class UpdateMRF:
                 nodeIndex[0].appendChild(doc.createTextNode(''))
                 nodeRaster[0].appendChild(nodeIndex[0])
             if (nodeData):
-                if (comp_val and comp_val in extensions_lup):
-                    rep_data_file = rep_data_file.replace(_CCACHE_EXT,
-                                                          extensions_lup[comp_val]['data'])
+                if (comp_val and
+                        comp_val in extensions_lup):
+                    rep_data_file = rep_data_file.replace(_CCACHE_EXT, extensions_lup[comp_val]['data'])
                 nodeData[0].firstChild.nodeValue = rep_data_file
             if (nodeIndex):
-                if (comp_val and comp_val in extensions_lup):
-                    rep_indx_file = rep_indx_file.replace(_CCACHE_EXT,
-                                                          extensions_lup[comp_val]['index'])
+                if (comp_val and
+                        comp_val in extensions_lup):
+                    rep_indx_file = rep_indx_file.replace(_CCACHE_EXT, extensions_lup[comp_val]['index'])
                 nodeIndex[0].firstChild.nodeValue = rep_indx_file
             with open(output, "w") as c:
-                # GDAL mrf driver can't handle XML entity names.
-                _mrfBody = doc.toxml().replace('&quot;', '"')
+                _mrfBody = doc.toxml().replace('&quot;', '"')       # GDAL mrf driver can't handle XML entity names.
                 _indx = _mrfBody.find('<{}>'.format(_CDOC_ROOT))
                 if (_indx == -1):
                     raise Exception('Err. Invalid MRF/header')
@@ -974,10 +998,12 @@ class Report:
         self._m_rasterAssociates = RasterAssociates()
         self._m_rasterAssociates.addRelatedExtensions('img;IMG', 'ige;IGE')  # To copy files required by raster formats to the primary raster copy location (-tempinput?) before any conversion could take place.
         self._m_rasterAssociates.addRelatedExtensions('tif;TIF', 'RPB;rpb')  # certain associated files need to be present alongside rasters for GDAL to work successfully.
+        self._m_skipExtentions = ('til.ovr')   # status report for these extensions will be skipped. Case insensitive comaprision.
 
     def init(self, report_file, root=None):
-        if (not self._base or not isinstance(self._base, Base)):
-                return False
+        if (not self._base or
+                not isinstance(self._base, Base)):
+            return False
         if (not report_file):
             return False
         if (not report_file.lower().endswith(self.CJOB_EXT)):
@@ -985,20 +1011,18 @@ class Report:
         self._report_file = report_file
         if (root):
             _root = root.replace('\\', '/')
-            if ((root.lower().startswith('http://') or
-                 root.lower().startswith('https://'))):
-                    self._input_list.append(_root)
-                    return True
+            if (root.lower().startswith('http://') or
+                    root.lower().startswith('https://')):
+                self._input_list.append(_root)
+                return True
             if (_root[-1:] != '/'):
                 _root += '/'
-
-            # first element in the report is the -input path to source
-            self._input_list.append(_root)
+            self._input_list.append(_root)          # first element in the report is the -input path to source
         return True
 
-    def getRecordStatus(self, input, type):
-        # returns (true or false)
-        if (input is None or type is None):
+    def getRecordStatus(self, input, type):         # returns (true or false)
+        if (input is None or
+                type is None):
             return CRPT_UNDEFINED
         try:
             return (self._input_list_info[input][type.upper()])
@@ -1011,37 +1035,33 @@ class Report:
         from datetime import datetime
         _dt = datetime.now()
         _prefix = 'OR'
-        _jobName = _prefix + "_%04d%02d%02dT%02d%02d%02d%06d" % (_dt.year,
-                                                                 _dt.month,
-                                                                 _dt.day,
-                                                                 _dt.hour,
-                                                                 _dt.minute,
-                                                                 _dt.second,
-                                                                 _dt.microsecond)
+        _jobName = _prefix + "_%04d%02d%02dT%02d%02d%02d%06d" % (_dt.year, _dt.month, _dt.day,
+                                                                 _dt.hour, _dt.minute, _dt.second, _dt.microsecond)
         return _jobName
 
-    def updateRecordStatus(self, input,
-                           type, value):
-        # input is the (src) path name which is case sensitive.
-        if (input is None or type is None or value is None):
+    def updateRecordStatus(self, input, type, value):  # input is the (src) path name which is case sensitive.
+        if (input is None or
+            type is None or
+                value is None):
             return False
         _input = input.strip()
+        if (_input.lower().endswith(self._m_skipExtentions)):
+            return True     # not flagged as an err
         if (CTEMPINPUT in self._header):
             if (_input.startswith(self._header[CTEMPINPUT])):
                 _input = _input.replace(self._header[CTEMPINPUT], self.root)
                 (p, e) = os.path.split(_input)
                 for _k in self._input_list_info:
                     if (_k.startswith(p)):
-                        if ((self.CRPT_URL_TRUENAME in
-                             self._input_list_info[_k])):
-                            if ((self._input_list_info[_k]
-                                 [self.CRPT_URL_TRUENAME] == e)):
+                        if (self.CRPT_URL_TRUENAME in self._input_list_info[_k]):
+                            if (self._input_list_info[_k][self.CRPT_URL_TRUENAME] == e):
                                 _input = _k
                                 break
         _path = os.path.dirname(_input.replace('\\', '/'))
         if (not _path.endswith('/')):
             _path += '/'
-        if ('output' in self._header and _path == self._header['output']):
+        if ('output' in self._header and
+                _path == self._header['output']):
             _input = _input.replace(_path, self._header[CRESUME_HDR_INPUT])
         (p, e) = os.path.splitext(_input)
         while(e):
@@ -1050,26 +1070,26 @@ class Report:
                 break
             (p, e) = os.path.splitext(p)
         if (not e):
-            if ((_input in self._input_list_info and
-                 self.CRPT_URL_TRUENAME in self._input_list_info[_input])):
-                (p, e) = os.path.splitext(self._input_list_info[_input]
-                                          [self.CRPT_URL_TRUENAME])
+            if (_input in self._input_list_info and
+                    self.CRPT_URL_TRUENAME in self._input_list_info[_input]):
+                (p, e) = os.path.splitext(self._input_list_info[_input][self.CRPT_URL_TRUENAME])
             if (not e):  # still no extension?
                 self._base.message('Invalid input ({}) at (Reporter)'.format(_input), self._base.const_warning_text)
                 return False
         _type = type.upper()
-        if (not _type in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
+        if (_type not in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
             self._base.message('Invalid type ({}) at (Reporter)'.format(type), self._base.const_critical_text)
             return False
         _value = value.lower()
-        if (not _value in [CRPT_YES, CRPT_NO]):
+        if (_value not in [CRPT_YES, CRPT_NO]):
             self._base.message('Invalid value ({}) at (Reporter)'.format(_value), self._base.const_critical_text)
             return False
         self._input_list_info[_input][_type] = _value
         return True
 
     def addHeader(self, key, value):
-        if (not key or not value):
+        if (not key or
+                not value):
             return False
         self._header[key.lower()] = value
         return True
@@ -1087,14 +1107,15 @@ class Report:
             return False
         _file = file.replace('\\', '/')
         _get_store = self.findWith(_file)
-        if (_get_store and _get_store == _file):
+        if (_get_store and
+                _get_store == _file):
             return False        # no duplicate entires allowed.
         self._input_list.append(_file)
         return True
 
     @property
     def operation(self):
-        if (not 'op' in self._header):
+        if ('op' not in self._header):
             return None
         return self._header['op'].lower() if (self._header['op']) else None
 
@@ -1117,9 +1138,8 @@ class Report:
                 hdr_skipped = False
                 while(ln):
                     ln = ln.strip()
-                    if (not ln or ln.startswith('##')):
-                        # ignore empty-lines and comment lines (beginning
-                        # with '##')
+                    if (not ln or
+                            ln.startswith('##')):        # ignore empty-lines and comment lines (beginning with '##')
                         ln = _fptr.readline()
                         continue
                     if (readCallback):      # client side callback support.
@@ -1127,24 +1147,21 @@ class Report:
                     lns = ln.split(self.CVSCHAR)
                     _fname = lns[0].strip().replace('\\', '/')
                     if (_fname.startswith(self.CHEADER_PREFIX)):
-                        _hdr = _fname.replace(self.CHEADER_PREFIX,
-                                              '').split('=')
+                        _hdr = _fname.replace(self.CHEADER_PREFIX, '').split('=')
                         if (len(_hdr) > 1):
                             self.addHeader(_hdr[0].strip(), _hdr[1].strip())
                             ln = _fptr.readline()
                             continue
-                    if (not _fname or not hdr_skipped):
-                        # do not accept empty lines.
-                        if (len(lns) == 4):
-                            # skip line if it's the column header without
-                            # the '#' prefix?
+                    if (not _fname or
+                            not hdr_skipped):        # do not accept empty lines.
+                        if (len(lns) == 4):      # skip line if it's the column header without the '#' prefix?
                             ln = _fptr.readline()
                         if (_fname):
                             hdr_skipped = True
                             if (CRESUME_HDR_INPUT in self._header):
                                 _input = self._header[CRESUME_HDR_INPUT].lower()
-                                if ((_input.startswith('http://') or
-                                     _input.startswith('https://'))):
+                                if (_input.startswith('http://') or
+                                        _input.startswith('https://')):
                                     self._isInputHTTP = True
                         continue
                     _copied = '' if len(lns) <= 1 else lns[1].strip()       # for now, previously stored status values aren't used.
@@ -1155,7 +1172,7 @@ class Report:
                             CRPT_COPIED: _copied,
                             CRPT_PROCESSED: _processed,
                             CRPT_UPLOADED: _uploaded
-                            }
+                        }
                     ln = _fptr.readline()
         except Exception as exp:
             self._base.message('{}'.format(str(exp)), self._base.const_critical_text)
@@ -1178,8 +1195,7 @@ class Report:
                 return f
         return None
 
-    def moveJobFileToPath(self, path):
-        # successful job files can be moved over to a given folder.
+    def moveJobFileToPath(self, path):  # successful job files can be moved over to a given folder.
         if (not path):
             return False
         try:
@@ -1190,8 +1206,7 @@ class Report:
             self._base.message('[MV] {}'.format(mk_path))
             shutil.move(self._report_file, mk_path)
         except Exception as e:
-            self._base.message('({})'.format(str(e)),
-                               self._base.const_critical_text)
+            self._base.message('({})'.format(str(e)), self._base.const_critical_text)
             return False
         return True
 
@@ -1199,9 +1214,9 @@ class Report:
         if (not self._input_list):
             return False
         for f in self:
-            if ((self._input_list_info[f][CRPT_COPIED] == CRPT_NO or
-                 self._input_list_info[f][CRPT_PROCESSED] == CRPT_NO or
-                 self._input_list_info[f][CRPT_UPLOADED] == CRPT_NO)):
+            if (self._input_list_info[f][CRPT_COPIED] == CRPT_NO or
+                self._input_list_info[f][CRPT_PROCESSED] == CRPT_NO or
+                    self._input_list_info[f][CRPT_UPLOADED] == CRPT_NO):
                 return True
         return False
 
@@ -1211,15 +1226,14 @@ class Report:
             _frmt = '{}/{}/{}/{}\n'.replace('/', self.CVSCHAR)
             with open(self._report_file, 'w+') as _fptr:
                 for key in self._header:
-                    _fptr.write('{} {}={}\n'.format(self.CHEADER_PREFIX,
-                                                    key, self._header[key]))
-                _fptr.write(_frmt.format(CRPT_SOURCE, CRPT_COPIED,
-                                         CRPT_PROCESSED, CRPT_UPLOADED))
+                    _fptr.write('{} {}={}\n'.format(self.CHEADER_PREFIX, key, self._header[key]))
+                _fptr.write(_frmt.format(CRPT_SOURCE, CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED))
                 for f in self._input_list:
                     _fptr.write(_frmt.format(f,
                                              self._input_list_info[f][CRPT_COPIED] if f in self._input_list_info else '',
                                              self._input_list_info[f][CRPT_PROCESSED] if f in self._input_list_info else '',
-                                             self._input_list_info[f][CRPT_UPLOADED] if f in self._input_list_info else ''))
+                                             self._input_list_info[f][CRPT_UPLOADED] if f in self._input_list_info else ''
+                                             ))
         except Exception as exp:
             self._base.message('{}'.format(str(exp)), self._base.const_critical_text)
             return False
@@ -1235,9 +1249,10 @@ class Report:
     def __iter__(self):
         return iter(self._input_list)
 
+# class to read/gather info on til files.
+
 
 class TIL:
-    # class to read/gather info on til files.
     CRELATED_FILE_COUNT = 'related_file_count'
     CPROCESSED_FILE_COUNT = 'processed_file_count'
     CKEY_FILES = 'files'
@@ -1252,13 +1267,10 @@ class TIL:
     def TILCount(self):
         return len(self._tils)
 
-    def addTIL(self, input):
-        # add (til) files to process later via (fnc: process).
-        # This when the (til) files are found before the associated
-        # (files) could be not found at the (til) location because they
-        # may not have been downloaded yet.
+    def addTIL(self, input):        # add (til) files to process later via (fnc: process).
+                                    # This when the (til) files are found before the associated (files) could be not found at the (til) location because they may not have been downloaded yet.
         _input = input.replace('\\', '/')
-        if (not _input in self._tils):
+        if (_input not in self._tils):
             self._tils.append(_input)
         if (not input.lower() in self._tils_info):
             self._tils_info[_input.lower()] = {
@@ -1296,13 +1308,14 @@ class TIL:
         if (not input.lower() in self._tils_info):
             return False
         _key_til_info = input.lower()
-        if ((self._tils_info[_key_til_info][self.CRELATED_FILE_COUNT] ==
-             self._tils_info[_key_til_info][self.CPROCESSED_FILE_COUNT])):
+        if (self._tils_info[_key_til_info][self.CRELATED_FILE_COUNT] ==
+                self._tils_info[_key_til_info][self.CPROCESSED_FILE_COUNT]):
             return True
         return False
 
     def process(self, input):
-        if (not input or len(input) == 0):
+        if (not input or
+                len(input) == 0):
             return False
         if (not os.path.exists(input)):
             return False
@@ -1315,22 +1328,21 @@ class TIL:
                     splt = ln.replace('"', '').replace(';', '').split(CBREAK)
                     if (len(splt) == 2):
                         file_name = splt[1].strip()
-                        if (not file_name in self._rasters):
+                        if (file_name not in self._rasters):
                             self._rasters.append(file_name)
                             _key_til_info = input.lower()
                             if (_key_til_info in self._tils_info):
                                 self._tils_info[_key_til_info][self.CRELATED_FILE_COUNT] += 1
                                 self._tils_info[_key_til_info][self.CKEY_FILES].append(file_name)
                 _line = _fp.readline()
-#        self._tils.append (input)
         return True
 
     def setOutputPath(self, input, output):
-        if (not input in self._output_path):
+        if (input not in self._output_path):
             self._output_path[input] = output
 
     def getOutputPath(self, input):
-        if (not input in self._output_path):
+        if (input not in self._output_path):
             return None
         return self._output_path[input]
 
@@ -1345,9 +1357,11 @@ class TIL:
     def __iter__(self):
         return iter(self._tils)
 
+# classes of S3Upload module to merge as a single source.
+
 
 class S3Upload:
-    # classes of S3Upload module to merge as a single source.
+
     def __init__(self, base):
         self._base = base
 
@@ -1362,12 +1376,8 @@ class S3Upload:
 
 
 class S3Upload_:
-    def __init__(self,
-                 base,
-                 s3_bucket,
-                 s3_path,
-                 local_file,
-                 acl_policy='private'):
+
+    def __init__(self, base, s3_bucket, s3_path, local_file, acl_policy='private'):
         self._base = base       # base
         self.m_s3_path = s3_path
         self.m_local_file = local_file
@@ -1387,10 +1397,10 @@ class S3Upload_:
     def upload(self):
         # read in big-file in chunks
         CHUNK_MIN_SIZE = MEMORYSTATUSEX().memoryStatus().memoryPerUploadChunk(CCLOUD_UPLOAD_THREADS)
-#        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
-#            return True                                 # "
+        # if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
+        #   return True                                 # "
         self._base.message('[S3-Push] {}..'.format(self.m_local_file))
-#        return True   # debug. Must be removed before release.
+        # return True   # debug. Must be removed before release.
         self._base.message('Upload block-size is set to ({}) bytes.'.format(CHUNK_MIN_SIZE))
         s3upl = S3Upload(self._base)
         idx = 1
@@ -1409,16 +1419,13 @@ class S3Upload_:
                     self.mp.cancel_upload()
                     raise
         except Exception as e:
-            self._base.message('File open/Upload: ({})'.format(str(e)),
-                               self._base.const_critical_text)
+            self._base.message('File open/Upload: ({})'.format(str(e)), self._base.const_critical_text)
             if (f):
                 f.close()
             return False
         threads = []
         pos_buffer = upl_blocks = 0
-
-        # set this to no of parallel (chunk) uploads at once.
-        len_buffer = CCLOUD_UPLOAD_THREADS
+        len_buffer = CCLOUD_UPLOAD_THREADS     # set this to no of parallel (chunk) uploads at once.
         tot_blocks = (f_size / CHUNK_MIN_SIZE) + 1
         self._base.message('Total blocks to upload ({})'.format(tot_blocks))
         while(1):
@@ -1434,11 +1441,12 @@ class S3Upload_:
             buffer = []
             for i in range(0, len_buffer):
                 chunk = f.read(CHUNK_MIN_SIZE)
-                if not chunk:
+                if (not chunk):
                     break
                 buffer.append(SlnTMStringIO(CHUNK_MIN_SIZE))
                 buffer[len(buffer) - 1].write(chunk)
-            if (len(buffer) == 0 and len(threads) == 0):
+            if (len(buffer) == 0 and
+                    len(threads) == 0):
                 break
             for e in buffer:
                 try:
@@ -1449,16 +1457,14 @@ class S3Upload_:
                     threads.append(t)
                     idx += 1
                 except Exception as e:
-                    self._base.message('{}'.format(str(e)),
-                                       self._base.const_critical_text)
+                    self._base.message('{}'.format(str(e)), self._base.const_critical_text)
                     if (f):
                         f.close()
                     return False
         try:
             self.mp.complete_upload()
         except Exception as e:
-            self._base.message('{}'.format(str(e)),
-                               self._base.const_critical_text)
+            self._base.message('{}'.format(str(e)), self._base.const_critical_text)
             self.mp.cancel_upload()
             return False
         finally:
@@ -1472,6 +1478,7 @@ class S3Upload_:
 
 
 class SlnTMStringIO:
+
     def __init__(self, size, buf=''):
         self.m_size = size
         self.m_buff = mmap.mmap(-1, self.m_size)
@@ -1552,8 +1559,7 @@ class Store(object):
     def init(self):
         return True
 
-    def upload(self, file_path, container_name,
-               parent_folder, properties=None):
+    def upload(self, file_path, container_name, parent_folder, properties=None):
         self._input_file_path = file_path
         self._upl_container_name = container_name
         self._upl_parent_folder = parent_folder
@@ -1568,17 +1574,13 @@ class Store(object):
 
     def readProfile(self, account_name, account_key):
         config = ConfigParser.RawConfigParser()
-        userHome = '{}/{}/{}'.format(os.path.expanduser('~').
-                                     replace('\\', '/'), '.optimizerasters',
-                                     'azure_credentials')
+        userHome = '{}/{}/{}'.format(os.path.expanduser('~').replace('\\', '/'), '.optimizerasters', 'azure_credentials')
         with open(userHome) as fptr:
             config.readfp(fptr)
         if (not config.has_section(self._profile_name)):
             return (None, None)
-        azure_account_name = config.get(self._profile_name,
-                                        account_name) if config.has_option(self._profile_name, account_name) else None
-        azure_account_key = config.get(self._profile_name,
-                                       account_key) if config.has_option(self._profile_name, account_key) else None
+        azure_account_name = config.get(self._profile_name, account_name) if config.has_option(self._profile_name, account_name) else None
+        azure_account_key = config.get(self._profile_name, account_key) if config.has_option(self._profile_name, account_key) else None
         return (azure_account_name, azure_account_key)
 
     def message(self, msg, status=0):     # type (0: general, 1: warning, 2: critical, 3: statusText)
@@ -1598,23 +1600,19 @@ class Azure(Store):
     COUT_AZURE_ACCOUNTNAME_INFILE = 'azure_account_name'
     COUT_AZURE_ACCOUNTKEY_INFILE = 'azure_account_key'
 
-    def __init__(self, account_name, account_key,
-                 profile_name=None, base=None):
-        super(Azure, self).__init__(account_name, account_key,
-                                    profile_name, base)
+    def __init__(self, account_name, account_key, profile_name=None, base=None):
+        super(Azure, self).__init__(account_name, account_key, profile_name, base)
         self._browsecontent = []
 
     def init(self):
         try:
-            if (self._profile_name):
-                # profile name if defined supersedes (account_name,
-                # account_key)
+            if (self._profile_name):    # profile name if defined supersedes (account_name, account_key)
                 (self._account_name, self._account_key) = self.readProfile(self.COUT_AZURE_ACCOUNTNAME_INFILE, self.COUT_AZURE_ACCOUNTKEY_INFILE)
-                if (not self._account_name or not self._account_key):
+                if (not self._account_name or
+                        not self._account_key):
                     return False
             from azure.storage.blob import BlobService
-            self._blob_service = BlobService(account_name=self._account_name,
-                                             account_key=self._account_key)
+            self._blob_service = BlobService(account_name=self._account_name, account_key=self._account_key)
         except Exception as e:
             return False
         return True
@@ -1640,25 +1638,26 @@ class Azure(Store):
     def getBrowseContent(self):
         return self._browsecontent
 
-    def browseContent(self, container_name, parent_folder,
-                      cb=None, precb=None):
+    def browseContent(self, container_name, parent_folder, cb=None, precb=None):
         super(Azure, self).setSource(container_name, parent_folder)
         blobs = []
         marker = None
         while (True):
             try:
-                batch = self._blob_service.list_blobs(self._dn_container_name,
-                                                      marker=marker)
+                batch = self._blob_service.list_blobs(self._dn_container_name, marker=marker)
                 blobs.extend(batch)
                 if not batch.next_marker:
                     break
                 marker = batch.next_marker
             except:
-                self._base.message('Unable to read from ({}). Check container name ({})/credentials.'.format(CCLOUD_AZURE.capitalize(), self._dn_container_name), self._base.const_critical_text)
+                self._base.message('Unable to read from ({}). Check container name ({})/credentials.'.format(CCLOUD_AZURE.capitalize(),
+                                                                                                             self._dn_container_name),
+                                   self._base.const_critical_text)
                 return False
         parent_folder_ = None
         parent_folder_indx = -1
-        if (parent_folder and parent_folder != '/'):
+        if (parent_folder and
+                parent_folder != '/'):
             parent_folder_ = parent_folder.replace('\\', '/')
             if (not parent_folder_.endswith('/')):
                 parent_folder_ += '/'
@@ -1666,30 +1665,32 @@ class Azure(Store):
         for blob in blobs:
             blob_name = blob.name.replace('\\', '/')
             if (not self._include_subFolders):
-                if (not parent_folder or parent_folder == '/'):
+                if (not parent_folder or
+                        parent_folder == '/'):
                     if (blob_name.find('/') != -1):
                         continue
             passed = False
             if (parent_folder_):
-                if ((parent_folder_ and
-                     blob_name.startswith(parent_folder_) or
-                     parent_folder_ == '/')):
+                if (parent_folder_ and
+                    blob_name.startswith(parent_folder_) or
+                        parent_folder_ == '/'):
                     passed = True
                 if (not self._include_subFolders):
                     passed = False
-                    if ((blob_name.find('/', parent_folder_indx) == -1 and
-                         blob_name.find('/') != -1)):
+                    if (blob_name.find('/', parent_folder_indx) == -1 and
+                            blob_name.find('/') != -1):
                         passed = True
-            if (not parent_folder_ or passed):
+            if (not parent_folder_ or
+                    passed):
                 self._addBrowseContent(blob_name)
-                if (precb and self._base.getUserConfiguration):
+                if (precb and
+                        self._base.getUserConfiguration):
                     _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
                     if (_resumeReporter):
                         remotePath = _resumeReporter._header['input']
-                        precb(blob_name if remotePath == '/'
-                              else blob_name.replace(remotePath, ''),
-                              remotePath, _resumeReporter._header['output'])
-                if (cb and self._mode != self.CMODE_SCAN_ONLY):
+                        precb(blob_name if remotePath == '/' else blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header['output'])
+                if (cb and
+                        self._mode != self.CMODE_SCAN_ONLY):
                     cb(blob_name)
         return True
 
@@ -1701,51 +1702,42 @@ class Azure(Store):
             _resumeReporter = _user_config.getValue(CPRT_HANDLER)
             # what does the restore point say about the (blob_source) status?
             if (_resumeReporter):
-                if (not blob_source in _resumeReporter._input_list_info):
-                    # if -subs=true but not on .orjob/internal list,
-                    # bail out early
+                if (blob_source not in _resumeReporter._input_list_info):   # if -subs=true but not on .orjob/internal list, bail out early
                     return True
-                _get_rstr_val = _resumeReporter.getRecordStatus(blob_source,
-                                                                CRPT_COPIED)
+                _get_rstr_val = _resumeReporter.getRecordStatus(blob_source, CRPT_COPIED)
                 if (_get_rstr_val == CRPT_YES):
-                    self._base.message('{} {}'.format(CRESUME_MSG_PREFIX,
-                                                      blob_source))
+                    self._base.message('{} {}'.format(CRESUME_MSG_PREFIX, blob_source))
                     return True
             # ends
-            _azureParentFolder = _user_config.getValue(CIN_AZURE_PARENTFOLDER,
-                                                       False)
+            _azureParentFolder = _user_config.getValue(CIN_AZURE_PARENTFOLDER, False)
             _azurePath = blob_source if _azureParentFolder == '/' else blob_source.replace(_azureParentFolder, '')
-            output_path = _user_config.getValue(CCFG_PRIVATE_OUTPUT,
-                                                False) + _azurePath
+            output_path = _user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + _azurePath
             isUpload = getBooleanValue(_user_config.getValue(CCLOUD_UPLOAD))
-            if (_user_config.getValue('istempoutput') and isUpload):
-                output_path = _user_config.getValue(CTEMPOUTPUT,
-                                                    False) + _azurePath
+            if (_user_config.getValue('istempoutput') and
+                    isUpload):
+                output_path = _user_config.getValue(CTEMPOUTPUT, False) + _azurePath
             is_raster = False
             is_tmp_input = getBooleanValue(_user_config.getValue('istempinput'))
             primaryRaster = None
-            if (_resumeReporter and is_tmp_input):
+            if (_resumeReporter and
+                    is_tmp_input):
                 primaryRaster = _resumeReporter._m_rasterAssociates.findPrimaryExtension(_azurePath)
-            if (True in [_azurePath.endswith(x) for x in
-                         _user_config.getValue('ExcludeFilter')]):
+            if (True in [_azurePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
                 return False
-
-            # if the _azurePath is an associated raster file,
-            #consider it as a raster.
-            elif (primaryRaster or
+            elif (primaryRaster or  # if the _azurePath is an associated raster file, consider it as a raster.
                   True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
                 if (is_tmp_input):
                     output_path = _user_config.getValue(CTEMPINPUT, False) + _azurePath
                 is_raster = True
             if (_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
                 return False
-            if ((not blob_source or
-                 not output_path or
-                 not self._dn_parent_folder)):
+            if (not blob_source or
+                not output_path or
+                    not self._dn_parent_folder):
                 self._base.message('Azure> Not initialized', self._base.const_critical_text)
                 return False
             flr = os.path.dirname(output_path)
-            if (os.path.exists(flr) is False):
+            if (not os.path.exists(flr)):
                 try:
                     os.makedirs(flr)
                 except Exception as e:
@@ -1757,24 +1749,18 @@ class Azure(Store):
             self._base.message('[Azure-Pull] {}'.format(blob_source))
             if (not is_raster):
                 writeTo = self._base.renameMetaFileToMatchRasterExtension(writeTo)
-            self._blob_service.get_blob_to_path(self._dn_container_name,
-                                                blob_source, writeTo)
-
+            self._blob_service.get_blob_to_path(self._dn_container_name, blob_source, writeTo)
             if (self._event_postCopyToLocal):
                 self._event_postCopyToLocal(writeTo)
             # mark download/copy status
             if (_resumeReporter):
-                _resumeReporter.updateRecordStatus(blob_source,
-                                                   CRPT_COPIED,
-                                                   CRPT_YES)
+                _resumeReporter.updateRecordStatus(blob_source, CRPT_COPIED, CRPT_YES)
             # ends
             # copy metadata files to -clonepath if set
-            if (not primaryRaster):
-                # do not copy raster associated files to clone path.
+            if (not primaryRaster):  # do not copy raster associated files to clone path.
                 self._base.copyMetadataToClonePath(output_path)
             # ends
-            # Handle any post-processing, if the final destination is to
-            # S3, upload right away.
+            # Handle any post-processing, if the final destination is to S3, upload right away.
             if (isUpload):
                 if (getBooleanValue(_user_config.getValue('istempinput'))):
                     if (is_raster):
@@ -1784,19 +1770,16 @@ class Azure(Store):
                     return False
             # ends
         except Exception as e:
-            self._base.message('({})'.format(str(e)),
-                               self._base.const_critical_text)
+            self._base.message('({})'.format(str(e)), self._base.const_critical_text)
             if (_resumeReporter):
-                _resumeReporter.updateRecordStatus(blob_source, CRPT_COPIED,
-                                                   CRPT_NO)
+                _resumeReporter.updateRecordStatus(blob_source, CRPT_COPIED, CRPT_NO)
             return False
         return True
 
-    def upload(self, input_path, container_name,
-               parent_folder, properties=None):
-        if ((not input_path or
-             not container_name or
-             parent_folder is None)):
+    def upload(self, input_path, container_name, parent_folder, properties=None):
+        if (not input_path or
+            not container_name or
+                parent_folder is None):
             return False
         _parent_folder = parent_folder
         if (not _parent_folder):
@@ -1808,15 +1791,17 @@ class Azure(Store):
             if (CTEMPOUTPUT in properties):
                 _tempoutput = properties[CTEMPOUTPUT]
                 _parent_folder = os.path.dirname(input_path.replace('\\', '/').replace(_tempoutput, _parent_folder))
-        super(Azure, self).upload(input_path, container_name,
-                                  _parent_folder, properties)
+        usrPath = self._base.getUserConfiguration.getValue(CUSR_TEXT_IN_PATH, False)
+        usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos (sub-folder loc) for user text in output path
+        if (usrPath):
+            (usrPath, usrPathPos) = usrPath.split('@')
+            _parent_folder = self._base.insertUserTextToOutputPath('{}{}'.format(_parent_folder, '/' if not _parent_folder.endswith('/') else ''), usrPath, usrPathPos)
+        super(Azure, self).upload(input_path, container_name, _parent_folder, properties)
         blob_path = self._input_file_path
-        blob_name = os.path.join(self._upl_parent_folder,
-                                 os.path.basename(blob_path))
-         # debug. Must be removed before release.
-#        if (blob_name.endswith('.lrc')):
-#            return True
-#        return True     # debug. Must be removed before release.
+        blob_name = os.path.join(self._upl_parent_folder, os.path.basename(blob_path))
+        # if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
+        #   return True                          #  "
+        # return True     # debug. Must be removed before release.
         isContainerCreated = False
         t0 = datetime.datetime.now()
         time_to_wait_before_retry = 3
@@ -1841,8 +1826,7 @@ class Azure(Store):
                         break
                 t1 = datetime.datetime.now() - t0
                 if (t1.seconds > max_time_to_wait):
-                    self.message('Timed out to create container.',
-                                 self.const_critical_text)
+                    self.message('Timed out to create container.', self.const_critical_text)
                     break
         if (not isContainerCreated):
             self.message('Unable to create the container ({})'.format(self._upl_container_name), self.const_critical_text)
@@ -1860,9 +1844,7 @@ class Azure(Store):
         threads = []
         block_ids = []
         pos_buffer = upl_blocks = 0
-
-        # set this to no of parallel (chunk) uploads at once.
-        len_buffer = CCLOUD_UPLOAD_THREADS
+        len_buffer = CCLOUD_UPLOAD_THREADS     # set this to no of parallel (chunk) uploads at once.
         tot_blocks = (f_size / Azure.CHUNK_MIN_SIZE) + 1
         idx = 1
         self.message('Uploading ({})'.format(blob_path))
@@ -1881,20 +1863,19 @@ class Azure(Store):
             buffer = []
             for i in range(0, len_buffer):
                 chunk = f.read(Azure.CHUNK_MIN_SIZE)
-                if not chunk:
+                if (not chunk):
                     break
                 buffer.append(SlnTMStringIO(len(chunk)))
                 buffer[len(buffer) - 1].write(chunk)
-            if (len(buffer) == 0 and len(threads) == 0):
+            if (len(buffer) == 0 and
+                    len(threads) == 0):
                 break
             for e in buffer:
                 try:
                     block_id = base64.b64encode(str(idx))
                     self.message('Adding block-id ({})'.format(idx))
                     t = threading.Thread(target=self._runBlock,
-                                         args=(self._blob_service, e,
-                                               self._upl_container_name,
-                                               blob_name, block_id))
+                                         args=(self._blob_service, e, self._upl_container_name, blob_name, block_id))
                     t.daemon = True
                     t.start()
                     threads.append(t)
@@ -1907,21 +1888,20 @@ class Azure(Store):
                     return False
         try:
             self.message('Finalizing uploads..')
-            ret = self._blob_service.put_block_list(self._upl_container_name,
-                                                    blob_name, block_ids)
+            ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, block_ids)
         except Exception as e:
             Message(str(e), self.const_critical_text)
             return False
         finally:
             if (f):
                 f.close()
-        self.message('Duration. ({} sec)'.format((datetime.datetime.now() -
-                                                  st).seconds))
+        self.message('Duration. ({} sec)'.format((datetime.datetime.now() - st).seconds))
         self.message('Done.')
         return True
 
 
 class S3Storage:
+
     def __init__(self, base):
         self._base = base
         self._isBucketPublic = False
@@ -1941,8 +1921,7 @@ class S3Storage:
                 self.m_bucketname = s3_bucket
             _profile_name = self.m_user_config.getValue('{}_S3_AWS_ProfileName'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
             # setup s3 connection
-            if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO)):
-                # return type is a boolean hence no need to explicitly convert
+            if (self.m_user_config.getValue(CCFG_PRIVATE_INC_BOTO)):    # return type is a boolean hence no need to explicitly convert.
                 _calling_format = boto.config.get('s3', 'calling_format', 'boto.s3.connection.SubdomainCallingFormat' if len([c for c in self.m_bucketname if c.isupper()]) == 0 and self.m_bucketname.find('.') == -1 else 'boto.s3.connection.OrdinaryCallingFormat')
                 try:
                     _servicePoint = self.m_user_config.getValue('{}_S3_ServicePoint'.format('Out' if direction == CS3STORAGE_OUT else 'In'), False)
@@ -1956,20 +1935,19 @@ class S3Storage:
                 self.bucketupload = con.lookup(self.m_bucketname, True, None)
                 if (not self.bucketupload):
                     self._base.message('Invalid {} S3 bucket ({})/credentials.'.format(
-                                       'output' if direction == CS3STORAGE_OUT else 'input',
-                                       self.m_bucketname),
-                                       self._base.const_critical_text)
+                        'output' if direction == CS3STORAGE_OUT else 'input',
+                        self.m_bucketname),
+                        self._base.const_critical_text)
                     return False
             # ends
         _remote_path = remote_path
-        if (os.path.isfile(_remote_path)):  # are we reading a file list?
+        if (os.path.isfile(_remote_path)):      # are we reading a file list?
             self._input_flist = _remote_path
             try:
                 global _rpt
                 _remote_path = _rpt.root
             except Exception as e:
-                self._base.message('Report ({})'.format(str(e)),
-                                   self._base.const_critical_text)
+                self._base.message('Report ({})'.format(str(e)), self._base.const_critical_text)
                 return False
         self.remote_path = _remote_path.replace("\\", "/")
         if (self.remote_path[-1:] != '/'):
@@ -1986,17 +1964,16 @@ class S3Storage:
 
     def getFailedUploadList(self):
         return self.__m_failed_upl_lst
-
     # code to iterate a S3 bucket/folder
+
     def getS3Content(self, prefix, cb=None, precb=None):
-        is_link = not self._input_flist is None
+        is_link = self._input_flist is not None
         keys = self.bucketupload.list(prefix) if not is_link else _rpt
-        root_only = True
+        subs = True
         if (self.m_user_config):
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
-            if (root_only_ is not None):
-                # if there's a value, take it else defaults to (True)
-                root_only = getBooleanValue(root_only_)
+            if (subs is not None):    # if there's a value, take it else defaults to (True)
+                subs = getBooleanValue(root_only_)
         # get the til files first
         if (til):
             try:
@@ -2004,14 +1981,12 @@ class S3Storage:
                     key = self.bucketupload.get_key(key) if is_link else key
                     if (not key):
                         continue
-                    if (key.name.endswith('/') is False):
-                        if (not root_only):
-                            if ((os.path.dirname(key.name) !=
-                                 os.path.dirname(self.remote_path))):
+                    if (not key.name.endswith('/')):
+                        if (not subs):
+                            if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
                                 continue
                         if (key.name.lower().endswith(CTIL_EXTENSION_)):
-                            # callback on the client-side
-                            cb(key, key.name.replace(self.remote_path, ''))
+                            cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
             except Exception as e:
                 self._base.message(e.message, self._base.const_critical_text)
                 return False
@@ -2021,78 +1996,63 @@ class S3Storage:
                 key = self.bucketupload.get_key(key) if is_link else key
                 if (not key):
                     continue
-                if (key.name.endswith('/') is False):
-                    if (not root_only):
-                        if ((os.path.dirname(key.name) !=
-                             os.path.dirname(self.remote_path))):
+                if (not key.name.endswith('/')):
+                    if (not subs):
+                        if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
                             continue
                     if (cb):
                         if (precb):
-                            # if raster/exclude list, do not proceed.
-                            if (precb(key.name.replace(self.remote_path, ''),
-                                      self.remote_path, self.inputPath)):
-                                if (getBooleanValue(self.m_user_config.getValue('istempinput')) is False):
+                            if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath)):     # if raster/exclude list, do not proceed.
+                                if (not getBooleanValue(self.m_user_config.getValue('istempinput'))):
                                     continue
                         if (til):
                             if (key.name.lower().endswith(CTIL_EXTENSION_)):
                                 continue
-                        # callback on the client-side. Note. return
-                        # value not checked.
-                        cb(key, key.name.replace(self.remote_path, ''))
+                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side. Note. return value not checked.
         except Exception as e:
             self._base.message(e.message, const_critical_text)
             return False
-        # Process (til) files once all the associate files have been
-        # copied from (cloud) to (local)
+        # Process (til) files once all the associate files have been copied from (cloud) to (local)
         if (til):
             for _til in til:
                 til.process(_til)
         # ends
         return True
     # ends
-
     # code to deal with s3-local-cpy
+
     def S3_copy_to_local(self, S3_key, S3_path):
         err_msg_0 = 'S3/Local path is invalid'
         if (S3_key is None):   # get rid of invalid args.
-                self._base.message(err_msg_0)
-                return False
+            self._base.message(err_msg_0)
+            return False
         # what does the restore point say about the (S3_key) status?
         if (_rpt):
             _get_rstr_val = _rpt.getRecordStatus(S3_key.name, CRPT_COPIED)
             if (_get_rstr_val == CRPT_YES):
-                self._base.message('{} {}'.format(CRESUME_MSG_PREFIX,
-                                                  S3_key.name))
+                self._base.message('{} {}'.format(CRESUME_MSG_PREFIX, S3_key.name))
                 return True
         # ends
         if (self.m_user_config is None):     # shouldn't happen
-            self._base.message('Internal/User config not initialized.',
-                               self._base.const_critical_text)
+            self._base.message('Internal/User config not initialized.', self._base.const_critical_text)
             return False
-        input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT,
-                                                 False) + S3_path
-        is_cpy_to_s3 = getBooleanValue(self.m_user_config
-                                       .getValue(CCLOUD_UPLOAD))
-        if ((self.m_user_config.getValue('istempoutput')) and is_cpy_to_s3):
-            # -tempoutput must be set with -cloudinput=true
-            input_path = self.m_user_config.getValue(CTEMPOUTPUT,
-                                                     False) + S3_path
+        input_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False) + S3_path
+        is_cpy_to_s3 = getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))
+        if ((self.m_user_config.getValue('istempoutput')) and
+                is_cpy_to_s3):
+            input_path = self.m_user_config.getValue(CTEMPOUTPUT, False) + S3_path  # -tempoutput must be set with -cloudinput=true
         is_raster = False
-        is_tmp_input = getBooleanValue(self.m_user_config
-                                       .getValue('istempinput'))
+        is_tmp_input = getBooleanValue(self.m_user_config.getValue('istempinput'))
         primaryRaster = None
-        if (_rpt and is_tmp_input):
+        if (_rpt and
+                is_tmp_input):
             primaryRaster = _rpt._m_rasterAssociates.findPrimaryExtension(S3_path)
-        if (True in [S3_path.endswith(x) for x in
-                     self.m_user_config.getValue('ExcludeFilter')]):
+        if (True in [S3_path.endswith(x) for x in self.m_user_config.getValue('ExcludeFilter')]):
             return False
-        # if the S3_Path is an associated raster file, consider it as a raster
-        elif (primaryRaster or
-              True in [S3_path.endswith(x) for x in
-                       self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
+        elif (primaryRaster or  # if the S3_Path is an associated raster file, consider it as a raster.
+              True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
             if (is_tmp_input):
-                input_path = (self.m_user_config.getValue(CTEMPINPUT, False)
-                              + S3_path)
+                input_path = self.m_user_config.getValue(CTEMPINPUT, False) + S3_path
                 is_raster = True
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
@@ -2104,12 +2064,11 @@ class S3Storage:
         self._base.message('[S3-Pull] %s' % (mk_path))
         mk_path = self._base.renameMetaFileToMatchRasterExtension(mk_path)
         flr = os.path.dirname(mk_path)
-        if (os.path.exists(flr) is False):
+        if (not os.path.exists(flr)):
             try:
                 os.makedirs(flr)
             except Exception as e:
-                self._base.message('(%s)' % (str(e)),
-                                   self._base.const_critical_text)
+                self._base.message('(%s)' % (str(e)), self._base.const_critical_text)
                 if (_rpt):
                     _rpt.updateRecordStatus(S3_key.name, CRPT_COPIED, CRPT_NO)
                 return False
@@ -2124,15 +2083,12 @@ class S3Storage:
                 endbyte = startbyte + (memPerChunk - 1)
                 if (endbyte > S3_key.size):
                     endbyte = S3_key.size - 1
-                print('Seek> {}-{} [{}]'.format(startbyte, endbyte,
-                                                S3_key.name))
-                # Note> not routed to the log file.
+                print ('Seek> {}-{} [{}]'.format(startbyte, endbyte, S3_key.name))         # Note> not routed to the log file.
                 S3_key.get_contents_to_file(fout, headers={'Range': 'bytes={}-{}'.format(startbyte, endbyte)})
                 fout.flush()
                 startbyte = endbyte + 1
         except Exception as e:
-            self._base.message('({}\n{})'.format(str(e), mk_path),
-                               self._base.const_critical_text)
+            self._base.message('({}\n{})'.format(str(e), mk_path), self._base.const_critical_text)
             if (_rpt):
                 _rpt.updateRecordStatus(S3_key.name, CRPT_COPIED, CRPT_NO)
             return False
@@ -2153,12 +2109,10 @@ class S3Storage:
             _rpt.updateRecordStatus(S3_key.name, CRPT_COPIED, CRPT_YES)
         # ends
         # copy metadata files to -clonepath if set
-        if (not primaryRaster):
-            # do not copy raster associated files to clone path.
+        if (not primaryRaster):  # do not copy raster associated files to clone path.
             self._base.copyMetadataToClonePath(mk_path)
         # ends
-        # Handle any post-processing, if the final destination is
-        # to S3, upload right away.
+        # Handle any post-processing, if the final destination is to S3, upload right away.
         if (is_cpy_to_s3):
             if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
                 if (is_raster):
@@ -2178,27 +2132,23 @@ class S3Storage:
                 upl_file = lcl_file.replace(self.inputPath, self.remote_path)
                 self._base.message(upl_file)
                 try:
-                    S3 = S3Upload_(self.bucketupload, upl_file, lcl_file,
-                                   self.m_user_config.getValue(COUT_S3_ACL)
-                                   if self.m_user_config else None)
-                    if (S3.init() is False):
+                    S3 = S3Upload_(self.bucketupload, upl_file, lcl_file, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None)
+                    if (not S3.init()):
                         self._base.message('Unable to initialize [S3-Push] for (%s=%s)' % (lcl_file, upl_file), const_warning_text)
                         continue
                     ret = S3.upload()
-                    if (ret is False):
-                        self._base.message('[S3-Push] (%s)' % (upl_file),
-                                           const_warning_text)
+                    if (not ret):
+                        self._base.message('[S3-Push] (%s)' % (upl_file), const_warning_text)
                         continue
                 except Exception as inf:
-                    self._base.message('(%s)' % (str(inf)),
-                                       const_warning_text)
+                    self._base.message('(%s)' % (str(inf)), const_warning_text)
                 finally:
                     if (S3 is not None):
                         del S3
         return True
 
     def _addToFailedList(self, localPath, remotePath):
-        if (not 'upl' in self.getFailedUploadList()):
+        if ('upl' not in self.getFailedUploadList()):
             self.__m_failed_upl_lst['upl'] = []
         _exists = False
         for v in self.__m_failed_upl_lst['upl']:
@@ -2206,15 +2156,17 @@ class S3Storage:
                 _exists = True
                 break
         if (not _exists):
-            self.__m_failed_upl_lst['upl'].append({'local': localPath,
-                                                   'remote': remotePath})
+            self.__m_failed_upl_lst['upl'].append({'local': localPath, 'remote': remotePath})
         return True
 
-    def upload_group(self, input_source, single_upload=False,
-                     include_subs=False):
+    def upload_group(self, input_source, single_upload=False, include_subs=False):
         m_input_source = input_source.replace('\\', '/')
         input_path = os.path.dirname(m_input_source)
         upload_buff = []
+        usrPath = self.m_user_config.getValue(CUSR_TEXT_IN_PATH, False)
+        usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos (sub-folder loc) for user text in output path
+        if (usrPath):
+            (usrPath, usrPathPos) = usrPath.split('@')
         (p, e) = os.path.splitext(m_input_source)
         for r, d, f in os.walk(input_path):
             for file in f:
@@ -2225,35 +2177,30 @@ class S3Storage:
                             continue
                     try:
                         S3 = None
-                        upl_file = mk_path.replace(self.inputPath,
-                                                   self.remote_path)
-                        if (getBooleanValue(self.m_user_config
-                                            .getValue(CCLOUD_UPLOAD))):
+                        upl_file = mk_path.replace(self.inputPath, self.remote_path)
+                        if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                             rep = self.inputPath
-                            if (rep.endswith('/') is False):
+                            if (not rep.endswith('/')):
                                 rep += '/'
-                            if (getBooleanValue(self.m_user_config
-                                                .getValue('istempoutput'))):
+                            if (getBooleanValue(self.m_user_config.getValue('istempoutput'))):
                                 rep = self.m_user_config.getValue(CTEMPOUTPUT, False)
                             upl_file = mk_path.replace(rep, self.remote_path if self.m_user_config.getValue('iss3') else self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False))
-                        S3 = S3Upload_(self._base, self.bucketupload,
-                                       upl_file, mk_path,
-                                       self.m_user_config
-                                       .getValue(COUT_S3_ACL) if
-                                       self.m_user_config else None)
-                        if (S3.init() is False):
+                        if (usrPath):
+                            upl_file = self._base.insertUserTextToOutputPath(upl_file, usrPath, usrPathPos)
+                        S3 = S3Upload_(self._base, self.bucketupload, upl_file, mk_path, self.m_user_config.getValue(COUT_S3_ACL) if self.m_user_config else None)
+                        if (not S3.init()):
                             self._base.message('Unable to initialize S3-Upload for (%s=>%s)' % (mk_path, upl_file), self._base.const_warning_text)
                             self._addToFailedList(mk_path, upl_file)
                             continue
                         upl_retries = CS3_UPLOAD_RETRIES
                         ret = False
-                        while(upl_retries and ret is False):
+                        while(upl_retries and not ret):
                             ret = S3.upload()
-                            if (ret is False):
+                            if (not ret):
                                 time.sleep(10)   # let's sleep for a while until s3 kick-starts
                                 upl_retries -= 1
                                 self._base.message('[S3-Push] (%s), retries-left (%d)' % (upl_file, upl_retries), self._base.const_warning_text)
-                        if (ret is False):
+                        if (not ret):
                             self._addToFailedList(mk_path, upl_file)
                             if (S3 is not None):
                                 del S3
@@ -2347,31 +2294,31 @@ def args_Callback(args, user_data=None):
                 m_mode = mode_[0]      # mode/output
                 m_compression = mode_[1]     # compression
             if (m_mode.startswith('tif')):
-                    args.append('-co')
-                    args.append('BIGTIFF=IF_NEEDED')
-                    args.append('-co')
-                    args.append('TILED=YES')
-                    m_mode = 'GTiff'   # so that gdal_translate can understand.
-                    if ((m_interleave == 'PIXEL' and
-                         m_compression.startswith(_JPEG))):
-                        _base = user_data[CIDX_USER_CLSBASE]
-                        if (_base):
-                            gdalInfo = GDALInfo(_base)
-                            gdalInfo.init(user_data[CIDX_USER_CONFIG].getValue(CCFG_GDAL_PATH, False))
-                            if (gdalInfo.process(user_data[CIDX_USER_INPUTFILE])):
-                                ret = gdalInfo.bandInfo
-                                if ((ret and
-                                     len(ret) != 1)):
-                                    args.append('-co')
-                                    args.append('PHOTOMETRIC=YCBCR')
-                        if (m_compression == _JPEG12):
-                            args.append('-co')
-                            args.append('NBITS=12')
-                        m_compression = _JPEG
-                    if ((m_interleave == 'PIXEL' and
-                         m_compression == 'deflate')):
+                args.append('-co')
+                args.append('BIGTIFF=IF_NEEDED')
+                args.append('-co')
+                args.append('TILED=YES')
+                m_mode = 'GTiff'   # so that gdal_translate can understand.
+                if (m_interleave == 'PIXEL' and
+                        m_compression.startswith(_JPEG)):
+                    _base = user_data[CIDX_USER_CLSBASE]
+                    if (_base):
+                        gdalInfo = GDALInfo(_base)
+                        gdalInfo.init(user_data[CIDX_USER_CONFIG].getValue(CCFG_GDAL_PATH, False))
+                        if (gdalInfo.process(user_data[CIDX_USER_INPUTFILE])):
+                            ret = gdalInfo.bandInfo
+                            if (ret and
+                                    len(ret) != 1):
+                                args.append('-co')
+                                args.append('PHOTOMETRIC=YCBCR')
+                    if (m_compression == _JPEG12):
                         args.append('-co')
-                        args.append(' predictor={}'.format(m_predictor))
+                        args.append('NBITS=12')
+                    m_compression = _JPEG
+                if (m_interleave == 'PIXEL' and
+                        m_compression == 'deflate'):
+                    args.append('-co')
+                    args.append(' predictor={}'.format(m_predictor))
         except:     # could throw if index isn't found
             pass    # ingnore with defaults.
     args.append('-of')
@@ -2393,9 +2340,9 @@ def args_Callback(args, user_data=None):
         args.append('-co')
         args.append('INTERLEAVE=%s' % (m_interleave))
     if (m_compression.startswith(_LERC)):
-        if ((m_lerc_prec or
-             m_compression == _LERC2 or
-             m_compression == _LERC)):
+        if (m_lerc_prec or
+            m_compression == _LERC2 or
+                m_compression == _LERC):
             args.append('-co')
             args.append('OPTIONS={}{}'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_compression == _LERC2 or m_compression == _LERC else ''))
     args.append('-co')
@@ -2442,9 +2389,9 @@ def args_Callback_for_meta(args, user_data=None):
     args.append('-co')
     args.append('COMPRESS=%s' % (_LERC if m_comp == _LERC2 else m_comp))
     if (m_comp.startswith(_LERC)):
-        if ((m_lerc_prec or
-             m_comp == _LERC2 or
-             m_comp == _LERC)):
+        if (m_lerc_prec or
+            m_comp == _LERC2 or
+                m_comp == _LERC):
             args.append('-co')
             args.append('OPTIONS={}{}'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_comp == _LERC2 or m_comp == _LERC else ''))
     elif(m_comp == 'jpeg'):
@@ -2476,8 +2423,8 @@ def exclude_callback(file, src, dst):
     if (file is None):
         return False
     (f, e) = os.path.splitext(file)
-    if ((e[1:] in cfg.getValue(CCFG_RASTERS_NODE) or
-         src.lower().startswith('http'))):
+    if (e[1:] in cfg.getValue(CCFG_RASTERS_NODE) or
+            src.lower().startswith('http')):
         raster_buff.append({'f': file, 'src': '' if src == '/' else src, 'dst': dst if dst else ''})
         return True
     return False
@@ -2489,8 +2436,8 @@ def exclude_callback_for_meta(file, src, dst):
 
 def getSourcePathUsingTempOutput(input):
     # cfg, _rpt are global vars.
-    if ((not _rpt or
-         not getBooleanValue(cfg.getValue('istempoutput')))):
+    if (not _rpt or
+            not getBooleanValue(cfg.getValue('istempoutput'))):
         return None
     _mk_path = input.replace(cfg.getValue(CTEMPOUTPUT, False), '')
     _indx = -1
@@ -2507,18 +2454,20 @@ def getSourcePathUsingTempOutput(input):
 
 def setUploadRecordStatus(input, rpt_status):
     _rpt_src = getSourcePathUsingTempOutput(input)
-    if ((_rpt_src and
-         _rpt.updateRecordStatus(_rpt_src, CRPT_UPLOADED, rpt_status))):
+    if (_rpt_src and
+            _rpt.updateRecordStatus(_rpt_src, CRPT_UPLOADED, rpt_status)):
         return True
     return False
 
 
 class Copy:
+
     def __init__(self, base=None):
         self._base = base
 
     def init(self, src, dst, copy_list, cb_list, user_config=None):
-        if (not dst or not src):
+        if (not dst or
+                not src):
             return False
         self.src = src.replace('\\', '/')
         self._input_flist = None
@@ -2534,7 +2483,7 @@ class Copy:
                 self.message('Report ({})'.format(str(e)), const_critical_text)
                 return False
         if (self.src[-1:] != '/'):
-                self.src += '/'
+            self.src += '/'
         self.dst = dst.replace('\\', '/')
         if (self.dst[-1:] != '/'):
             self.dst += '/'
@@ -2542,7 +2491,7 @@ class Copy:
         self.cb_list = cb_list
         self.m_user_config = None
         self.__m_include_subs = True
-        if (user_config is not None):
+        if (user_config):
             self.m_user_config = user_config
             include_subs = self.m_user_config.getValue('IncludeSubdirectories')
             if (include_subs is not None):    # if there's a value either (!None), take it else defaults to (True)
@@ -2562,13 +2511,13 @@ class Copy:
             log.CreateCategory('Copy')
         self.message('Copying non rasters/aux files (%s=>%s)..' % (self.src, self.dst))
         # init - TIL files
-        is_link = not self._input_flist is None
+        is_link = self._input_flist is not None
         if (til):
             for r, d, f in _rpt.walk() if is_link else os.walk(self.src):
                 for file in f:
                     if (not file):
                         continue
-                    if (self.__m_include_subs is False):
+                    if (not self.__m_include_subs):
                         if ((r[:-1] if r[-1:] == '/' else r) != os.path.dirname(self.src)):     # note: first arg to walk (self.src) has a trailing '/'
                             continue
                     if (file.lower().endswith(CTIL_EXTENSION_)):
@@ -2582,14 +2531,14 @@ class Copy:
             for file in f:
                 if (not file):
                     continue
-                if (self.__m_include_subs is False):
+                if (not self.__m_include_subs):
                     if ((r[:-1] if r[-1:] == '/' else r) != os.path.dirname(self.src)):     # note: first arg to walk (self.src) has a trailing '/'
                         continue
                 free_pass = False
                 dst_path = r.replace(self.src, self.dst)
                 if (('*' in self.format['copy'])):
                     free_pass = True
-                if (free_pass is False):
+                if (not free_pass):
                     _isCpy = False
                     for _p in self.format['copy']:
                         if (file.endswith(_p)):
@@ -2598,13 +2547,14 @@ class Copy:
                     if (not _isCpy):
                         continue
                 isInputWebAPI = False
-                if (_rpt and _rpt._isInputHTTP):
+                if (_rpt and
+                        _rpt._isInputHTTP):
                     (f, e) = os.path.splitext(file)
                     if (not e):     # if no file extension at the end of URL, it's assumed we're talking to a service which in turn returns a raster.
                         isInputWebAPI = True
-                if ((True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
-                     not file.lower().endswith(CTIL_EXTENSION_) or       # skip 'exclude' list items and always copy (.til) files to destination.
-                     isInputWebAPI)):
+                if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
+                    not file.lower().endswith(CTIL_EXTENSION_) or       # skip 'exclude' list items and always copy (.til) files to destination.
+                        isInputWebAPI):
                     if (('exclude' in self.cb_list)):
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
@@ -2615,7 +2565,8 @@ class Copy:
                                 if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
                                     if (getBooleanValue(self.m_user_config.getValue('istempinput'))):
                                         r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
-                            if (_rpt and _rpt._isInputHTTP):
+                            if (_rpt and
+                                    _rpt._isInputHTTP):
                                 _mkRemoteURL = os.path.join(_r, file)
                                 try:
                                     import urllib2
@@ -2626,7 +2577,7 @@ class Copy:
                                             token = 'filename='
                                             f = v.find(token)
                                             if (f != -1):
-                                                e = v.find('\r',  f + len(token))
+                                                e = v.find('\r', f + len(token))
                                                 if (_mkRemoteURL in _rpt._input_list_info):
                                                     _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = v[f + len(token): e].strip().replace('"', '').replace('?', '_')
                                                 isFileNameInHeader = True
@@ -2640,7 +2591,7 @@ class Copy:
                                             buff = 2024 * 1024
                                             while True:
                                                 chunk = file_url.read(buff)
-                                                if not chunk:
+                                                if (not chunk):
                                                     break
                                                 fp.write(chunk)
                                         # mark download/copy status
@@ -2649,27 +2600,30 @@ class Copy:
                                         # ends
                                 except Exception as e:
                                     self._base.message('{}'.format(str(e), self._base.const_critical_text))
-                            if (self.cb_list['exclude'](file, r, dst_path) is False):       # skip fruther processing if 'false' returned from the callback fnc
+                            if (not self.cb_list['exclude'](file, r, dst_path)):       # skip fruther processing if 'false' returned from the callback fnc
                                 continue
                     continue
                 try:
                     if (('copy' in self.cb_list)):
                         if (self.cb_list['copy'] is not None):
-                            if (self.cb_list['copy'](file, r, dst_path) is False):       # skip fruther processing if 'false' returned
+                            if (not self.cb_list['copy'](file, r, dst_path)):       # skip fruther processing if 'false' returned
                                 continue
                     if (not g_is_generate_report):              # do not create folders for op==reporting only.
-                        if (os.path.exists(dst_path) is False):
+                        if (not os.path.exists(dst_path)):
                             os.makedirs(dst_path)
                     dst_file = os.path.join(dst_path, file)
                     src_file = os.path.join(r, file)
                     do_post_processing_cb = do_copy = True
-                    if ((os.path.dirname(src_file.replace('\\', '/')) != os.path.dirname(dst_path.replace('\\', '/')) or
-                         g_is_generate_report)):
+                    if (os.path.dirname(src_file.replace('\\', '/')) != os.path.dirname(dst_path.replace('\\', '/')) or
+                            g_is_generate_report):
                         if (pre_processing_callback):
                             do_post_processing_cb = do_copy = pre_processing_callback(src_file, dst_file, self.m_user_config)
                         if (do_copy):
                             if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
-                                if (_rpt.getRecordStatus(src_file, CRPT_COPIED) == CRPT_YES or (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD)) and _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES) or _rpt.operation == COP_UPL):
+                                if (_rpt.getRecordStatus(src_file, CRPT_COPIED) == CRPT_YES or
+                                    (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD)) and
+                                     _rpt.getRecordStatus(src_file, CRPT_UPLOADED) == CRPT_YES) or
+                                        _rpt.operation == COP_UPL):
                                     do_copy = False
                             if (do_copy):
                                 primaryRaster = _rpt._m_rasterAssociates.findPrimaryExtension(src_file)
@@ -2716,7 +2670,7 @@ class Copy:
                     file_buff.append(mk_path)
         return file_buff
 
-    def batch(self, file_lst, args=None,  pre_copy_callback=None):
+    def batch(self, file_lst, args=None, pre_copy_callback=None):
         threads = []
         files_len = len(file_lst)
         batch = 1
@@ -2730,14 +2684,14 @@ class Copy:
                 req = file_lst[i]
                 (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], False)
                 dst_path = os.path.dirname(output_file)
-                if (os.path.exists(dst_path) is False):
+                if (not os.path.exists(dst_path)):
                     os.makedirs(dst_path)
                 CCOPY = 0
                 CMOVE = 1
                 mode_ = CCOPY        # 0 = copy, 1 = move
                 if (args is not None):
                     if (isinstance(args, dict)):
-                        if ('mode' in args):
+                        if (('mode' in args)):
                             if (args['mode'].lower() == 'move'):
                                 mode_ = CMOVE
                 if (mode_ == CCOPY):
@@ -2755,6 +2709,7 @@ class Copy:
 
 
 class compression:
+
     def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
         self.CGDAL_TRANSLATE_EXE = 'gdal_translate'
@@ -2765,11 +2720,11 @@ class compression:
         self._base = base
 
     def init(self, id=None):
-        if (id is not None):
+        if (id):
             self.m_id = id
-        if ((not self._base or
-             not isinstance(self._base, Base) or
-             not isinstance(self._base.getUserConfiguration, Config))):
+        if (not self._base or
+            not isinstance(self._base, Base) or
+                not isinstance(self._base.getUserConfiguration, Config)):
             Message('Err/Internal. (Compression) instance is not initialized with a valid (Base) instance.', const_critical_text)
             return False
         if (not self._base.isLinux()):
@@ -2778,8 +2733,8 @@ class compression:
             self.CGDAL_BUILDVRT_EXE += CEXEEXT
         self.m_user_config = self._base.getUserConfiguration
         # internal gdal_path could get modified here.
-        if ((not self.m_gdal_path or
-             os.path.isdir(self.m_gdal_path) is False)):
+        if (not self.m_gdal_path or
+                not os.path.isdir(self.m_gdal_path)):
             if (self.m_gdal_path):
                 self.message('Invalid GDAL path ({}) in paramter file. Using default location.'.format(self.m_gdal_path), const_warning_text)
             self.m_gdal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), r'GDAL/bin')
@@ -2792,17 +2747,17 @@ class compression:
         os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
         # ends
         msg_text = '(%s) is not found at (%s)'
-        if (os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)) is False):
+        if (not os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE))):
             self.message(msg_text % (self.CGDAL_TRANSLATE_EXE, self.m_gdal_path), self._base.const_critical_text)
             return False
-        if (os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)) is False):
+        if (not os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE))):
             self.message(msg_text % (self.CGDAL_ADDO_EXE, self.m_gdal_path), self._base.const_critical_text)
             return False
         return True
 
     def message(self, msg, status=const_general_text):
         write = msg
-        if (self.m_id is not None):
+        if (self.m_id):
             write = '[{}] {}'.format(threading.current_thread().name, msg)
         self._base.message(write, status)
         return True
@@ -2819,9 +2774,8 @@ class compression:
 
     def compress(self, input_file, output_file, args_callback=None, build_pyramids=True, post_processing_callback=None, post_processing_callback_args=None):
         if (_rpt):
-            if ((input_file in _rpt._input_list_info and
-                 Report.CRPT_URL_TRUENAME in
-                 _rpt._input_list_info[input_file])):
+            if (input_file in _rpt._input_list_info and
+                    Report.CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
                 output_file = '{}/{}'.format(os.path.dirname(output_file), _rpt._input_list_info[input_file][Report.CRPT_URL_TRUENAME])
         _vsicurl_input = self.m_user_config.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
@@ -2832,8 +2786,8 @@ class compression:
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
             _get_rstr_val = _rpt.getRecordStatus(_input_file, CRPT_PROCESSED)
-            if ((_get_rstr_val == CRPT_YES or
-                 _rpt.operation == COP_UPL)):
+            if (_get_rstr_val == CRPT_YES or
+                    _rpt.operation == COP_UPL):
                 if (_rpt.operation != COP_UPL):
                     self.message('{} {}'.format(CRESUME_MSG_PREFIX, _input_file))
                 _do_process = False
@@ -2841,12 +2795,12 @@ class compression:
         post_process_output = output_file
         if (_do_process):
             out_dir_path = os.path.dirname(output_file)
-            if (os.path.exists(out_dir_path) is False):
+            if (not os.path.exists(out_dir_path)):
                 try:
                     os.makedirs(os.path.dirname(output_file))   # let's try to make the output dir-tree else GDAL would fail
                 except Exception as exp:
                     time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
-                    if (os.path.exists(out_dir_path) is False):
+                    if (not os.path.exists(out_dir_path)):
                         self.message('(%s)' % str(exp), const_critical_text)
                         if (_rpt):
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
@@ -2871,7 +2825,7 @@ class compression:
                                     if (chunk[:10] != '<{}>'.format(CMRF_DOC_ROOT)):
                                         self.message('Invalid MRF ({})'.format(_dn_vsicurl_), const_critical_text)
                                         raise Exception
-                                if not chunk:
+                                if (not chunk):
                                     break
                                 fp.write(chunk)
                     except Exception as e:
@@ -2879,8 +2833,8 @@ class compression:
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
                 else:
-                    if ((getBooleanValue(self.m_user_config.getValue('istempinput')) or
-                         not getBooleanValue(cfg.getValue('iss3')))):
+                    if (getBooleanValue(self.m_user_config.getValue('istempinput')) or
+                            not getBooleanValue(cfg.getValue('iss3'))):
                         shutil.copyfile(input_file, output_file)
                 if (isModeClone):
                     # Simulate the MRF file update (to include the CachedSource) which was earlier done via the GDAL_Translate->MRF driver.
@@ -2891,7 +2845,8 @@ class compression:
                         doc = minidom.parse(output_file)
                         nodeMeta = doc.getElementsByTagName(_CDOC_ROOT)
                         nodeRaster = doc.getElementsByTagName('Raster')
-                        if (not nodeMeta or not nodeRaster):
+                        if (not nodeMeta or
+                                not nodeRaster):
                             raise Exception()
                         cachedNode = doc.getElementsByTagName(_CDOC_CACHED_SOURCE)
                         if (not cachedNode):
@@ -2918,7 +2873,8 @@ class compression:
                         return False
                     # ends
             do_pyramids = self.m_user_config.getValue('Pyramids')
-            if (do_pyramids != CCMD_PYRAMIDS_ONLY and do_process):
+            if (do_pyramids != CCMD_PYRAMIDS_ONLY and
+                    do_process):
                 args = [os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)]
                 if (args_callback is None):      # defaults
                     args.append('-of')
@@ -2934,14 +2890,14 @@ class compression:
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self.__call_external(args)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
-                if (ret is False):
+                if (not ret):
                     if (_rpt):
                         _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                     return ret
             if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
-                if ((getBooleanValue(do_pyramids) or     # accept any valid boolean value.
-                     do_pyramids == CCMD_PYRAMIDS_ONLY or
-                     do_pyramids == CCMD_PYRAMIDS_EXTERNAL)):
+                if (getBooleanValue(do_pyramids) or     # accept any valid boolean value.
+                    do_pyramids == CCMD_PYRAMIDS_ONLY or
+                        do_pyramids == CCMD_PYRAMIDS_EXTERNAL):
                     iss3 = self.m_user_config.getValue('iss3')
                     if (iss3 and do_pyramids == CCMD_PYRAMIDS_ONLY):
                         if (do_pyramids != CCMD_PYRAMIDS_ONLY):     # s3->(local)->.ovr
@@ -2950,17 +2906,18 @@ class compression:
                         self.message('BuildVrt (%s=>%s)' % (input_file, output_file))
                         ret = self.buildMultibandVRT([input_file], output_file)
                         self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
-                        if (ret is False):
+                        if (not ret):
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return ret  # we can't proceed if vrt couldn't be built successfully.
                     ret = self.createaOverview(output_file)
                     self.message('Status: (%s).' % ('OK' if ret else 'FAILED'), const_general_text if ret else const_critical_text)
-                    if (ret is False):
+                    if (not ret):
                         if (_rpt):
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
-                    if (iss3 and do_pyramids == CCMD_PYRAMIDS_ONLY):
+                    if (iss3 and
+                            do_pyramids == CCMD_PYRAMIDS_ONLY):
                         try:
                             os.remove(output_file)      # *.ext__or__ temp vrt file.
                             in_ = output_file + '.ovr'
@@ -2981,12 +2938,8 @@ class compression:
             _tempOutputPath = self.m_user_config.getValue(CTEMPOUTPUT, False)
             if (_tempOutputPath):
                 _output_home_path = _tempOutputPath
-            if (updateMRF.init(output_file,
-                               self.m_user_config.getValue(CCLONE_PATH),
-                               self.m_user_config.getValue('Mode'),
-                               self.m_user_config.getValue(CCACHE_PATH),
-                               _output_home_path,
-                               self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
+            if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH), self.m_user_config.getValue('Mode'),
+                               self.m_user_config.getValue(CCACHE_PATH), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
                 updateMRF.copyInputMRFFilesToOutput()
         # ends
         # call any user-defined fnc for any post-processings.
@@ -2996,7 +2949,8 @@ class compression:
             ret = post_processing_callback(post_process_output, post_processing_callback_args, {'f': post_process_output, 'cfg': self.m_user_config})
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
         # ends
-        if (_rpt and _rpt.operation != COP_UPL):
+        if (_rpt and
+                _rpt.operation != COP_UPL):
             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
 
@@ -3005,9 +2959,9 @@ class compression:
         m_py_sampling = 'average'
         get_mode = self.m_user_config.getValue('Mode')
         if (get_mode):
-            if ((get_mode == 'cachingmrf' or
-                 get_mode == 'clonemrf' or
-                 get_mode == 'splitmrf')):
+            if (get_mode == 'cachingmrf' or
+                get_mode == 'clonemrf' or
+                    get_mode == 'splitmrf'):
                 return True
         # skip pyramid creation on (tiffs) related to (til) files.
         if (til):
@@ -3018,7 +2972,8 @@ class compression:
         self.message('Creating pyramid ({})'.format(input_file))
         # let's input cfg values..
         py_factor_ = self.m_user_config.getValue('PyramidFactor')
-        if (py_factor_ and py_factor_.strip()):
+        if (py_factor_ and
+                py_factor_.strip()):
             m_py_factor = py_factor_.replace(',', ' ')  # can be commna sep vals in the cfg file.
         else:
             gdalInfo = GDALInfo(self._base, self.message)
@@ -3031,8 +2986,8 @@ class compression:
         py_sampling_ = self.m_user_config.getValue('PyramidSampling')
         if (py_sampling_):
             m_py_sampling = py_sampling_
-            if ((m_py_sampling.lower() == 'avg' and
-                 input_file.lower().endswith(CTIL_EXTENSION_))):
+            if (m_py_sampling.lower() == 'avg' and
+                    input_file.lower().endswith(CTIL_EXTENSION_)):
                 m_py_sampling = 'average'
         m_py_compression = self.m_user_config.getValue('PyramidCompression')
         args = [os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)]
@@ -3040,8 +2995,8 @@ class compression:
         args.append('nearest' if isBQA else m_py_sampling)
         m_py_quality = self.m_user_config.getValue('Quality')
         m_py_interleave = self.m_user_config.getValue(CCFG_INTERLEAVE)
-        if ((m_py_compression == 'jpeg' or
-             m_py_compression == 'png')):
+        if (m_py_compression == 'jpeg' or
+                m_py_compression == 'png'):
             if (not get_mode.startswith('mrf')):
                 m_py_external = False
                 py_external_ = self.m_user_config.getValue('Pyramids')
@@ -3049,9 +3004,9 @@ class compression:
                     m_py_external = py_external_ == CCMD_PYRAMIDS_EXTERNAL
                 if (m_py_external):
                     args.append('-ro')
-                if ((get_mode.startswith('tif') and
-                     m_py_compression == 'jpeg' and
-                     m_py_interleave == 'pixel')):
+                if (get_mode.startswith('tif') and
+                    m_py_compression == 'jpeg' and
+                        m_py_interleave == 'pixel'):
                     args.append('--config')
                     args.append('PHOTOMETRIC_OVERVIEW')
                     args.append('YCBCR')
@@ -3071,7 +3026,7 @@ class compression:
         return self.__call_external(args)
 
     def __call_external(self, args):
-        p = subprocess.Popen(args, creationflags=subprocess.SW_HIDE, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         message = ''
         first_pass_ = True
         messages = []
@@ -3085,7 +3040,7 @@ class compression:
         if (messages):
             self.message('messages:')
             for m in messages:
-                    self.message(m)
+                self.message(m)
         warnings = p.stderr.readlines()
         if (warnings):
             self.message('warnings/errors:')
@@ -3101,6 +3056,7 @@ class compression:
 
 
 class Config:
+
     def __init__(self):
         pass
 
@@ -3114,11 +3070,11 @@ class Config:
             return False
         node = nodes[0].firstChild
         self.m_cfgs = {}
-        while (node is not None):
-            if (node.hasChildNodes() is False):
+        while (node):
+            if (not node.hasChildNodes()):
                 node = node.nextSibling
                 continue
-            if ((node.nodeName in self.m_cfgs) is False):
+            if (not (node.nodeName in self.m_cfgs)):
                 self.m_cfgs[node.nodeName] = node.firstChild.nodeValue
             node = node.nextSibling
             pass
@@ -3146,22 +3102,24 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     input_file = os.path.join(inputfldr, file)
     output_file = os.path.join(outputfldr, file)
     ifile_toLower = input_file.lower()
-    if ((ifile_toLower.startswith('http://') or
-         ifile_toLower.startswith('https://'))):
+    if (ifile_toLower.startswith('http://') or
+            ifile_toLower.startswith('https://')):
         cfg.setValue(CIN_S3_PREFIX, '/vsicurl/')
         isinput_s3 = True
     if (isinput_s3):
         input_file = cfg.getValue(CIN_S3_PREFIX, False) + input_file
         output_file = outputfldr
-        if ((getBooleanValue(cfg.getValue('istempinput')) or
-             getBooleanValue(cfg.getValue('istempoutput')))):
+        if (getBooleanValue(cfg.getValue('istempinput')) or
+                getBooleanValue(cfg.getValue('istempoutput'))):
             output_file = os.path.join(output_file, file)
             if (getBooleanValue(cfg.getValue('istempinput'))):
-                input_file = os.path.join(cfg.getValue(CTEMPINPUT, False),
-                                          file)
+                input_file = os.path.join(cfg.getValue(CTEMPINPUT, False), file)
             if (getBooleanValue(cfg.getValue('istempoutput'))):
-                output_file = os.path.join(cfg.getValue(CTEMPOUTPUT, False),
-                                           file)
+                tempOutput = cfg.getValue(CTEMPOUTPUT, False)
+                _file = file
+                if (output_file.startswith(tempOutput)):     # http source raster entries without -tempinput will have subfolder info in (output_file)
+                    _file = output_file.replace(tempOutput, '')
+                output_file = os.path.join(cfg.getValue(CTEMPOUTPUT, False), _file)
             return (input_file, output_file)
         output_file = os.path.join(output_file, file)
     return (input_file, output_file)
@@ -3173,26 +3131,28 @@ def getBooleanValue(value):
     if (isinstance(value, bool)):
         return value
     val = value.lower()
-    if ((val == 'true' or
-         val == 'yes' or
-         val == 't' or
-         val == '1' or
-         val == 'y')):
+    if (val == 'true' or
+        val == 'yes' or
+        val == 't' or
+        val == '1' or
+            val == 'y'):
         return True
     return False
 
 
 def formatExtensions(value):
-    if (value is None or len(value.strip()) == 0):
+    if (value is None or
+            len(value.strip()) == 0):
         return []
     frmts = value.split(',')
     for i in range(0, len(frmts)):
         frmts[i] = frmts[i].strip()
     return frmts
 
+# custom exit code block to write out logs
+
 
 def terminate(objBase, exit_code, log_category=False):
-    # custom exit code block to write out logs
     if (objBase):
         success = 'OK'
         if (exit_code != 0):
@@ -3205,11 +3165,11 @@ def terminate(objBase, exit_code, log_category=False):
 # ends
 
 
-def fn_collect_input_files(src):
-    # collect input files to support (resume) support.
+def fn_collect_input_files(src):    # collect input files to support (resume) support.
     if (not src):
         return False
-    if (not g_is_generate_report or not g_rpt):
+    if (not g_is_generate_report or
+            not g_rpt):
         return False
     try:
         _type = 'local'
@@ -3227,9 +3187,7 @@ def fn_collect_input_files(src):
 
 def fn_pre_process_copy_default(src, dst, arg):
     if (fn_collect_input_files(src)):
-        # just gathering information for the report either (op=report).
-        # Do not proceed with (Copying/e.t.c)
-        return False
+        return False             # just gathering information for the report either (op=report). Do not proceed with (Copying/e.t.c)
     if (not src):
         return False
     if (til):
@@ -3249,21 +3207,14 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
         if (args is not None):
             if (isinstance(args[0], dict)):
                 if (('cfg' in args[0])):
-                    if (getBooleanValue(args[0]['cfg'].getValue('istempoutput')) is False):
+                    if (not getBooleanValue(args[0]['cfg'].getValue('istempoutput'))):
                         return False    # no copying..
                     p += '/'
-
-                    # safety check
-                    t = args[0]['cfg'].getValue(CTEMPOUTPUT,
-                                                False).replace('\\', '/')
-                    if (t.endswith('/') is False):
-                        # making sure, replace will work fine.
+                    t = args[0]['cfg'].getValue(CTEMPOUTPUT, False).replace('\\', '/')    # safety check
+                    if (not t.endswith('/')):  # making sure, replace will work fine.
                         t += '/'
-
-                    # safety check
-                    o = args[0]['cfg'].getValue(CCFG_PRIVATE_OUTPUT,
-                                                False).replace('\\', '/')
-                    if (o.endswith('/') is False):
+                    o = args[0]['cfg'].getValue(CCFG_PRIVATE_OUTPUT, False).replace('\\', '/')  # safety check
+                    if (not o.endswith('/')):
                         o += '/'
                     dst = (p.replace(t, o))
                     files.append({'src': p, 'dst': dst, 'f': f})
@@ -3273,6 +3224,7 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
 
 
 class Args:
+
     def __init__(self):
         pass
 
@@ -3295,16 +3247,13 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7a'
-    __program_date__ = '20160810'
+    __program_ver__ = 'v1.7b'
+    __program_date__ = '20160901'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
-    __program_desc__ = ('Convert raster formats to a valid output format '
-                        'through GDAL_Translate.\n'
-                        '\nPlease Note:\nOptimizeRasters.py is entirely '
-                        'case-sensitive, extensions/paths in the config '
-                        'file are case-sensitive and the program will fail '
-                        'if the correct path/case is not '
-                        'entered at the cmd-line or in the config file.\n')
+    __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
+        '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
+        'file are case-sensitive and the program will fail if the correct path/case is not ' + \
+        'entered at the cmd-line or in the config file.\n'
 
     def __init__(self, args):
         self._usr_args = args
@@ -3321,8 +3270,8 @@ class Application(object):
         if (not self._args.config):
             self._args.config = os.path.abspath(os.path.join(os.path.dirname(__file__), CCFG_FILE))
         config_ = self._args.config
-        if ((self._args.input and            # Pick up the config file name from a (resume) job file.
-             self._args.input.lower().endswith(Report.CJOB_EXT))):
+        if (self._args.input and            # Pick up the config file name from a (resume) job file.
+                self._args.input.lower().endswith(Report.CJOB_EXT)):
             _r = Report(Base())
             if (not _r.init(self._args.input)):
                 self.writeToConsole('Err. ({})/init'.format(self._args.input))
@@ -3359,11 +3308,11 @@ class Application(object):
         log = None
         try:
             solutionLib_path = os.path.realpath(__file__)
-            if (os.path.isdir(solutionLib_path) is False):
+            if (not os.path.isdir(solutionLib_path)):
                 solutionLib_path = os.path.dirname(solutionLib_path)
             _CLOG_FOLDER = 'logs'
             self._log_path = os.path.join(solutionLib_path, _CLOG_FOLDER)
-            sys.path.append(os.path.join(solutionLib_path, 'solutionsLog'))
+            sys.path.append(os.path.join(solutionLib_path, 'SolutionsLog'))
             import logger
             log = logger.Logger()
             log.Project('OptimizeRasters')
@@ -3371,15 +3320,15 @@ class Application(object):
             log.StartLog()
             cfg_log_path = cfg.getValue('LogPath')
             if (cfg_log_path):
-                if (os.path.isdir(cfg_log_path) is False):
+                if (not os.path.isdir(cfg_log_path)):
                     Message('Invalid log-path (%s). Resetting to (%s)' % (cfg_log_path, self._log_path))
                     cfg_log_path = None
             if (cfg_log_path):
                 self._log_path = os.path.join(cfg_log_path, _CLOG_FOLDER)
             log.SetLogFolder(self._log_path)
-            print('Log-path set to ({})'.format(self._log_path))
+            print ('Log-path set to ({})'.format(self._log_path))
         except Exception as e:
-            print('Warning: External logging support disabled! ({})'.format(str(e)))
+            print ('Warning: External logging support disabled! ({})'.format(str(e)))
         # ends
         # let's write to log (input config file content plus all cmd-line args)
         if (log):
@@ -3412,7 +3361,7 @@ class Application(object):
     def writeToConsole(self, msg, status=const_general_text):
         if (self._msg_callback):
             return (self._msg_callback(msg, status))
-        print(msg)          # log file is not up yet, write to (console)
+        print (msg)          # log file is not up yet, write to (console)
         return True
 
     def getReport(self):
@@ -3420,10 +3369,12 @@ class Application(object):
         return _rpt if _rpt else None
 
     def init(self):
-        global _rpt, cfg, til
+        global _rpt, \
+            cfg, \
+            til
         self.writeToConsole(self.__program_name__)
         self.writeToConsole(self.__program_desc__)
-        _rpt = cfg = til = None   # by (default) til extensions or its associated files aren't processed differently.
+        _rpt = cfg = til = None  # by (default) til extensions or its associated files aren't processed differently.
         if (not self._usr_args):
             return False
         if (isinstance(self._usr_args, argparse.Namespace)):
@@ -3443,7 +3394,8 @@ class Application(object):
         if (not self._base.init()):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
             return CRET_ERROR
-        if (self._args.input and os.path.isfile(self._args.input)):
+        if (self._args.input and
+                os.path.isfile(self._args.input)):
             _rpt = Report(self._base)
             if (not _rpt.init(self._args.input)):        # not checked for return.
                 self._base.message('Unable to init (Report/job)', self._base.const_critical_text)
@@ -3456,6 +3408,21 @@ class Application(object):
                 self._base.message('Unable to read the -input job file.', self._base.const_critical_text)
                 return False
         self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
+        # verify user defined text for cloud output path
+        usrPath = self._args.hashkey
+        if (usrPath):
+            usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos
+            _s = usrPath.split('@')
+            if (len(_s) == 2 and
+                    _s[0]):
+                usrPath = _s[0]
+                if (len(_s) > 1):
+                    try:
+                        usrPathPos = abs(int(_s[1]))
+                    except:
+                        pass
+            self._base.getUserConfiguration.setValue(CUSR_TEXT_IN_PATH, '{}@{}'.format(usrPath, usrPathPos))
+        # ends
         # do we need to process (til) files?
         for x in self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE):
             if (x.lower() == 'til'):
@@ -3475,9 +3442,9 @@ class Application(object):
 
     @postMessagesToArcGIS.setter
     def postMessagesToArcGIS(self, value):
-        if ((not self._base or
-             not self._base._m_log or
-             not hasattr(self._base._m_log, 'isGPRun'))):
+        if (not self._base or
+            not self._base._m_log or
+                not hasattr(self._base._m_log, 'isGPRun')):
             return
         self._postMessagesToArcGIS = self._base.getBooleanValue(value)
         self._base._m_log.isGPRun = self.postMessagesToArcGIS
@@ -3498,7 +3465,15 @@ class Application(object):
         return True
 
     def run(self):
-        global raster_buff, til, cfg, _rpt, g_rpt, g_is_generate_report, user_args_Callback, S3_storage, azure_storage
+        global raster_buff, \
+            til, \
+            cfg, \
+            _rpt, \
+            g_rpt, \
+            g_is_generate_report, \
+            user_args_Callback, \
+            S3_storage, \
+            azure_storage
 
         S3_storage = None
         azure_storage = None
@@ -3510,7 +3485,8 @@ class Application(object):
         CRESUME_CREATE_JOB_TEXT = '[Resume] Creating job ({})'
 
         # is resume?
-        if (self._args.input and os.path.isfile(self._args.input)):
+        if (self._args.input and
+                os.path.isfile(self._args.input)):
             _rpt = Report(self._base)
             if (not _rpt.init(self._args.input)):        # not checked for return.
                 self._base.message('Unable to init (Reporter/obj)', self._base.const_critical_text)
@@ -3524,8 +3500,8 @@ class Application(object):
 
         # Get the default (project name)
         project_name = self._args.job
-        if ((project_name and
-             project_name.lower().endswith(Report.CJOB_EXT))):
+        if (project_name and
+                project_name.lower().endswith(Report.CJOB_EXT)):
             project_name = project_name[:len(project_name) - len(Report.CJOB_EXT)]
         if (not project_name):
             project_name = cfg.getValue(CPRJ_NAME, False)
@@ -3568,13 +3544,13 @@ class Application(object):
         # ends
         if (self._args.op):
             self._args.op = self._args.op.lower()
-            if (not self._args.op in _utility):
+            if (self._args.op not in _utility):
                 self._base.message('Invalid utility operation mode ({})'.format(self._args.op), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
-            if ((self._args.op == COP_RPT or
-                 self._args.op == COP_UPL or
-                 self._args.op == COP_NOCONVERT or
-                 self._args.op == COP_LAMBDA)):
+            if(self._args.op == COP_RPT or
+                    self._args.op == COP_UPL or
+                    self._args.op == COP_NOCONVERT or
+                    self._args.op == COP_LAMBDA):
                 g_rpt = Report(self._base)
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message('Unable to init (Report)', self._base.const_critical_text)
@@ -3583,8 +3559,9 @@ class Application(object):
                 if (self._args.op == COP_UPL):
                     self._args.cloudupload = 'true'
                     self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
-                    if (cfg.getValue(CLOAD_RESTORE_POINT) and _rpt):
-                        if (not 'input' in _rpt._header):
+                    if (cfg.getValue(CLOAD_RESTORE_POINT) and
+                            _rpt):
+                        if ('input' not in _rpt._header):
                             return(terminate(self._base, eFAIL))
                         self._args.tempoutput = _rpt._header['input']
         # fix the slashes to force a convention
@@ -3599,8 +3576,7 @@ class Application(object):
         if (cfg.getValue(CCFG_INTERLEAVE) is None):
             cfg.setValue(CCFG_INTERLEAVE, 'PIXEL')
         # ends
-        # overwrite (Out_CloudUpload, IncludeSubdirectories) with
-        # cmd-line args if defined.
+        # overwrite (Out_CloudUpload, IncludeSubdirectories) with cmd-line args if defined.
         if (self._args.cloudupload or self._args.s3output):
             cfg.setValue(CCLOUD_UPLOAD, getBooleanValue(self._args.cloudupload) if self._args.cloudupload else getBooleanValue(self._args.s3output))
             cfg.setValue(CCLOUD_UPLOAD_OLD_KEY, cfg.getValue(CCLOUD_UPLOAD))
@@ -3609,8 +3585,7 @@ class Application(object):
                 cfg.setValue(COUT_CLOUD_TYPE, self._args.clouduploadtype)
         is_cloud_upload = getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) if cfg.getValue(CCLOUD_UPLOAD) else getBooleanValue(cfg.getValue(CCLOUD_UPLOAD_OLD_KEY))
         if (is_cloud_upload):
-            if (self._args.output.startswith('/')):
-                # remove any leading '/' for http -output
+            if (self._args.output.startswith('/')):  # remove any leading '/' for http -output
                 self._args.output = self._args.output[1:]
         # for backward compatibility (-s3output)
         if (not cfg.getValue(CCLOUD_UPLOAD)):
@@ -3619,8 +3594,7 @@ class Application(object):
             cfg.setValue(COUT_CLOUD_TYPE, CCLOUD_AMAZON)
         # ends
         if (self._args.subs):
-            cfg.setValue('IncludeSubdirectories',
-                         getBooleanValue(self._args.subs))
+            cfg.setValue('IncludeSubdirectories', getBooleanValue(self._args.subs))
         # ends
         # do we have -tempinput path to copy rasters first before conversion.
         is_input_temp = False
@@ -3632,8 +3606,7 @@ class Application(object):
                 except Exception as exp:
                     self._base.message('Unable to create the -tempinput path (%s) [%s]' % (self._args.tempinput, str(exp)), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
-            # flag flows to deal with -tempinput
-            is_input_temp = True
+            is_input_temp = True         # flag flows to deal with -tempinput
             cfg.setValue('istempinput', is_input_temp)
             cfg.setValue(CTEMPINPUT, self._args.tempinput)
         # ends
@@ -3661,8 +3634,7 @@ class Application(object):
         isinput_s3 = getBooleanValue(self._args.s3input)
         if (self._args.clouddownload):
             isinput_s3 = getBooleanValue(self._args.clouddownload)
-        # import boto modules only when required. This allows users to run
-        # the program for only local file operations.
+        # import boto modules only when required. This allows users to run the program for only local file operations.
         if ((inAmazon and
              isinput_s3) or
             (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) and
@@ -3679,8 +3651,7 @@ class Application(object):
                 return(terminate(self._base, eFAIL))
         # ends
         # take care of missing -input and -output if -clouddownload==True
-        # Note/Warning: S3/Azure inputs/outputs are case-sensitive hence
-        # wrong (case) could mean no files found on S3/Azure
+        # Note/Warning: S3/Azure inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3/Azure
         if (isinput_s3):
             _cloudInput = self._args.input
             if (not _cloudInput):
@@ -3698,14 +3669,11 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
             _access = cfg.getValue(COUT_AZURE_ACCESS)
             if (_access):
-                if (not _access in ('private', 'blob', 'container')):
-                        self._base.message('Invalid value for ({})'.format(COUT_AZURE_ACCESS), self._base.const_critical_text)
-                        return(terminate(self._base, eFAIL))
-                if (_access == 'private'):
-                    # private is not recognized by Azure, used internally
-                    # only for clarity
-                    cfg.setValue(COUT_AZURE_ACCESS, None)
-                    # None == private container
+                if (_access not in ('private', 'blob', 'container')):
+                    self._base.message('Invalid value for ({})'.format(COUT_AZURE_ACCESS), self._base.const_critical_text)
+                    return(terminate(self._base, eFAIL))
+                if (_access == 'private'):      # private is not recognized by Azure, used internally only for clarity
+                    cfg.setValue(COUT_AZURE_ACCESS, None)       # None == private container
             if (self._args.output is None):
                 _cloud_upload_type = cfg.getValue(COUT_CLOUD_TYPE, True)
                 if (_cloud_upload_type == CCLOUD_AMAZON):
@@ -3719,16 +3687,19 @@ class Application(object):
                     self._args.output = self._args.output.strip().replace('\\', '/')
                 cfg.setValue(COUT_S3_PARENTFOLDER, self._args.output)
         # ends
-        if (not self._args.output or not self._args.input):
-            if (((not self._args.op and not self._args.input) or
-                 (self._args.op and not self._args.input))):
-                self._base.message('-input/-output is not specified!',
-                                   self._base.const_critical_text)
+        if (not self._args.output or
+                not self._args.input):
+            if ((not self._args.op and
+                 not self._args.input) or
+                (self._args.op and
+                 not self._args.input)):
+                self._base.message('-input/-output is not specified!', self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
 
         # set output in cfg.
         dst_ = self._args.output
-        if (dst_ and dst_[-1:] != '/'):
+        if (dst_ and
+                dst_[-1:] != '/'):
             dst_ += '/'
 
         cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_ if dst_ else '')
@@ -3757,7 +3728,8 @@ class Application(object):
         cfg_mode = self._args.mode     # cmd-line -mode overrides the cfg value.
         if (cfg_mode is None):
             cfg_mode = cfg.getValue('Mode')
-        if (cfg_mode is None or (cfg_mode.lower() in cfg_modes) is False):
+        if (cfg_mode is None or
+                (not cfg_mode.lower() in cfg_modes)):
             self._base.message('<Mode> value not set/illegal', self._base.const_critical_text)
             return(terminate(self._base, eFAIL))
         cfg_mode = cfg_mode.lower()
@@ -3765,8 +3737,8 @@ class Application(object):
         # ends
 
         # is clonepath defined?
-        if ((self._args.clonepath and
-             cfg_mode.startswith('mrf'))):
+        if (self._args.clonepath and
+                cfg_mode.startswith('mrf')):
             self._args.clonepath = self._args.clonepath.replace('\\', '/')
             if (not self._args.clonepath.endswith('/')):
                 self._args.clonepath += '/'
@@ -3803,14 +3775,12 @@ class Application(object):
                         else:
                             self._base.message('-input and -output paths must be the same if the -pyramids=only', const_critical_text)
                             return(terminate(self._base, eFAIL))
-        if ((getBooleanValue(do_pyramids) is False and
-             do_pyramids != CCMD_PYRAMIDS_ONLY and
-             do_pyramids != CCMD_PYRAMIDS_EXTERNAL)):
+        if (not getBooleanValue(do_pyramids) and
+            do_pyramids != CCMD_PYRAMIDS_ONLY and
+                do_pyramids != CCMD_PYRAMIDS_EXTERNAL):
             do_pyramids = 'false'
         cfg.setValue('Pyramids', do_pyramids)
-        cfg.setValue('isuniformscale',
-                     True if do_pyramids == CCMD_PYRAMIDS_ONLY
-                     else getBooleanValue(do_pyramids))
+        cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids))
         # ends
 
         # read in the gdal_path from config.
@@ -3837,8 +3807,8 @@ class Application(object):
         if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
             if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
                 if ((s3_output is None and self._args.output is None)):
-                        self._base.message('Empty/Invalid values detected for keys in the ({}) beginning with (Out_S3|Out_S3_ID|Out_S3_Secret|Out_S3_AWS_ProfileName) or values for command-line args (-outputprofile)'.format(self._args.config), self._base.const_critical_text)
-                        return(terminate(self._base, eFAIL))
+                    self._base.message('Empty/Invalid values detected for keys in the ({}) beginning with (Out_S3|Out_S3_ID|Out_S3_Secret|Out_S3_AWS_ProfileName) or values for command-line args (-outputprofile)'.format(self._args.config), self._base.const_critical_text)
+                    return(terminate(self._base, eFAIL))
                 # instance of upload storage.
                 S3_storage = S3Storage(self._base)
                 if (self._args.output):
@@ -3849,17 +3819,18 @@ class Application(object):
                     cfg.setValue('Out_S3_Bucket', self._args.outputbucket)
                 # end
                 ret = S3_storage.init(s3_output, s3_id, s3_secret, CS3STORAGE_OUT)
-                if (ret is False):
+                if (not ret):
                     self._base.message(err_init_msg.format('S3'), const_critical_text)
                     return(terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
-                cfg.setValue(COUT_VSICURL_PREFIX,
-                             '/vsicurl/{}{}'.format(S3_storage.bucketupload.generate_url(0).split('?')[0].replace('https', 'http'), cfg.getValue(COUT_S3_PARENTFOLDER, False)) if not S3_storage._isBucketPublic else '/vsicurl/http://{}.{}/{}'.format(S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN, cfg.getValue(COUT_S3_PARENTFOLDER, False)))
+                cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format(S3_storage.bucketupload.generate_url(0).split('?')[0].replace('https', 'http'),
+                                                                         cfg.getValue(COUT_S3_PARENTFOLDER, False)) if not S3_storage._isBucketPublic else
+                             '/vsicurl/http://{}.{}/{}'.format(S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN, cfg.getValue(COUT_S3_PARENTFOLDER, False)))
                 # ends
             elif (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE):
                 _account_name = cfg.getValue(COUT_AZURE_ACCOUNTNAME, False)
                 _account_key = cfg.getValue(COUT_AZURE_ACCOUNTKEY, False)
-                _container = cfg.getValue(COUT_AZURE_CONTAINER)        # Azure container names will be lowercased.
+                _container = cfg.getValue(COUT_AZURE_CONTAINER)  # Azure container names will be lowercased.
                 _out_profile = cfg.getValue(COUT_AZURE_PROFILENAME, False)
                 if (self._args.outputbucket):
                     _container = self._args.outputbucket
@@ -3867,16 +3838,18 @@ class Application(object):
                 if (self._args.outputprofile):
                     _out_profile = self._args.outputprofile
                     cfg.setValue(COUT_AZURE_PROFILENAME, _out_profile)
-                if (((not _account_name or not _account_key) and
-                     not _out_profile) or not _container):
+                if (((not _account_name or
+                      not _account_key) and
+                     not _out_profile) or
+                        not _container):
                     self._base.message('Empty/Invalid values detected for keys ({}/{}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER, COUT_AZURE_PROFILENAME), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 azure_storage = Azure(_account_name, _account_key, _out_profile, self._base)
                 if (not azure_storage.init()):
                     self._base.message(err_init_msg.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
-                cfg.setValue(COUT_VSICURL_PREFIX,
-                             '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(azure_storage.getAccountName, _container), self._args.output if self._args.output else cfg.getValue(COUT_S3_PARENTFOLDER, False)))
+                cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format('http://{}.blob.core.windows.net/{}/'.format(azure_storage.getAccountName, _container),
+                                                                         self._args.output if self._args.output else cfg.getValue(COUT_S3_PARENTFOLDER, False)))
             else:
                 self._base.message('Invalid value for ({})'.format(COUT_CLOUD_TYPE), const_critical_text)
                 return(terminate(self._base, eFAIL))
@@ -3895,9 +3868,9 @@ class Application(object):
             list['exclude'][i] = ''
 
         is_caching = False
-        if ((cfg_mode == 'clonemrf' or
+        if (cfg_mode == 'clonemrf' or
             cfg_mode == 'splitmrf' or
-             cfg_mode == 'cachingmrf')):
+                cfg_mode == 'cachingmrf'):
             is_caching = True
 
         if (is_caching):
@@ -3926,7 +3899,8 @@ class Application(object):
             cfg_threads = int(cfg_threads)   # (None) value is expected
         except:
             cfg_threads = -1
-        if (cfg_threads <= 0 or cfg_threads > CCFG_THREADS):
+        if (cfg_threads <= 0 or
+                cfg_threads > CCFG_THREADS):
             cfg_threads = CCFG_THREADS
             self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS), self._base.const_warning_text)
         # ends
@@ -3944,41 +3918,37 @@ class Application(object):
             in_s3_bucket = self._args.inputbucket
             if (not in_s3_bucket):
                 in_s3_bucket = cfg.getValue('In_S3_Bucket' if inAmazon else 'In_Azure_Container', False)
-            if (in_s3_parent is None or in_s3_bucket is None):
+            if (in_s3_parent is None or
+                    in_s3_bucket is None):
                 self._base.message('Invalid/empty value(s) found in node(s) [In_S3_ParentFolder, In_S3_Bucket]', self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
-
-            # update (in s3 bucket name in config)
-            cfg.setValue('In_S3_Bucket', in_s3_bucket)
+            cfg.setValue('In_S3_Bucket', in_s3_bucket)          # update (in s3 bucket name in config)
             in_s3_parent = in_s3_parent.replace('\\', '/')
-            if ((in_s3_parent[:1] == '/' and
-                 not in_s3_parent.lower().endswith(Report.CJOB_EXT))):
+            if (in_s3_parent[:1] == '/' and
+                    not in_s3_parent.lower().endswith(Report.CJOB_EXT)):
                 in_s3_parent = in_s3_parent[1:]
                 cfg.setValue(CIN_S3_PARENTFOLDER, in_s3_parent)
             if (inAmazon):
                 o_S3_storage = S3Storage(self._base)
-                ret = o_S3_storage.init(in_s3_parent,
-                                        in_s3_id,
-                                        in_s3_secret,
-                                        CS3STORAGE_IN)
-                if (ret is False):
+                ret = o_S3_storage.init(in_s3_parent, in_s3_id, in_s3_secret, CS3STORAGE_IN)
+                if (not ret):
                     self._base.message('Unable to initialize S3-storage! Quitting..', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
-                # handles EMC namespace cloud urls differently
-                if ((str(o_S3_storage.bucketupload.connection)
-                     .lower().endswith('.ecstestdrive.com'))):
-                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.public.ecstestdrive.com/{}/'.format(o_S3_storage.bucketupload.connection.aws_access_key_id.split('@')[0], o_S3_storage.m_bucketname))
+                if (str(o_S3_storage.bucketupload.connection).lower().endswith('.ecstestdrive.com')):   # handles EMC namespace cloud urls differently
+                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.public.ecstestdrive.com/{}/'.format(
+                        o_S3_storage.bucketupload.connection.aws_access_key_id.split('@')[0], o_S3_storage.m_bucketname))
                 else:   # for all other standard cloud urls
-                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN))  # vsicurl doesn't like 'https'
+                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(o_S3_storage.bucketupload.generate_url(0).split('?')[0]).replace('https', 'http') if not o_S3_storage._isBucketPublic else
+                                 '/vsicurl/http://{}.{}/'.format(o_S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN))  # vsicurl doesn't like 'https'
                 o_S3_storage.inputPath = self._args.output
-                if (o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback) is False):
+                if (not o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback)):
                     self._base.message('Unable to read S3-Content', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
             else:
                 # let's do (Azure) init
                 in_azure_storage = Azure(in_s3_id, in_s3_secret, in_s3_profile_name, self._base)
-                if ((not in_azure_storage.init() or
-                     not in_azure_storage.getAccountName)):
+                if (not in_azure_storage.init() or
+                        not in_azure_storage.getAccountName):
                     self._base.message('({}) download initialization error. Check input credentials/profile name. Quitting..'.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 in_azure_storage._include_subFolders = getBooleanValue(cfg.getValue('IncludeSubdirectories'))
@@ -4002,15 +3972,15 @@ class Application(object):
                 # ends
         # ends
         # control flow if conversions required.
-        if (is_caching is False):
-            if ((isinput_s3 is False and
-                 not self._args.input.lower().startswith('http'))):
+        if (not is_caching):
+            if (not isinput_s3 and
+                    not self._args.input.lower().startswith('http')):
                 ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
-                if (ret is False):
+                if (not ret):
                     self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 ret = cpy.processs(self._base.S3Upl if is_cloud_upload else None, user_args_Callback, fn_pre_process_copy_default)
-                if (ret is False):
+                if (not ret):
                     self._base.message(CONST_CPY_ERR_1, self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 if (is_input_temp):
@@ -4018,23 +3988,26 @@ class Application(object):
             files = raster_buff
             files_len = len(files)
             if (files_len):
-                if ((is_input_temp and
-                     isinput_s3 is False and
-                     not cfg.getValue(CLOAD_RESTORE_POINT))):
+                if (is_input_temp and
+                    not isinput_s3 and
+                        not cfg.getValue(CLOAD_RESTORE_POINT)):
                     # if the -tempinput path is defined, we first copy rasters from the source path to -tempinput before any conversion.
                     self._base.message('Copying files to -tempinput path (%s)' % (cfg.getValue(CTEMPINPUT, False)))
                     cpy_files_ = []
                     for i in range(0, len(files)):
                         get_dst_path = files[i]['dst'].replace(self._args.output if cfg.getValue(CTEMPOUTPUT, False) is None else cfg.getValue(CTEMPOUTPUT, False), cfg.getValue(CTEMPINPUT, False))
-                        cpy_files_.append({
-                            'src': files[i]['src'],
-                            'dst': get_dst_path,
-                            'f': files[i]['f']})
+                        cpy_files_.append(
+                            {
+                                'src': files[i]['src'],
+                                'dst': get_dst_path,
+                                'f': files[i]['f']
+                            })
                         files[i]['src'] = get_dst_path
                     cpy.batch(cpy_files_, None)
                 self._base.message('Converting..')
             # collect all the input raster files.
-            if (g_is_generate_report and g_rpt):
+            if (g_is_generate_report and
+                    g_rpt):
                 for req in files:
                     _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     if (getBooleanValue(cfg.getValue('istempinput'))):
@@ -4047,9 +4020,10 @@ class Application(object):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write()
                 # process @ lambda?
-                if (self._args.op and self._args.op == COP_LAMBDA):
-                    if ((getBooleanValue(self._args.clouddownload) and
-                         getBooleanValue(self._args.cloudupload))):
+                if (self._args.op and
+                        self._args.op == COP_LAMBDA):
+                    if (getBooleanValue(self._args.clouddownload) and
+                            getBooleanValue(self._args.cloudupload)):
                         self._base.message('Using AWS Lambda..')
                         sns = Lambda(self._base)
                         if (not sns.initSNS('aws_lambda')):
@@ -4077,43 +4051,33 @@ class Application(object):
                 threads = []
                 for i in range(s, m):
                     req = files[i]
-                    (input_file, output_file) = getInputOutput(req['src'],
-                                                               req['dst'],
-                                                               req['f'],
-                                                               isinput_s3)
+                    (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     f, e = os.path.splitext(output_file)
-                    if (cfg_keep_original_ext is False):
+                    if (not cfg_keep_original_ext):
                         output_file = output_file.replace(e, '.{}'.format(cfg_mode.split('_')[0]))
                     _build_pyramids = True
                     if (til):
                         if (til.find(req['f'])):
-                            # increment the process counter if the raster
-                            # belongs to a (til) file.
-                            til.addFileToProcessed(req['f'])
-                            # build pyramids is always turned off for rasters
-                            #that belong to (.til) files.
-                            _build_pyramids = False
-                    t = threading.Thread(target=comp.compress,
-                                         args=(input_file, output_file,
-                                               args_Callback, _build_pyramids,
-                                               self._base.S3Upl if is_cloud_upload else fn_copy_temp_dst if is_output_temp and is_cloud_upload is False else None, user_args_Callback))
+                            til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
+                            _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
+                    t = threading.Thread(target=comp.compress, args=(input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload else fn_copy_temp_dst if is_output_temp and not is_cloud_upload else None, user_args_Callback))
                     t.daemon = True
                     t.start()
                     threads.append(t)
                 for t in threads:
                     t.join()
-                # process til file if all the associate files have been
-                # processed
+                # process til file if all the associate files have been processed
                 if (til):
                     for _til in til:
+                        _doPostProcessing = True
+                        if (cfg.getValue(CLOAD_RESTORE_POINT)):
+                            if (_rpt.getRecordStatus(_til, CRPT_PROCESSED) == CRPT_YES):
+                                self._base.message('{} {}'.format(CRESUME_MSG_PREFIX, _til))
+                                _doPostProcessing = False
                         if (not til.isAllFilesProcessed(_til)):
-                            self._base.message('TIL> Not yet completed for ({})'.format(_til))
+                            if (_doPostProcessing):
+                                self._base.message('TIL> Not yet completed for ({})'.format(_til))
                         if (til.isAllFilesProcessed(_til)):
-                            _doPostProcessing = True
-                            if (cfg.getValue(CLOAD_RESTORE_POINT)):
-                                if (_rpt.getRecordStatus(_til, CRPT_PROCESSED) == CRPT_YES):
-                                    self._base.message('{} {}'.format(CRESUME_MSG_PREFIX, _til))
-                                    _doPostProcessing = False
                             til_output_path = til.getOutputPath(_til)
                             if (_doPostProcessing):
                                 if (not til_output_path):
@@ -4127,6 +4091,7 @@ class Application(object):
                                 if (not ret):
                                     self._base.message('Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path), self._base.const_warning_text)
                                     continue
+                                _rpt.updateRecordStatus(_til, CRPT_PROCESSED, CRPT_YES)
                                 # let's rename (.mrf) => (.ovr)
                                 try:
                                     os.remove('{}.ovr'.format(til_output_path))
@@ -4144,7 +4109,7 @@ class Application(object):
                                         xmlString = xmlString.replace('.mrf<', '.ovr<')
                                         xmlString = xmlString.replace('.{}'.format(CCACHE_EXT), '.ovr.{}'.format(CCACHE_EXT))
                                         _indx = xmlString.find('<{}>'.format(CMRF_DOC_ROOT))
-                                        if (_indx == - 1):
+                                        if (_indx == -1):
                                             raise Exception('Err. Invalid MRF/header')
                                         xmlString = xmlString[_indx:]
                                         _mk_save_path = '{}{}.ovr'.format(self._args.clonepath, _clonePath.replace('.mrf', ''))
@@ -4155,15 +4120,14 @@ class Application(object):
                                     continue
                                 # ends
                             # upload (til) related files (.idx, .ovr, .lrc)
-                            if (is_cloud_upload and S3_storage):
+                            if (is_cloud_upload and
+                                    S3_storage):
                                 ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
                                 retry_failed_lst = []
                                 failed_upl_lst = S3_storage.getFailedUploadList()
                                 if (failed_upl_lst):
-                                    [retry_failed_lst.append(_x['local'])
-                                     for _x in failed_upl_lst['upl']]
-                                # let's delete all the associate files
-                                # related to (TIL) files.
+                                    [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
+                                # let's delete all the associate files related to (TIL) files.
                                 (p, n) = os.path.split(til_output_path)
                                 for r, d, f in os.walk(p):
                                     for file in f:
@@ -4171,9 +4135,7 @@ class Application(object):
                                             continue
                                         mk_filename = os.path.join(r, file).replace('\\', '/')
                                         if (til.fileTILRelated(mk_filename)):
-                                            # Don't delete files included in
-                                            # the (failed upload list)
-                                            if (mk_filename in retry_failed_lst):
+                                            if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
                                                 continue
                                             try:
                                                 self._base.message('[Del] {}'.format(mk_filename))
@@ -4188,64 +4150,50 @@ class Application(object):
                     break
         # ends
         # block to deal with caching ops.
-        if ((is_caching and
-             do_pyramids != CCMD_PYRAMIDS_ONLY)):
+        if (is_caching and
+                do_pyramids != CCMD_PYRAMIDS_ONLY):
             if (not g_is_generate_report):
                 self._base.message('\nProcessing caching operations...')
-            if (isinput_s3 is False):
+            if (not isinput_s3):
                 raster_buff = []
-                # set explicit (exclude list) for mode (splitmrf)
-                if (cfg_mode == 'splitmrf'):
+                if (cfg_mode == 'splitmrf'):        # set explicit (exclude list) for mode (splitmrf)
                     list['exclude']['idx'] = ''
-                ret = cpy.init(self._args.input,
-                               self._args.output,
-                               list,
-                               callbacks_for_meta,
-                               cfg)
-                if (ret is False):
-                    self._base.message(CONST_CPY_ERR_0,
-                                       self._base.const_critical_text)
+                ret = cpy.init(self._args.input, self._args.output, list, callbacks_for_meta, cfg)
+                if (not ret):
+                    self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 ret = cpy.processs(pre_processing_callback=fn_pre_process_copy_default)
-                if (ret is False):
+                if (not ret):
                     self._base.message(CONST_CPY_ERR_1, self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
-            if (g_is_generate_report and g_rpt):
+            if (g_is_generate_report and
+                    g_rpt):
                 for req in raster_buff:
                     (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     g_rpt.addFile(_src)
                 self._base.message('{}'.format(CRESUME_CREATE_JOB_TEXT).format(_project_path))
-                # Uploading is disabled for modes related to caching.
-                self._args.cloudupload = 'false'
+                self._args.cloudupload = 'false'    # Uploading is disabled for modes related to caching.
                 for arg in vars(self._args):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write()
                 self._args.op = None
-                # preserve the original -input path
-                cfg.setValue(CCMD_ARG_INPUT, self._args.input)
+                cfg.setValue(CCMD_ARG_INPUT, self._args.input)      # preserve the original -input path
                 self._args.input = _project_path
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
                 return
             for req in raster_buff:
-                (input_file, output_file) = getInputOutput(req['src'],
-                                                           req['dst'],
-                                                           req['f'],
-                                                           isinput_s3)
+                (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                 (f, ext) = os.path.splitext(req['f'])
                 ext = ext.lower()
-                if (cfg_keep_original_ext is False):
+                if (not cfg_keep_original_ext):
                     output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
                 finalPath = output_file
                 if (is_output_temp):
-                    finalPath = output_file.replace(self._args.tempoutput,
-                                                    self._args.output)
-                if (cfg_mode != 'splitmrf'):
-                    # uses GDAL utilities
-                    ret = comp.compress(input_file,
-                                        output_file,
-                                        args_Callback_for_meta,
+                    finalPath = output_file.replace(self._args.tempoutput, self._args.output)
+                if (cfg_mode != 'splitmrf'):     # uses GDAL utilities
+                    ret = comp.compress(input_file, output_file, args_Callback_for_meta,
                                         post_processing_callback=fn_copy_temp_dst if is_output_temp else None)    # and not isinput_s3
                 else:
                     try:
@@ -4258,37 +4206,34 @@ class Application(object):
                 # update .mrf.
                 updateMRF = UpdateMRF(self._base)
                 _output_home_path = self._args.output
-                if (updateMRF.init(finalPath, _output_home_path,
-                                   cfg.getValue('Mode'),
-                                   self._args.cache, _output_home_path,
-                                   cfg.getValue(COUT_VSICURL_PREFIX, False))):
+                if (updateMRF.init(finalPath, _output_home_path, cfg.getValue('Mode'),
+                                   self._args.cache, _output_home_path, cfg.getValue(COUT_VSICURL_PREFIX, False))):
                     if (not updateMRF.update(finalPath)):
                         self._base.message('Updating ({}) was not successful!'.format(finalPath), self._base.const_critical_text)
                         continue
                 # ends
         # do we have failed upload files on list?
-        if (is_cloud_upload and S3_storage):
+        if (is_cloud_upload and
+                S3_storage):
             if (cfg.getValue(COUT_CLOUD_TYPE) == CCLOUD_AMAZON):
                 failed_upl_lst = S3_storage.getFailedUploadList()
                 if (failed_upl_lst):
-                    self._base.message('Retry - Failed upload list.',
-                                       const_general_text)
+                    self._base.message('Retry - Failed upload list.', const_general_text)
                     _fptr = None
                     if (self._log_path):
                         try:
                             if (not os.path.isdir(self._log_path)):
                                 os.makedirs(self._log_path)
                             ousr_date = datetime.datetime.now()
-                            err_upl_file = os.path.join(self._log_path, '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day, ousr_date.hour, ousr_date.minute, ousr_date.second))
+                            err_upl_file = os.path.join(self._log_path, '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day,
+                                                                                                                         ousr_date.hour, ousr_date.minute, ousr_date.second))
                             _fptr = open(err_upl_file, 'w+')
                         except:
                             pass
                     for v in failed_upl_lst['upl']:
-                        self._base.message('%s' % (v['local']),
-                                           const_general_text)
+                        self._base.message('%s' % (v['local']), const_general_text)
                         ret = S3_storage.upload_group(v['local'])
-                        # the following files will be logged as unsuccessful
-                        # uploads to output cloud
+                        # the following files will be logged as unsuccessful uploads to output cloud
                         if (not ret):
                             if (_fptr):
                                 _fptr.write('{}\n'.format(v['local']))
@@ -4313,38 +4258,31 @@ class Application(object):
                         _fptr = None
         # ends
         # let's clean-up rasters @ -tempinput path
-        if ((is_input_temp and
-             # if caching is (True), -tempinput is ignored and no deletion
-             # of source @ -input takes place.
-             is_caching is False)):
+        if (is_input_temp and
+                not is_caching):        # if caching is (True), -tempinput is ignored and no deletion of source @ -input takes place.
             if (len(raster_buff) != 0):
                 self._base.message('Removing input rasters at ({})'.format(cfg.getValue(CTEMPINPUT, False)))
                 for req in raster_buff:
                     doRemove = True
-                    (input_file, output_file) = getInputOutput(req['src'],
-                                                               req['dst'],
-                                                               req['f'],
-                                                               isinput_s3)
+                    (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     try:
                         if (_rpt):
-                            if ((_rpt.getRecordStatus('{}{}'.format(req['src'],
-                                                                    req['f']),
-                                 CRPT_PROCESSED) == CRPT_NO)):
+                            if (_rpt.getRecordStatus('{}{}'.format(req['src'], req['f']), CRPT_PROCESSED) == CRPT_NO):
                                 doRemove = False
-                        if (doRemove and os.path.exists(input_file)):
+                        if (doRemove and
+                                os.path.exists(input_file)):
                             self._base.message('[Del] {}'.format(input_file))
                             os.remove(input_file)
                     except Exception as e:
-                        self._base.message('[Del] {} ({})'.format(input_file,
-                                                                  str(e)),
-                                           self._base.const_warning_text)
-                    if (_rpt and doRemove):
+                        self._base.message('[Del] {} ({})'.format(input_file, str(e)), self._base.const_warning_text)
+                    if (_rpt and
+                            doRemove):
                         primaryExt = _rpt._m_rasterAssociates.findExtension(input_file)
                         if (primaryExt):
                             raInfo = _rpt._m_rasterAssociates.getInfo()
-                            if (raInfo and primaryExt in raInfo):
-                                self._base.message('Removing associated files '
-                                                   'for ({})'.format(input_file))
+                            if (raInfo and
+                                    primaryExt in raInfo):
+                                self._base.message('Removing associated files for ({})'.format(input_file))
                                 for relatedExt in raInfo[primaryExt].split(';'):
                                     try:
                                         _mkPrimaryRaster = '{}{}'.format(input_file[:len(input_file) - len(primaryExt)], relatedExt)
@@ -4356,17 +4294,17 @@ class Application(object):
                 self._base.message('Done.')
         # ends
         if (not raster_buff):
-            self._base.message('No input rasters to process..',
-                               self._base.const_warning_text)
+            self._base.message('No input rasters to process..', self._base.const_warning_text)
         # ends
         _status = eOK
         # write out the (job file) with updated status.
         if (_rpt):
-            if (not _rpt.write() or _rpt.hasFailures()):
+            if (not _rpt.write() or
+                    _rpt.hasFailures()):
                 _status = eFAIL
             if (_status == eOK):
-                if ((self._base.getMessageHandler and
-                     not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder))):
+                if (self._base.getMessageHandler and
+                        not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
                     _status = eFAIL
         # ends
         self._base.message('Done..\n')
@@ -4375,81 +4313,31 @@ class Application(object):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-mode',
-                        help='Processing mode/output format',
-                        dest='mode')
-    parser.add_argument('-input',
-                        help='Input raster files directory/job file to resume',
-                        dest='input')
-    parser.add_argument('-output',
-                        help='Output directory',
-                        dest='output')
-    parser.add_argument('-subs',
-                        help='Include sub-directories in -input? [true/false]',
-                        dest='subs')
-    parser.add_argument('-cache',
-                        help='cache output directory',
-                        dest='cache')
-    parser.add_argument('-config',
-                        help='Configuration file with default settings',
-                        dest='config')
-    parser.add_argument('-quality',
-                        help='JPEG quality if compression is jpeg',
-                        dest='quality')
-    parser.add_argument('-prec',
-                        help='LERC precision',
-                        dest='prec')
-    parser.add_argument('-pyramids',
-                        help='Generate pyramids? [true/false/only/external]',
-                        dest='pyramids')
-    parser.add_argument('-tempinput',
-                        help='Path to copy -input raters before conversion',
-                        dest=CTEMPINPUT)
-    parser.add_argument('-tempoutput',
-                        help=('Path to output converted rasters before '
-                              'moving to (-output) path'),
-                        dest=CTEMPOUTPUT)
-    parser.add_argument('-clouddownload',
-                        help=('Is -input a cloud storage? '
-                              '[true/false: default:false]'),
-                        dest='clouddownload')
-    parser.add_argument('-cloudupload',
-                        help='Is -output a cloud storage? [true/false]',
-                        dest='cloudupload')
-    parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'],
-                        help='Upload Cloud Type [amazon/azure]',
-                        dest='clouduploadtype')
-    parser.add_argument('-clouddownloadtype', choices=['amazon', 'azure'],
-                        help='Download Cloud Type [amazon/azure]',
-                        dest='clouddownloadtype')
-    parser.add_argument('-inputprofile',
-                        help='Input cloud profile name with credentials',
-                        dest='inputprofile')
-    parser.add_argument('-outputprofile',
-                        help='Output cloud profile name with credentials',
-                        dest='outputprofile')
-    parser.add_argument('-inputbucket',
-                        help='Input cloud bucket/container name',
-                        dest='inputbucket')
-    parser.add_argument('-outputbucket',
-                        help='Output cloud bucket/container name',
-                        dest='outputbucket')
-    parser.add_argument('-op',
-                        help='Utility operation mode [upload/noconvert]',
-                        dest='op')
-    parser.add_argument('-job',
-                        help='Name output job/log-prefix file name',
-                        dest='job')
-    parser.add_argument('-clonepath',
-                        help=('Path to auto-generate cloneMRF files '
-                              'during the conversion process'),
-                        dest='clonepath')
-    parser.add_argument('-s3input',
-                        help='Deprecated. Use (-clouddownload)',
-                        dest='s3input')
-    parser.add_argument('-s3output',
-                        help='Deprecated. Use (-cloudupload)',
-                        dest='s3output')
+    parser.add_argument('-mode', help='Processing mode/output format', dest='mode')
+    parser.add_argument('-input', help='Input raster files directory/job file to resume', dest='input')
+    parser.add_argument('-output', help='Output directory', dest='output')
+    parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='subs')
+    parser.add_argument('-cache', help='cache output directory', dest='cache')
+    parser.add_argument('-config', help='Configuration file with default settings', dest='config')
+    parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality')
+    parser.add_argument('-prec', help='LERC precision', dest='prec')
+    parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only/external]', dest='pyramids')
+    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest=CTEMPINPUT)
+    parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest=CTEMPOUTPUT)
+    parser.add_argument('-clouddownload', help='Is -input a cloud storage? [true/false: default:false]', dest='clouddownload')
+    parser.add_argument('-cloudupload', help='Is -output a cloud storage? [true/false]', dest='cloudupload')
+    parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype')
+    parser.add_argument('-clouddownloadtype', choices=['amazon', 'azure'], help='Download Cloud Type [amazon/azure]', dest='clouddownloadtype')
+    parser.add_argument('-inputprofile', help='Input cloud profile name with credentials', dest='inputprofile')
+    parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest='outputprofile')
+    parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket')
+    parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket')
+    parser.add_argument('-op', help='Utility operation mode [upload/noconvert]', dest='op')
+    parser.add_argument('-job', help='Name output job/log-prefix file name', dest='job')
+    parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath')
+    parser.add_argument('-hashkey', help='Hashkey for encryption to use in output paths for cloud storage. e.g. -hashkey=random@1. This will insert the encrypted text using the -hashkey (\'random\') as the first folder name for the output path', dest=CUSR_TEXT_IN_PATH)
+    parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input')
+    parser.add_argument('-s3output', help='Deprecated. Use (-cloudupload)', dest='s3output')
 
     args = parser.parse_args()
     app = Application(args)
