@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160901
+# Version: 20160908
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2675,7 +2675,7 @@ class Copy:
         files_len = len(file_lst)
         batch = 1
         s = 0
-        while 1:
+        while True:
             m = s + batch
             if (m >= files_len):
                 m = files_len
@@ -3247,8 +3247,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7b'
-    __program_date__ = '20160901'
+    __program_ver__ = 'v1.7c'
+    __program_date__ = '20160908'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3418,7 +3418,9 @@ class Application(object):
                 usrPath = _s[0]
                 if (len(_s) > 1):
                     try:
-                        usrPathPos = abs(int(_s[1]))
+                        usrPathPos = int(_s[1])
+                        if (int(_s[1]) < CHASH_DEF_INSERT_POS):
+                            usrPathPos = CHASH_DEF_INSERT_POS
                     except:
                         pass
             self._base.getUserConfiguration.setValue(CUSR_TEXT_IN_PATH, '{}@{}'.format(usrPath, usrPathPos))
@@ -3463,6 +3465,34 @@ class Application(object):
                     return True
                 setattr(self._args, _key, _hdr[1].strip())
         return True
+
+    def _isLambdaJob(self):
+        if (self._args.op and
+                self._args.op == COP_LAMBDA):
+            if (getBooleanValue(self._args.clouddownload) and
+                    getBooleanValue(self._args.cloudupload)):
+                return True
+        return False
+
+    def _runLambdaJob(self, jobFile):
+        # process @ lambda
+        try:
+            global boto
+            import boto
+            import boto.sns
+        except ImportError as e:
+            self._base.message('Err. ({})/Lambda'.format(str(e)), self._base.const_critical_text)
+            return False
+        self._base.message('Using AWS Lambda..')
+        sns = Lambda(self._base)
+        if (not sns.initSNS('aws_lambda')):
+            self._base.message('Unable to initialize', self._base.const_critical_text)
+            return False
+        if (not sns.submitJob(jobFile)):
+            self._base.message('Unable to submit job.', self._base.const_critical_text)
+            return False
+        return True
+        # ends
 
     def run(self):
         global raster_buff, \
@@ -3513,6 +3543,10 @@ class Application(object):
         _project_path = '{}{}'.format(os.path.join(os.path.dirname(self._args.input if self._args.input and self._args.input.lower().endswith(Report.CJOB_EXT) else __file__), project_name), Report.CJOB_EXT)
         if (not cfg.getValue(CLOAD_RESTORE_POINT)):
             if (os.path.exists(_project_path)):
+                # process @ lambda?
+                if (self._isLambdaJob()):
+                    return(terminate(self._base, eOK if self._runLambdaJob(_project_path) else eFAIL))
+                # ends
                 self._args.op = None
                 self._args.input = _project_path
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
@@ -3612,6 +3646,11 @@ class Application(object):
         # ends
         # let's setup -tempoutput
         is_output_temp = False
+        if (not self._args.tempoutput):
+            if (self._args.op and
+                    self._args.op == COP_LAMBDA):
+                self._args.tempoutput = '/tmp/'  # -tempoutput is not required when -cloudupload=true with -op=lambda.
+                # This is to suppress warnings or false alarms when reusing the .orjob file without the # -tempoutput key in header with the -clouduplaod=true.
         if (self._args.tempoutput):
             self._args.tempoutput = self._base.convertToForwardSlash(self._args.tempoutput)
             if (not os.path.isdir(self._args.tempoutput)):
@@ -3619,7 +3658,9 @@ class Application(object):
                 try:
                     if (not self._args.op or
                         (self._args.op and
-                         self._args.op != COP_UPL)):
+                         self._args.op != COP_UPL) and
+                        self._args.op and
+                            self._args.op != COP_LAMBDA):
                         os.makedirs(self._args.tempoutput)
                 except Exception as exp:
                     self._base.message('Unable to create the -tempoutput path (%s)\n[%s]' % (self._args.tempoutput, str(exp)), self._base.const_critical_text)
@@ -4020,19 +4061,8 @@ class Application(object):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write()
                 # process @ lambda?
-                if (self._args.op and
-                        self._args.op == COP_LAMBDA):
-                    if (getBooleanValue(self._args.clouddownload) and
-                            getBooleanValue(self._args.cloudupload)):
-                        self._base.message('Using AWS Lambda..')
-                        sns = Lambda(self._base)
-                        if (not sns.initSNS('aws_lambda')):
-                            self._base.message('Unable to initialize', self._base.const_critical_text)
-                            return(terminate(self._base, eFAIL))
-                        if (not sns.submitJob(g_rpt._report_file)):
-                            self._base.message('Unable to submit job.', self._base.const_critical_text)
-                            return(terminate(self._base, eFAIL))
-                        return(terminate(self._base, eOK))
+                if (self._isLambdaJob()):
+                    return(terminate(self._base, eOK if self._runLambdaJob(g_rpt._report_file) else eFAIL))
                 # ends
                 self._args.op = None
                 self._args.input = _project_path
@@ -4044,7 +4074,7 @@ class Application(object):
             threads = []
             batch = cfg_threads
             s = 0
-            while 1:
+            while True:
                 m = s + batch
                 if (m >= files_len):
                     m = files_len
