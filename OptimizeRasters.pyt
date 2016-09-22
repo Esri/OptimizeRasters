@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160428
+# Version: 20160922
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -137,7 +137,7 @@ def setPaths(xFname,values):
 
 def returnPaths(xFname):
 
-    keyList = ['Mode','RasterFormatFilter','ExcludeFilter','Compression','Quality','LERCPrecision','BuildPyramids','PyramidFactor','PyramidSampling','PyramidCompression','NoDataValue','BlockSize','Scale','KeepExtension','Threads']
+    keyList = ['Mode','RasterFormatFilter','ExcludeFilter','IncludeSubdirectories','Compression','Quality','LERCPrecision','BuildPyramids','PyramidFactor','PyramidSampling','PyramidCompression','NoDataValue','BlockSize','Scale','KeepExtension','Threads', 'Op']
 
     xfName2 = os.path.normpath(xFname)
 
@@ -192,7 +192,10 @@ def config_Init(parentfolder,filename):
 
     if os.path.exists(awsfile) == True:
         print awsfile
-        config.read(awsfile)
+        try:
+            config.read(awsfile)
+        except:
+            pass
         return config
     else:
         if os.path.exists(os.path.dirname(awsfile)) == False:
@@ -743,14 +746,20 @@ class OptimizeRasters(object):
             # ends
         if parameters[14].altered == True:
                 configValList = parameters[14].value
-                aVal = configValList[0][1]
-                parameters[11].enabled = True
-                if ((aVal.strip().lower() == 'clonemrf') or (aVal.strip().lower() == 'cachingmrf')):
-                    parameters[11].enabled = False
-                    parameters[10].enabled = False
+                aVal = configValList[0][1].strip().lower()
+                op = configValList[len(configValList) - 1][1].strip().lower()
+                if (aVal == 'clonemrf' or aVal == 'cachingmrf'):
+                        parameters[10].enabled = False
+                        parameters[11].enabled = False
+                        parameters[12].enabled = True
                 else:
-                    parameters[11].enabled = True
                     parameters[10].enabled = True
+                    parameters[11].enabled = True
+                    parameters[12].enabled = True
+                    if (op == 'copyonly'):
+                        parameters[11].enabled = False
+                        parameters[12].enabled = False
+
 
     def updateMessages(self, parameters):
         if parameters[1].altered == True:
@@ -815,10 +824,9 @@ class OptimizeRasters(object):
         args['output'] = outPath
 
         args['tempinput'] = intempFolder
-        args['tempoutput'] = outtempFolder
+        if (outtempFolder):
+            args['tempoutput'] = outtempFolder  # used only if -cloudupload=true
 
-        args['clouddownload'] = 'false'
-        args['cloudupload'] = 'false'
         args['input'] = inPath
 
         if inType == 'Local':
