@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160908
+# Version: 20160922
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -95,6 +95,7 @@ COP_DNL = 'download'
 COP_RPT = 'report'
 COP_NOCONVERT = 'noconvert'
 COP_LAMBDA = 'lambda'
+COP_COPYONLY = 'copyonly'
 # ends
 
 # clone specific
@@ -130,6 +131,7 @@ COUT_AZURE_CONTAINER = 'Out_Azure_Container'
 COUT_AZURE_ACCESS = 'Out_Azure_Access'
 COUT_AZURE_PROFILENAME = 'Out_Azure_ProfileName'
 CIN_AZURE_PARENTFOLDER = 'In_Azure_ParentFolder'
+COP = 'Op'
 # ends
 
 CCLOUD_UPLOAD_THREADS = 20          # applies to both (azure and amazon/s3)
@@ -143,6 +145,7 @@ CIN_S3_PREFIX = 'In_S3_Prefix'
 CIN_CLOUD_TYPE = 'In_Cloud_Type'
 COUT_VSICURL_PREFIX = 'Out_VSICURL_Prefix'
 CINOUT_S3_DEFAULT_DOMAIN = 's3.amazonaws.com'
+COUT_DELETE_AFTER_UPLOAD = 'Out_S3_DeleteAfterUpload'
 # ends
 
 # const
@@ -997,7 +1000,7 @@ class Report:
         self._isInputHTTP = False
         self._m_rasterAssociates = RasterAssociates()
         self._m_rasterAssociates.addRelatedExtensions('img;IMG', 'ige;IGE')  # To copy files required by raster formats to the primary raster copy location (-tempinput?) before any conversion could take place.
-        self._m_rasterAssociates.addRelatedExtensions('tif;TIF', 'RPB;rpb')  # certain associated files need to be present alongside rasters for GDAL to work successfully.
+        self._m_rasterAssociates.addRelatedExtensions('ntf;NTF;tif;TIF', 'RPB;rpb;IMD;imd;til;TIL')  # certain associated files need to be present alongside rasters for GDAL to work successfully.
         self._m_skipExtentions = ('til.ovr')   # status report for these extensions will be skipped. Case insensitive comaprision.
 
     def init(self, report_file, root=None):
@@ -2109,7 +2112,7 @@ class S3Storage:
             _rpt.updateRecordStatus(S3_key.name, CRPT_COPIED, CRPT_YES)
         # ends
         # copy metadata files to -clonepath if set
-        if (not primaryRaster):  # do not copy raster associated files to clone path.
+        if (not is_raster): # do not copy raster associated files to clone path.
             self._base.copyMetadataToClonePath(mk_path)
         # ends
         # Handle any post-processing, if the final destination is to S3, upload right away.
@@ -2425,6 +2428,8 @@ def exclude_callback(file, src, dst):
     (f, e) = os.path.splitext(file)
     if (e[1:] in cfg.getValue(CCFG_RASTERS_NODE) or
             src.lower().startswith('http')):
+        if (file.lower().endswith(CTIL_EXTENSION_)):
+            return True
         raster_buff.append({'f': file, 'src': '' if src == '/' else src, 'dst': dst if dst else ''})
         return True
     return False
@@ -3247,8 +3252,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7c'
-    __program_date__ = '20160908'
+    __program_ver__ = 'v1.7d'
+    __program_date__ = '20160922'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3291,15 +3296,18 @@ class Application(object):
             return False
         # ends
         # deal with cfg extensions (rasters/exclude list)
+        opCopyOnly = cfg.getValue(COP) == COP_COPYONLY # no defaults for (CCFG_RASTERS_NODE, CCFG_EXCLUDE_NODE) if op={COP_COPYONLY}
         rasters_ext_ = cfg.getValue(CCFG_RASTERS_NODE, False)
-        if (rasters_ext_ is None):
+        if (rasters_ext_ is None and
+            not opCopyOnly):
             rasters_ext_ = 'tif,mrf'        # defaults: in-code if defaults are missing in cfg file.
 
         exclude_ext_ = cfg.getValue(CCFG_EXCLUDE_NODE, False)
-        if (exclude_ext_ is None):
+        if (exclude_ext_ is None and
+            not opCopyOnly):
             exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp,pjg'  # defaults: in-code if defaults are missing in cfg file.
 
-        cfg.setValue(CCFG_RASTERS_NODE, formatExtensions(rasters_ext_))
+        cfg.setValue(CCFG_RASTERS_NODE, [] if opCopyOnly else formatExtensions(rasters_ext_))   # {CCFG_RASTERS_NODE} entries not allowed for op={COP_COPYONLY}
         cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
         # ends
         return True
@@ -3561,6 +3569,11 @@ class Application(object):
             dn_cloud_type = cfg.getValue(CIN_CLOUD_TYPE, True)
         inAmazon = dn_cloud_type == CCLOUD_AMAZON or not dn_cloud_type
         # ends
+        # are we doing input from S3|Azure?
+        isinput_s3 = getBooleanValue(self._args.s3input)
+        if (self._args.clouddownload):
+            isinput_s3 = getBooleanValue(self._args.clouddownload)
+        # ends
         # let's create a restore point
         if (not self._args.input or        # assume it's a folder from s3/azure
             (self._args.input and
@@ -3573,8 +3586,23 @@ class Application(object):
             COP_DNL: None,
             COP_RPT: None,
             COP_NOCONVERT: None,
-            COP_LAMBDA: None
+            COP_LAMBDA: None,
+            COP_COPYONLY: None
         }
+        # ends
+        # op={COP_COPYONLY} check
+        if (self._args.op == COP_RPT):
+            opKey = cfg.getValue(COP)
+            if (opKey == COP_COPYONLY):
+                if (self._args.cloudupload or
+                        self._args.s3output):
+                    self._args.op = COP_UPL # conditions will enable local->local copy if -cloudupload is (false)
+                else:
+                    self._args.tempoutput = None # -tempoutput is disabled if -cloudupload=false and -op={COP_COPYONLY}
+                if (isinput_s3):
+                    self._args.op = COP_NOCONVERT
+                    cfg.setValue(COUT_DELETE_AFTER_UPLOAD, True)    # Delete temporary files in (local) transit for (op={COP_COPYONLY}) if the input source is from (cloud).
+                    # However, If the input (source) path is form the local machine the config value in (COUT_DELETE_AFTER_UPLOAD) is used.
         # ends
         if (self._args.op):
             self._args.op = self._args.op.lower()
@@ -3584,6 +3612,7 @@ class Application(object):
             if(self._args.op == COP_RPT or
                     self._args.op == COP_UPL or
                     self._args.op == COP_NOCONVERT or
+                    self._args.op == COP_COPYONLY or
                     self._args.op == COP_LAMBDA):
                 g_rpt = Report(self._base)
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
@@ -3670,11 +3699,6 @@ class Application(object):
             cfg.setValue('istempoutput', is_output_temp)
             cfg.setValue(CTEMPOUTPUT, self._args.tempoutput)
         # ends
-        # are we doing input from S3|Azure?
-        err_init_msg = 'Unable to initialize the ({}) upload module! Check module setup/credentials. Quitting..'
-        isinput_s3 = getBooleanValue(self._args.s3input)
-        if (self._args.clouddownload):
-            isinput_s3 = getBooleanValue(self._args.clouddownload)
         # import boto modules only when required. This allows users to run the program for only local file operations.
         if ((inAmazon and
              isinput_s3) or
@@ -3845,6 +3869,7 @@ class Application(object):
         s3_id = cfg.getValue('Out_S3_ID', False)
         s3_secret = cfg.getValue('Out_S3_Secret', False)
 
+        err_init_msg = 'Unable to initialize the ({}) upload module! Check module setup/credentials. Quitting..'
         if (getBooleanValue(cfg.getValue(CCLOUD_UPLOAD))):
             if (cfg.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AMAZON):
                 if ((s3_output is None and self._args.output is None)):
@@ -3897,7 +3922,7 @@ class Application(object):
 
         user_args_Callback = {
             USR_ARG_UPLOAD: getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)),
-            USR_ARG_DEL: getBooleanValue(cfg.getValue('Out_S3_DeleteAfterUpload'))
+            USR_ARG_DEL: getBooleanValue(cfg.getValue(COUT_DELETE_AFTER_UPLOAD))
         }
         # ends
         cpy = Copy(self._base)
@@ -4324,7 +4349,8 @@ class Application(object):
                 self._base.message('Done.')
         # ends
         if (not raster_buff):
-            self._base.message('No input rasters to process..', self._base.const_warning_text)
+            if (len(cfg.getValue(CCFG_RASTERS_NODE))):  # it's possible to have empty {CCFG_RASTERS_NODE} raster extensions. e.g configs for op=copyonly
+                self._base.message('No input rasters to process..', self._base.const_warning_text)
         # ends
         _status = eOK
         # write out the (job file) with updated status.
