@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160922
+# Version: 20160926
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1000,7 +1000,7 @@ class Report:
         self._isInputHTTP = False
         self._m_rasterAssociates = RasterAssociates()
         self._m_rasterAssociates.addRelatedExtensions('img;IMG', 'ige;IGE')  # To copy files required by raster formats to the primary raster copy location (-tempinput?) before any conversion could take place.
-        self._m_rasterAssociates.addRelatedExtensions('ntf;NTF;tif;TIF', 'RPB;rpb;IMD;imd;til;TIL')  # certain associated files need to be present alongside rasters for GDAL to work successfully.
+        self._m_rasterAssociates.addRelatedExtensions('ntf;NTF;tif;TIF', 'RPB;rpb')  # certain associated files need to be present alongside rasters for GDAL to work successfully.
         self._m_skipExtentions = ('til.ovr')   # status report for these extensions will be skipped. Case insensitive comaprision.
 
     def init(self, report_file, root=None):
@@ -1730,8 +1730,9 @@ class Azure(Store):
             elif (primaryRaster or  # if the _azurePath is an associated raster file, consider it as a raster.
                   True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
                 if (is_tmp_input):
-                    output_path = _user_config.getValue(CTEMPINPUT, False) + _azurePath
-                is_raster = True
+                    if (not output_path.lower().endswith(CTIL_EXTENSION_)):
+                        output_path = _user_config.getValue(CTEMPINPUT, False) + _azurePath
+                        is_raster = True
             if (_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
                 return False
             if (not blob_source or
@@ -1760,7 +1761,7 @@ class Azure(Store):
                 _resumeReporter.updateRecordStatus(blob_source, CRPT_COPIED, CRPT_YES)
             # ends
             # copy metadata files to -clonepath if set
-            if (not primaryRaster):  # do not copy raster associated files to clone path.
+            if (not is_raster):  # do not copy raster associated files to clone path.
                 self._base.copyMetadataToClonePath(output_path)
             # ends
             # Handle any post-processing, if the final destination is to S3, upload right away.
@@ -2055,8 +2056,9 @@ class S3Storage:
         elif (primaryRaster or  # if the S3_Path is an associated raster file, consider it as a raster.
               True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
             if (is_tmp_input):
-                input_path = self.m_user_config.getValue(CTEMPINPUT, False) + S3_path
-                is_raster = True
+                if (not input_path.lower().endswith(CTIL_EXTENSION_)):
+                    input_path = self.m_user_config.getValue(CTEMPINPUT, False) + S3_path
+                    is_raster = True
         if (self.m_user_config.getValue('Pyramids') == CCMD_PYRAMIDS_ONLY):
             return False
         # collect input file names.
@@ -3252,8 +3254,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7d'
-    __program_date__ = '20160922'
+    __program_ver__ = 'v1.7e'
+    __program_date__ = '20160926'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
