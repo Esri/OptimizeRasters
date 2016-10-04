@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20160926
+# Version: 20161003
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2359,7 +2359,7 @@ def args_Callback(args, user_data=None):
             m_compression == _LERC2 or
                 m_compression == _LERC):
             args.append('-co')
-            args.append('OPTIONS={}{}'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_compression == _LERC2 or m_compression == _LERC else ''))
+            args.append('OPTIONS="{}{}"'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_compression == _LERC2 or m_compression == _LERC else ''))
     args.append('-co')
     args.append('{}={}'.format('BLOCKXSIZE' if m_mode.lower() == 'gtiff' else 'BLOCKSIZE', m_bsize))
     return args
@@ -3264,8 +3264,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7e'
-    __program_date__ = '20160926'
+    __program_ver__ = 'v1.7f'
+    __program_date__ = '20161003'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
