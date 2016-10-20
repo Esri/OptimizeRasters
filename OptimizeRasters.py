@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20161003
+# Version: 20161020
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -29,6 +29,8 @@
 # Author: Esri Imagery Workflows team
 # ------------------------------------------------------------------------------
 # !/usr/bin/env python
+
+CRUN_IN_AWSLAMBDA = False    # IMPORTANT> Set (CRUN_IN_AWSLAMBDA) to (True) when the OptimizeRasters.py is used within the (lambda_function.zip) to act as a lambda function.
 
 import sys
 import os
@@ -120,6 +122,8 @@ CTEMPINPUT = 'tempinput'
 CISTEMPOUTPUT = 'istempoutput'
 CISTEMPINPUT = 'istempinput'
 CHASH_DEF_INSERT_POS = 2
+CHASH_DEF_CHAR = '#'
+CHASH_DEF_SPLIT_CHAR = '@'
 
 # const node-names in the config file
 CCLOUD_AMAZON = 'amazon'
@@ -488,6 +492,17 @@ class Base(object):
     def isLinux(self):
         return True if sys.platform.lower().startswith('linux') else False
 
+    def copyBinaryToTmp(self, binarySrc, binaryDst):
+        if (not os.path.exists(binaryDst)):
+            try:
+                shutil.copyfile(binarySrc, binaryDst)
+                os.chmod(binaryDst, 0777)   # set (rwx) to make lambda work.
+                self.message('**LAMBDA** Copied -> {}'.format(binarySrc))
+            except Exception as e:
+                self.message(str(e), self.const_critical_text)
+                return False
+        return True
+
     def convertToForwardSlash(self, input, endSlash=True):
         if (not input):
             return None
@@ -514,7 +529,7 @@ class Base(object):
             _pos = lenPath - 1
         p = os.path.dirname(path)
         if (p not in self.hashInfo):
-            if (text == '#'):
+            if (text == CHASH_DEF_CHAR):
                 text = binascii.hexlify(os.urandom(4))
             else:
                 m = md5.new()
@@ -567,7 +582,8 @@ class Base(object):
 
     def close(self):
         if (self._m_log):
-            self._m_log.WriteLog('#all')   # persist information/errors collected.
+            if (not CRUN_IN_AWSLAMBDA):
+                self._m_log.WriteLog('#all')   # persist information/errors collected.
 
     def renameMetaFileToMatchRasterExtension(self, metaFile):
         updatedMetaFile = metaFile
@@ -688,7 +704,7 @@ class Base(object):
 
 
 class GDALInfo(object):
-    CGDAL_ADDO_EXE = 'gdalinfo'
+    CGDAL_INFO_EXE = 'gdalinfo'
     CW = 'width'
     CH = 'height'
 
@@ -706,14 +722,19 @@ class GDALInfo(object):
                 not isinstance(self._base, Base)):
             return False
         if (not self._base.isLinux()):
-            self.CGDAL_ADDO_EXE += CEXEEXT
+            self.CGDAL_INFO_EXE += CEXEEXT
         self._GDALPath = GDALPath.replace('\\', '/')
-        if (not self._GDALPath.endswith('/{}'.format(self.CGDAL_ADDO_EXE))):
-            self._GDALPath = os.path.join(self._GDALPath, self.CGDAL_ADDO_EXE).replace('\\', '/')
+        if (not self._GDALPath.endswith('/{}'.format(self.CGDAL_INFO_EXE))):
+            self._GDALPath = os.path.join(self._GDALPath, self.CGDAL_INFO_EXE).replace('\\', '/')
         # check for path existence / e.t.c
         if (not os.path.exists(self._GDALPath)):
             self.message('Invalid GDALInfo/Path ({})'.format(self._GDALPath), self._base.const_critical_text)
             return False
+        if (CRUN_IN_AWSLAMBDA):
+            _gdalinfo = '/tmp/{}'.format(self.CGDAL_INFO_EXE)
+            if (not self._base.copyBinaryToTmp(self._GDALPath, _gdalinfo)):
+                return False
+            self._GDALPath = _gdalinfo
         for p in self._propertyNames:       # init-property names
             setattr(self, p, None)
         return True
@@ -729,7 +750,7 @@ class GDALInfo(object):
         self.message('Using GDALInfo..', self._base.const_general_text)
         return self.__call_external(args)
 
-    def message(self, msg, status):
+    def message(self, msg, status=0):
         self._m_msg_callback(msg, status) if self._m_msg_callback else self._base.message(msg, status)
 
     @property
@@ -774,7 +795,6 @@ class GDALInfo(object):
     def __call_external(self, args):
         p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE)
         message = '/'
-        first_pass_ = True
         CSIZE_PREFIX = 'Size is'
         while (message):
             message = p.stdout.readline()
@@ -899,7 +919,7 @@ class UpdateMRF:
                 usrPath = self._base.getUserConfiguration.getValue(CUSR_TEXT_IN_PATH, False)
                 usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos (sub-folder loc) for user text in output path
                 if (usrPath):
-                    (usrPath, usrPathPos) = usrPath.split('@')
+                    (usrPath, usrPathPos) = usrPath.split(CHASH_DEF_SPLIT_CHAR)
                 _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
                 if (_rasterSource.startswith('/vsicurl/')):
                     _rasterSource = self._base.urlEncode(_rasterSource)
@@ -1807,7 +1827,7 @@ class Azure(Store):
         usrPath = self._base.getUserConfiguration.getValue(CUSR_TEXT_IN_PATH, False)
         usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos (sub-folder loc) for user text in output path
         if (usrPath):
-            (usrPath, usrPathPos) = usrPath.split('@')
+            (usrPath, usrPathPos) = usrPath.split(CHASH_DEF_SPLIT_CHAR)
             _parent_folder = self._base.insertUserTextToOutputPath('{}{}'.format(_parent_folder, '/' if not _parent_folder.endswith('/') else ''), usrPath, usrPathPos)
         super(Azure, self).upload(input_path, container_name, _parent_folder, properties)
         blob_path = self._input_file_path
@@ -2181,7 +2201,7 @@ class S3Storage:
         usrPath = self.m_user_config.getValue(CUSR_TEXT_IN_PATH, False)
         usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos (sub-folder loc) for user text in output path
         if (usrPath):
-            (usrPath, usrPathPos) = usrPath.split('@')
+            (usrPath, usrPathPos) = usrPath.split(CHASH_DEF_SPLIT_CHAR)
         (p, e) = os.path.splitext(m_input_source)
         for r, d, f in os.walk(input_path):
             for file in f:
@@ -2764,11 +2784,33 @@ class compression:
         os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
         # ends
         msg_text = '(%s) is not found at (%s)'
-        if (not os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE))):
+        _gdal_translate = os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)
+        if (not os.path.isfile(_gdal_translate)):
             self.message(msg_text % (self.CGDAL_TRANSLATE_EXE, self.m_gdal_path), self._base.const_critical_text)
             return False
-        if (not os.path.isfile(os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE))):
+        if (CRUN_IN_AWSLAMBDA):
+            if (not self._base.copyBinaryToTmp(_gdal_translate, '/tmp/{}'.format(self.CGDAL_TRANSLATE_EXE))):
+                return False
+        _gdaladdo = os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)
+        if (not os.path.isfile(_gdaladdo)):
             self.message(msg_text % (self.CGDAL_ADDO_EXE, self.m_gdal_path), self._base.const_critical_text)
+            return False
+        if (CRUN_IN_AWSLAMBDA):
+            if (not self._base.copyBinaryToTmp(_gdaladdo, '/tmp/{}'.format(self.CGDAL_ADDO_EXE))):
+                return False
+            # copy shared so binaries. Note> libcurl.so.4 support is installed on Lambda by default.
+            if (not self._lambdaCopySharedSO('libgdal.so.20')):
+                return False
+        return True
+
+    def _lambdaCopySharedSO(self, sharedLib):
+        try:
+            self.message('# pre-sudo {}'.format(sharedLib))
+            _so = os.path.join(self.m_gdal_path, sharedLib)
+            p = subprocess.Popen(' '.join(['sudo', 'cp', _so, '/var/task']), shell=True)
+            self.message('# post-sudo {}'.format(sharedLib))
+        except Exception as e:
+            self.message('Err. lambda>{}'.format(str(e)))
             return False
         return True
 
@@ -2986,6 +3028,10 @@ class compression:
             if (til.find(n)):
                 return True
         # ends
+        # skip pyramid creation for (.ecw) files.
+        if (input_file.lower().endswith('.ecw')):
+            return True
+        # ends
         self.message('Creating pyramid ({})'.format(input_file))
         # let's input cfg values..
         py_factor_ = self.m_user_config.getValue('PyramidFactor')
@@ -3043,9 +3089,11 @@ class compression:
         return self.__call_external(args)
 
     def __call_external(self, args):
+        if (CRUN_IN_AWSLAMBDA):
+            tmpELF = '/tmp/{}'.format(os.path.basename(args[0]))
+            args[0] = tmpELF
         p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         message = ''
-        first_pass_ = True
         messages = []
         val = p.poll()
         while (val is None):
@@ -3058,6 +3106,8 @@ class compression:
             self.message('messages:')
             for m in messages:
                 self.message(m)
+        if (not p.stderr):
+            return True
         warnings = p.stderr.readlines()
         if (warnings):
             self.message('warnings/errors:')
@@ -3066,6 +3116,9 @@ class compression:
                 if (not is_error):
                     if (w.find('ERROR') >= 0):
                         is_error = True
+                        if (w.find('ECW') >= 0 and
+                                self._base.isLinux()):   # temp fix to get rid of (no version information available) warnings for .so under linux
+                            is_error = False
                 self.message(w.strip())
             if (is_error):
                 return False
@@ -3264,8 +3317,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7f'
-    __program_date__ = '20161003'
+    __program_ver__ = 'v1.7g'
+    __program_date__ = '20161009'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3432,9 +3485,10 @@ class Application(object):
         usrPath = self._args.hashkey
         if (usrPath):
             usrPathPos = CHASH_DEF_INSERT_POS  # default insert pos
-            _s = usrPath.split('@')
-            if (len(_s) == 2 and
-                    _s[0]):
+            _s = usrPath.split(CHASH_DEF_SPLIT_CHAR)
+            if (len(_s) == 2):
+                if (not _s[0]):
+                    _s[0] = CHASH_DEF_CHAR
                 usrPath = _s[0]
                 if (len(_s) > 1):
                     try:
@@ -3443,7 +3497,7 @@ class Application(object):
                             usrPathPos = CHASH_DEF_INSERT_POS
                     except:
                         pass
-            self._base.getUserConfiguration.setValue(CUSR_TEXT_IN_PATH, '{}@{}'.format(usrPath, usrPathPos))
+            self._base.getUserConfiguration.setValue(CUSR_TEXT_IN_PATH, '{}{}{}'.format(usrPath, CHASH_DEF_SPLIT_CHAR, usrPathPos))
         # ends
         # do we need to process (til) files?
         for x in self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE):
@@ -3487,6 +3541,8 @@ class Application(object):
         return True
 
     def _isLambdaJob(self):
+        if (CRUN_IN_AWSLAMBDA):
+            return False
         if (self._args.op and
                 self._args.op == COP_LAMBDA):
             if (getBooleanValue(self._args.clouddownload) and
@@ -4371,9 +4427,10 @@ class Application(object):
                     _rpt.hasFailures()):
                 _status = eFAIL
             if (_status == eOK):
-                if (self._base.getMessageHandler and
-                        not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
-                    _status = eFAIL
+                if (not CRUN_IN_AWSLAMBDA):
+                    if (self._base.getMessageHandler and
+                            not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
+                        _status = eFAIL
         # ends
         self._base.message('Done..\n')
         return(terminate(self._base, _status))
