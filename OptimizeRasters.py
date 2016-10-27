@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20161020
+# Version: 20161027
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -113,6 +113,7 @@ CRESUME = '_RESUME_'
 CRESUME_MSG_PREFIX = '[Resume]'
 CRESUME_ARG = 'resume'
 CRESUME_HDR_INPUT = 'input'
+CRESUME_HDR_OUTPUT = 'output'
 # ends
 
 CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
@@ -314,10 +315,13 @@ class Lambda:
         inProfileNode = doc.getElementsByTagName('{}_S3_AWS_ProfileName'.format(direction))
         inKeyIDNode = doc.getElementsByTagName('{}_S3_ID'.format(direction))
         inKeySecretNode = doc.getElementsByTagName('{}_S3_Secret'.format(direction))
+        rptProfile = self._base.getUserConfiguration.getValue('{}_S3_AWS_ProfileName'.format(direction))
+
         CERR_MSG = 'Credential keys don\'t exist/invalid'
-        if (not len(inProfileNode) or
-            not inProfileNode[0].hasChildNodes() or
-                not inProfileNode[0].firstChild):
+        if ((not len(inProfileNode) or
+             not inProfileNode[0].hasChildNodes() or
+                not inProfileNode[0].firstChild) and
+                not rptProfile):
             if (not len(inKeyIDNode) or
                     not len(inKeySecretNode)):
                 self._base.message(CERR_MSG, self._base.const_critical_text)
@@ -327,7 +331,7 @@ class Lambda:
                 self._base.message(CERR_MSG, self._base.const_critical_text)
                 return False
         else:
-            keyProfileName = inProfileNode[0].firstChild.nodeValue
+            keyProfileName = rptProfile if rptProfile else inProfileNode[0].firstChild.nodeValue
             if (not self._aws_credentials.has_section(keyProfileName)):
                 return False
             parentNode = doc.getElementsByTagName('Defaults')
@@ -387,8 +391,9 @@ class Lambda:
             return False
         try:
             doc = minidom.parseString(configContent)
-            self._updateCredentials(doc, 'In')
-            self._updateCredentials(doc, 'Out')
+            if (not self._updateCredentials(doc, 'In') or
+                    not self._updateCredentials(doc, 'Out')):
+                return False
             configContent = doc.toprettyxml(indent="\t", encoding="utf-8")
         except Exception as e:
             self._base.message(str(e), self._base.const_critical_text)
@@ -748,7 +753,7 @@ class GDALInfo(object):
         args = [self._GDALPath]
         args.append(input)
         self.message('Using GDALInfo..', self._base.const_general_text)
-        return self.__call_external(args)
+        return self._call_external(args)
 
     def message(self, msg, status=0):
         self._m_msg_callback(msg, status) if self._m_msg_callback else self._base.message(msg, status)
@@ -792,7 +797,7 @@ class GDALInfo(object):
         self.message('<PyramidFactor> set to ({})'.format(_steps), self._base.const_general_text)
         return _steps
 
-    def __call_external(self, args):
+    def _call_external(self, args):
         p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE)
         message = '/'
         CSIZE_PREFIX = 'Size is'
@@ -871,7 +876,7 @@ class UpdateMRF:
         input_folder = os.path.dirname(self._input)
         _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
         if (_resumeReporter and
-                'output' not in _resumeReporter._header):
+                CRESUME_HDR_OUTPUT not in _resumeReporter._header):
             _resumeReporter = None
         for r, d, f in os.walk(input_folder):
             r = r.replace('\\', '/')
@@ -886,7 +891,7 @@ class UpdateMRF:
                             if (self._homePath):
                                 userInput = self._homePath
                                 if (_resumeReporter):
-                                    userInput = _resumeReporter._header['output']
+                                    userInput = _resumeReporter._header[CRESUME_HDR_OUTPUT]
                                 _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath if self._input.startswith(self._homePath) else userInput, '')))    #
                             if (not os.path.exists(_output_path)):
                                 os.makedirs(_output_path)
@@ -1011,6 +1016,8 @@ class Report:
     CJOB_EXT = '.orjob'
     CVSCHAR = '\t'
     CRPT_URL_TRUENAME = 'URL_NAME'
+    CHDR_TEMPOUTPUT = CTEMPOUTPUT
+    CHDR_CLOUDUPLOAD = 'cloudupload'
 
     def __init__(self, base):
         self._input_list = []
@@ -1036,7 +1043,9 @@ class Report:
         self._report_file = report_file
         if (root):
             _root = root.replace('\\', '/')
-            if (root.lower().startswith('http://') or
+            if ((self._base.getUserConfiguration and
+                 self._base.getUserConfiguration.getValue('Mode') == BundleMaker.CMODE) or
+                root.lower().startswith('http://') or
                     root.lower().startswith('https://')):
                 self._input_list.append(_root)
                 return True
@@ -1085,8 +1094,8 @@ class Report:
         _path = os.path.dirname(_input.replace('\\', '/'))
         if (not _path.endswith('/')):
             _path += '/'
-        if ('output' in self._header and
-                _path == self._header['output']):
+        if (CRESUME_HDR_OUTPUT in self._header and
+                _path == self._header[CRESUME_HDR_OUTPUT]):
             _input = _input.replace(_path, self._header[CRESUME_HDR_INPUT])
         (p, e) = os.path.splitext(_input)
         while(e):
@@ -1712,8 +1721,8 @@ class Azure(Store):
                         self._base.getUserConfiguration):
                     _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
                     if (_resumeReporter):
-                        remotePath = _resumeReporter._header['input']
-                        precb(blob_name if remotePath == '/' else blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header['output'])
+                        remotePath = _resumeReporter._header[CRESUME_HDR_INPUT]
+                        precb(blob_name if remotePath == '/' else blob_name.replace(remotePath, ''), remotePath, _resumeReporter._header[CRESUME_HDR_OUTPUT])
                 if (cb and
                         self._mode != self.CMODE_SCAN_ONLY):
                     cb(blob_name)
@@ -1968,7 +1977,7 @@ class S3Storage:
                 self.bucketupload = con.lookup(self.m_bucketname, True, None)
                 if (not self.bucketupload):
                     self._base.message('Invalid {} S3 bucket ({})/credentials.'.format(
-                        'output' if direction == CS3STORAGE_OUT else 'input',
+                        CRESUME_HDR_OUTPUT if direction == CS3STORAGE_OUT else CRESUME_HDR_INPUT,
                         self.m_bucketname),
                         self._base.const_critical_text)
                     return False
@@ -2670,7 +2679,7 @@ class Copy:
                                         _mkPrimaryRaster = '{}{}'.format(src_file[:len(src_file) - len(_ext)], primaryRaster)
                                         if (_mkPrimaryRaster in _rpt._input_list_info):
                                             if (CTEMPINPUT in _rpt._header):
-                                                dst_file = dst_file.replace(_rpt._header['output'], _rpt._header[CTEMPINPUT])
+                                                dst_file = dst_file.replace(_rpt._header[CRESUME_HDR_OUTPUT], _rpt._header[CTEMPINPUT])
                                 dst_file = self._base.renameMetaFileToMatchRasterExtension(dst_file)
                                 shutil.copyfile(src_file, dst_file)
                                 # Clone folder will get all the metadata files by default.
@@ -2745,7 +2754,7 @@ class Copy:
         return True
 
 
-class compression:
+class compression(object):
 
     def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
@@ -2829,7 +2838,7 @@ class compression:
         for f in (input_files):
             args.append(f)
         self.message('Creating VRT output file (%s)' % (output_file))
-        return self.__call_external(args)
+        return self._call_external(args)
 
     def compress(self, input_file, output_file, args_callback=None, build_pyramids=True, post_processing_callback=None, post_processing_callback_args=None):
         if (_rpt):
@@ -2947,7 +2956,7 @@ class compression:
                 args.append(self._base.urlEncode(input_file) if _vsicurl_input else input_file)
                 args.append(output_file)
                 self.message('Applying compression (%s)' % (input_file))
-                ret = self.__call_external(args)
+                ret = self._call_external(args)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
                 if (not ret):
                     if (_rpt):
@@ -3086,9 +3095,9 @@ class compression:
         m_ary_factors = m_py_factor.split()
         for f in m_ary_factors:
             args.append(f)
-        return self.__call_external(args)
+        return self._call_external(args)
 
-    def __call_external(self, args):
+    def _call_external(self, args, messageCallback=None):
         if (CRUN_IN_AWSLAMBDA):
             tmpELF = '/tmp/{}'.format(os.path.basename(args[0]))
             args[0] = tmpELF
@@ -3113,15 +3122,71 @@ class compression:
             self.message('warnings/errors:')
             is_error = False
             for w in warnings:
+                w = w.strip()
                 if (not is_error):
                     if (w.find('ERROR') >= 0):
                         is_error = True
                         if (w.find('ECW') >= 0 and
                                 self._base.isLinux()):   # temp fix to get rid of (no version information available) warnings for .so under linux
                             is_error = False
-                self.message(w.strip())
+                self.message(w)
+                if (messageCallback):
+                    messageCallback(w)
             if (is_error):
                 return False
+        return True
+
+
+class BundleMaker(compression):
+
+    CBUNDLEMAKER_BIN = 'BundleMaker'
+    CPROJ4SO = 'libproj.so'
+    CMODE = 'bundle'
+    CLEVEL = 'level'
+
+    def __init__(self, inputRaster, *args, **kwargs):
+        super(BundleMaker, self).__init__(*args, **kwargs)
+        self.inputRaster = inputRaster
+        self.bundleName = None  # 'Rae80C11080'
+        self.level = None
+
+    def init(self):
+        if (not super(BundleMaker, self).init()):
+            return False
+        self.homePath = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'BundleMaker')
+        if (CRUN_IN_AWSLAMBDA):
+            _tmp = '/tmp/{}'.format(self.CBUNDLEMAKER_BIN)
+            if (not self._base.copyBinaryToTmp(os.path.join(self.homePath, self.CBUNDLEMAKER_BIN), _tmp)):
+                return False
+            if (not self._lambdaCopySharedSO(self.CPROJ4SO)):
+                return False
+            self.homePath = _tmp
+        return True
+
+    def _messageCallback(self, msg):
+        if (self.level is None and
+                msg.startswith('Output at level')):
+            self.level = msg[msg.rfind(' ') + 1:]
+
+    def run(self):
+        _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
+        if (not _resumeReporter or
+            (_resumeReporter and
+                (Report.CHDR_TEMPOUTPUT not in _resumeReporter._header or
+                 self.CMODE not in _resumeReporter._header or
+                 self.CLEVEL not in _resumeReporter._header))):
+            return False
+        self.bundleName = _resumeReporter._header[self.CMODE]
+        self.level = _resumeReporter._header[self.CLEVEL]
+        args = [self.homePath if CRUN_IN_AWSLAMBDA else os.path.join(self.homePath, '{}.exe'.format(self.CBUNDLEMAKER_BIN, '.exe')),
+                '-level', self.level, '-bundle', self.bundleName, self.inputRaster, _resumeReporter._header[Report.CHDR_TEMPOUTPUT]]
+        self.message('BundleMaker> ({})'.format(self.inputRaster))
+        ret = self._call_external(args)
+        if (not ret or
+                not self.level):
+            return ret
+        if (self._base.getBooleanValue(_resumeReporter._header[Report.CHDR_CLOUDUPLOAD])):
+            self._base.S3Upl(os.path.join(_resumeReporter._header[Report.CHDR_TEMPOUTPUT], '_alllayers/L{}/{}.mrf'.format(self.level, self.bundleName)), None)
         return True
 
 
@@ -3175,6 +3240,7 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     if (ifile_toLower.startswith('http://') or
             ifile_toLower.startswith('https://')):
         cfg.setValue(CIN_S3_PREFIX, '/vsicurl/')
+        input_file = input_file.replace('\\', '/')
         isinput_s3 = True
     if (isinput_s3):
         input_file = cfg.getValue(CIN_S3_PREFIX, False) + input_file
@@ -3317,8 +3383,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7g'
-    __program_date__ = '20161009'
+    __program_ver__ = 'v1.7h'
+    __program_date__ = '20161027'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3371,9 +3437,39 @@ class Application(object):
         if (exclude_ext_ is None and
                 not opCopyOnly):
             exclude_ext_ = 'ovr,rrd,aux.xml,idx,lrc,mrf_cache,pjp,ppng,pft,pzp,pjg'  # defaults: in-code if defaults are missing in cfg file.
-
         cfg.setValue(CCFG_RASTERS_NODE, [] if opCopyOnly else formatExtensions(rasters_ext_))   # {CCFG_RASTERS_NODE} entries not allowed for op={COP_COPYONLY}
         cfg.setValue(CCFG_EXCLUDE_NODE, formatExtensions(exclude_ext_))
+        # ends
+        # init -mode
+        # cfg-init-valid modes
+        cfg_modes = {
+            'tif',
+            'tif_lzw',
+            'tif_jpeg',
+            'tif_mix',
+            'tif_dg',
+            'tiff_landsat',
+            'mrf',
+            'mrf_jpeg',
+            'mrf_mix',
+            'mrf_dg',
+            'mrf_landsat',
+            'cachingmrf',
+            'clonemrf',
+            'splitmrf',
+            BundleMaker.CMODE
+        }
+        # ends
+        # read-in (-mode)
+        cfg_mode = self._args.mode     # cmd-line -mode overrides the cfg value.
+        if (cfg_mode is None):
+            cfg_mode = cfg.getValue('Mode')
+        if (cfg_mode is None or
+                (not cfg_mode.lower() in cfg_modes)):
+            self._base.message('<Mode> value not set/illegal ({})'.format(str(cfg_mode)), self._base.const_critical_text)
+            return(terminate(self._base, eFAIL))
+        cfg_mode = cfg_mode.lower()
+        cfg.setValue('Mode', cfg_mode)
         # ends
         return True
 
@@ -3468,6 +3564,7 @@ class Application(object):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
             return CRET_ERROR
         if (self._args.input and
+            self._args.input.lower().endswith(Report.CJOB_EXT) and
                 os.path.isfile(self._args.input)):
             _rpt = Report(self._base)
             if (not _rpt.init(self._args.input)):        # not checked for return.
@@ -3592,6 +3689,7 @@ class Application(object):
 
         # is resume?
         if (self._args.input and
+            self._args.input.lower().endswith(Report.CJOB_EXT) and
                 os.path.isfile(self._args.input)):
             _rpt = Report(self._base)
             if (not _rpt.init(self._args.input)):        # not checked for return.
@@ -3682,6 +3780,8 @@ class Application(object):
                     self._args.op == COP_NOCONVERT or
                     self._args.op == COP_COPYONLY or
                     self._args.op == COP_LAMBDA):
+                if (self._args.op == COP_LAMBDA):
+                    isinput_s3 = self._args.clouddownload = self._args.cloudupload = True     # make these cmd-line args (optional) to type at the cmd-line for op={COP_LAMBDA}
                 g_rpt = Report(self._base)
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message('Unable to init (Report)', self._base.const_critical_text)
@@ -3692,12 +3792,15 @@ class Application(object):
                     self._args.tempoutput = self._args.input if os.path.isdir(self._args.input) else os.path.dirname(self._args.input)
                     if (cfg.getValue(CLOAD_RESTORE_POINT) and
                             _rpt):
-                        if ('input' not in _rpt._header):
+                        if (CRESUME_HDR_INPUT not in _rpt._header):
                             return(terminate(self._base, eFAIL))
-                        self._args.tempoutput = _rpt._header['input']
+                        self._args.tempoutput = _rpt._header[CRESUME_HDR_INPUT]
+        # read-in <Mode>
+        cfg_mode = cfg.getValue('Mode')
         # fix the slashes to force a convention
         if (self._args.input):
-            self._args.input = self._base.convertToForwardSlash(self._args.input, not self._args.input.lower().endswith(Report.CJOB_EXT))
+            self._args.input = self._base.convertToForwardSlash(self._args.input,
+                                                                not (self._args.input.lower().endswith(Report.CJOB_EXT) or cfg_mode == BundleMaker.CMODE))
         if (self._args.output):
             self._args.output = self._base.convertToForwardSlash(self._args.output)
         if (self._args.cache):
@@ -3836,37 +3939,6 @@ class Application(object):
             dst_ += '/'
 
         cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_ if dst_ else '')
-        # ends
-
-        # cfg-init-valid modes
-        cfg_modes = {
-            'tif',
-            'tif_lzw',
-            'tif_jpeg',
-            'tif_mix',
-            'tif_dg',
-            'tiff_landsat',
-            'mrf',
-            'mrf_jpeg',
-            'mrf_mix',
-            'mrf_dg',
-            'mrf_landsat',
-            'cachingmrf',
-            'clonemrf',
-            'splitmrf'
-        }
-        # ends
-
-        # read-in (-mode)
-        cfg_mode = self._args.mode     # cmd-line -mode overrides the cfg value.
-        if (cfg_mode is None):
-            cfg_mode = cfg.getValue('Mode')
-        if (cfg_mode is None or
-                (not cfg_mode.lower() in cfg_modes)):
-            self._base.message('<Mode> value not set/illegal', self._base.const_critical_text)
-            return(terminate(self._base, eFAIL))
-        cfg_mode = cfg_mode.lower()
-        cfg.setValue('Mode', cfg_mode)
         # ends
 
         # is clonepath defined?
@@ -4108,7 +4180,8 @@ class Application(object):
         # control flow if conversions required.
         if (not is_caching):
             if (not isinput_s3 and
-                    not self._args.input.lower().startswith('http')):
+                    not self._args.input.lower().startswith('http') and
+                    not cfg_mode == BundleMaker.CMODE):
                 ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
                 if (not ret):
                     self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text)
@@ -4119,6 +4192,12 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
                 if (is_input_temp):
                     pass        # no post custom code yet for non-rasters
+            if (cfg_mode == BundleMaker.CMODE):
+                p, f = os.path.split(self._args.input if not cfg.getValue(CLOAD_RESTORE_POINT) else self._base.convertToForwardSlash(_rpt._input_list[0], False))
+                raster_buff = [{'dst': self._args.output,
+                                'f': f,
+                                'src': p}]
+
             files = raster_buff
             files_len = len(files)
             if (files_len):
@@ -4183,7 +4262,15 @@ class Application(object):
                         if (til.find(req['f'])):
                             til.addFileToProcessed(req['f'])    # increment the process counter if the raster belongs to a (til) file.
                             _build_pyramids = False     # build pyramids is always turned off for rasters that belong to (.til) files.
-                    t = threading.Thread(target=comp.compress, args=(input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload else fn_copy_temp_dst if is_output_temp and not is_cloud_upload else None, user_args_Callback))
+                    useBundleMaker = cfg_mode == BundleMaker.CMODE
+                    if (useBundleMaker):
+                        bundleMaker = BundleMaker(input_file, gdal_path, base=self._base)
+                        if (not bundleMaker.init()):
+                            continue
+                        t = threading.Thread(target=bundleMaker.run)
+                    else:
+                        t = threading.Thread(target=comp.compress,
+                                             args=(input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload else fn_copy_temp_dst if is_output_temp and not is_cloud_upload else None, user_args_Callback))
                     t.daemon = True
                     t.start()
                     threads.append(t)
@@ -4439,8 +4526,8 @@ class Application(object):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', help='Processing mode/output format', dest='mode')
-    parser.add_argument('-input', help='Input raster files directory/job file to resume', dest='input')
-    parser.add_argument('-output', help='Output directory', dest='output')
+    parser.add_argument('-input', help='Input raster files directory/job file to resume', dest=CRESUME_HDR_INPUT)
+    parser.add_argument('-output', help='Output directory', dest=CRESUME_HDR_OUTPUT)
     parser.add_argument('-subs', help='Include sub-directories in -input? [true/false]', dest='subs')
     parser.add_argument('-cache', help='cache output directory', dest='cache')
     parser.add_argument('-config', help='Configuration file with default settings', dest='config')
