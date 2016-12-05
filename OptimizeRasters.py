@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20161027
+# Version: 20161127
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -79,6 +79,9 @@ CRPT_UNDEFINED = ''
 USR_ARG_UPLOAD = 'upload'
 USR_ARG_DEL = 'del'
 # ends
+
+# PL
+CPLANET_IDENTIFY = 'api.planet.com'
 
 # Del delay
 CDEL_DELAY_SECS = 20
@@ -277,6 +280,7 @@ class Lambda:
     account_key = 'aws_secret_access_key'
     account_region = 'region'
     account_sns = 'sns_arn'
+    queue_length = 'queuelength'
 
     def __init__(self, base=None):
         self._sns_aws_access_key = \
@@ -316,7 +320,11 @@ class Lambda:
         inKeyIDNode = doc.getElementsByTagName('{}_S3_ID'.format(direction))
         inKeySecretNode = doc.getElementsByTagName('{}_S3_Secret'.format(direction))
         rptProfile = self._base.getUserConfiguration.getValue('{}_S3_AWS_ProfileName'.format(direction))
-
+        _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)    # gives a chance to overwrite the profile name in the parameter file with the orjob one.
+        if (_resumeReporter):                                                       # unless the orjob was edited manually, the profile name on both would be the same.
+            selectProfile = 'inputprofile' if direction == 'In' else 'outputprofile'
+            if (selectProfile in _resumeReporter._header):
+                rptProfile = _resumeReporter._header[selectProfile]
         CERR_MSG = 'Credential keys don\'t exist/invalid'
         if ((not len(inProfileNode) or
              not inProfileNode[0].hasChildNodes() or
@@ -356,7 +364,8 @@ class Lambda:
             inKeySecretNode = doc.createElement('{}_S3_Secret'.format(direction))
             inKeySecretNode.appendChild(doc.createTextNode(str(_sns_aws_secret_access_key)))
             parentNode[0].appendChild(inKeySecretNode)
-            parentNode[0].removeChild(inProfileNode[0])
+            if (inProfileNode.length):
+                parentNode[0].removeChild(inProfileNode[0])
             if (not _sns_aws_access_key or
                     not _sns_aws_secret_access_key):
                 self._base.message(CERR_MSG, self._base.const_critical_text)
@@ -391,20 +400,52 @@ class Lambda:
             return False
         try:
             doc = minidom.parseString(configContent)
-            if (not self._updateCredentials(doc, 'In') or
-                    not self._updateCredentials(doc, 'Out')):
+            if (not Report.CHDR_CLOUD_DWNLOAD in _orjob._header and
+                    not _orjob._isInputHTTP):   # skip looking into the parameter file for credentials if the input is a direct HTTP link with no reqruirement to pre-download the raster/file before processing.
+                if (not self._updateCredentials(doc, 'In')):
+                    return False
+            if (not self._updateCredentials(doc, 'Out')):
                 return False
             configContent = doc.toprettyxml(indent="\t", encoding="utf-8")
         except Exception as e:
             self._base.message(str(e), self._base.const_critical_text)
             return False
-        orjobContent = ''
+        orjobHeader = ''
         for hdr in _orjob._header:
-            orjobContent += '# {}={}\n'.format(hdr, _orjob._header[hdr])
-        for f in _orjob._input_list:
-            orjobContent += '{}\n'.format(f)
-        store = {'orjob': {'file': orjobName, 'content': orjobContent}, 'config': {'file': configName, 'content': configContent}}
-        message = json.dumps(store)
+            orjobHeader += '# {}={}\n'.format(hdr, _orjob._header[hdr])
+        length = len(_orjob._input_list)
+        jobQueue = self._base.getUserConfiguration.getValue(self.queue_length)
+        if (not jobQueue):
+            jobQueue = _orjob._header[self.queue_length] if self.queue_length in _orjob._header else None   # read from orjob/reporter if not in at cmd-line
+        if (not jobQueue or
+            jobQueue and
+            (jobQueue <= 0 or
+             jobQueue > length)):
+            jobQueue = length
+        i = 0
+        errSNS = False
+        while(i < length):
+            orjobContent = ''
+            for j in range(i, i + jobQueue):
+                if (j == length):
+                    break
+                f = _orjob._input_list[j]
+                if (f.endswith('/')):
+                    i += 1
+                    continue    # skip folder entries
+                if (not orjobContent):
+                    orjobContent += orjobHeader
+                orjobContent += '{}\n'.format(f)
+                i += 1
+            if (not orjobContent):
+                continue
+            store = {'orjob': {'file': '{}_{}{}'.format(orjobWOExt, i, Report.CJOB_EXT), 'content': orjobContent}, 'config': {'file': configName, 'content': configContent}}
+            message = json.dumps(store)
+            if (not self.invokeSNS(message)):
+                errSNS = True
+        return not errSNS
+
+    def invokeSNS(self, message):
         publish = None
         try:
             publish = self._sns_connection.publish(self._sns_ARN, message, subject='OR')
@@ -501,7 +542,7 @@ class Base(object):
         if (not os.path.exists(binaryDst)):
             try:
                 shutil.copyfile(binarySrc, binaryDst)
-                os.chmod(binaryDst, 0777)   # set (rwx) to make lambda work.
+                os.chmod(binaryDst, 0o777)   # set (rwx) to make lambda work.
                 self.message('**LAMBDA** Copied -> {}'.format(binarySrc))
             except Exception as e:
                 self.message(str(e), self.const_critical_text)
@@ -1018,6 +1059,7 @@ class Report:
     CRPT_URL_TRUENAME = 'URL_NAME'
     CHDR_TEMPOUTPUT = CTEMPOUTPUT
     CHDR_CLOUDUPLOAD = 'cloudupload'
+    CHDR_CLOUD_DWNLOAD = 'clouddownload'
 
     def __init__(self, base):
         self._input_list = []
@@ -1123,7 +1165,7 @@ class Report:
 
     def addHeader(self, key, value):
         if (not key or
-                not value):
+                value is None):
             return False
         self._header[key.lower()] = value
         return True
@@ -1183,7 +1225,18 @@ class Report:
                     if (_fname.startswith(self.CHEADER_PREFIX)):
                         _hdr = _fname.replace(self.CHEADER_PREFIX, '').split('=')
                         if (len(_hdr) > 1):
-                            self.addHeader(_hdr[0].strip(), _hdr[1].strip())
+                            _hdr_key = _hdr[0].strip()
+                            _hdr_val = _hdr[1].strip()
+                            if (_hdr_key == CTEMPINPUT or
+                                    _hdr_key == CTEMPOUTPUT):
+                                if (not _hdr_val.endswith('/')):
+                                    _hdr_val += '/'
+                            elif (_hdr_key == Lambda.queue_length):
+                                if (not str.isdigit(_hdr_val)):
+                                    ln = _fptr.readline()
+                                    continue
+                                _hdr_val = int(_hdr_val)    # filter {Lambda.queuelength}
+                            self.addHeader(_hdr_key, _hdr_val)
                             ln = _fptr.readline()
                             continue
                     if (not _fname or
@@ -2598,9 +2651,11 @@ class Copy:
                     (f, e) = os.path.splitext(file)
                     if (not e):     # if no file extension at the end of URL, it's assumed we're talking to a service which in turn returns a raster.
                         isInputWebAPI = True
+                isPlanet = self.src.find(CPLANET_IDENTIFY) != -1
                 if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
                     not file.lower().endswith(CTIL_EXTENSION_) or       # skip 'exclude' list items and always copy (.til) files to destination.
-                        isInputWebAPI):
+                        isInputWebAPI or
+                        isPlanet):
                     if (('exclude' in self.cb_list)):
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
@@ -2620,6 +2675,11 @@ class Copy:
                                     isFileNameInHeader = False
                                     for v in file_url.headers.headers:
                                         if (v.startswith('Content-Disposition')):
+                                            if (isPlanet):
+                                                if (_mkRemoteURL in _rpt._input_list_info):
+                                                    _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = v.split(':')[1].strip()
+                                                isFileNameInHeader = True
+                                                break
                                             token = 'filename='
                                             f = v.find(token)
                                             if (f != -1):
@@ -2697,7 +2757,7 @@ class Copy:
                 except Exception as e:
                     if (self._input_flist):
                         _rpt.updateRecordStatus(os.path.join(r, file), CRPT_COPIED, CRPT_NO)
-                    self.message('(%s)' % (str(e)), const_critical_text)
+                    self.message('(%s)' % (str(e)), self._base.const_critical_text)
                     continue
         self.message('Done.')
         if (log):
@@ -2791,6 +2851,7 @@ class compression(object):
         # ends
         # set gdal_data enviornment path
         os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
+        os.environ['GDAL_HTTP_UNSAFESSL'] = 'true'  # disable CURL SSL certificate problem
         # ends
         msg_text = '(%s) is not found at (%s)'
         _gdal_translate = os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)
@@ -2849,7 +2910,8 @@ class compression(object):
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
         if (getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
             if (_rpt):
-                _input_file = _input_file.replace(self.m_user_config.getValue(CTEMPINPUT, False), '' if _rpt.root == '/' else _rpt.root)
+                if (not _rpt._isInputHTTP):
+                    _input_file = _input_file.replace(self.m_user_config.getValue(CTEMPINPUT, False), '' if _rpt.root == '/' else _rpt.root)
         _do_process = ret = True
         # get restore point snapshot
         if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
@@ -2953,7 +3015,23 @@ class compression(object):
                     args.append('BLOCKSIZE=512')
                 else:
                     args = args_callback(args, [input_file, output_file, self.m_user_config, self._base])      # callback user function to get arguments.
-                args.append(self._base.urlEncode(input_file) if _vsicurl_input else input_file)
+                if (_rpt):
+                    if (input_file.startswith('/vsicurl/')):
+                        trueFile = input_file.replace('/vsicurl/', '')
+                        if (trueFile in _rpt._input_list_info and
+                                Report.CRPT_URL_TRUENAME in _rpt._input_list_info[trueFile]):
+                            (urlFileName, urlExt) = os.path.splitext(os.path.join(output_file.split('?')[0], _rpt._input_list_info[trueFile][Report.CRPT_URL_TRUENAME]))
+                            if (not getBooleanValue(self.m_user_config.getValue('KeepExtension')) and
+                                    args[1] == '-of'):
+                                urlExt = args[2]
+                            post_process_output = output_file = '{}.{}'.format(urlFileName, urlExt)
+                            try:
+                                createPath = os.path.dirname(output_file)
+                                if (not os.path.exists(createPath)):
+                                    os.makedirs(createPath)
+                            except Exception as e:
+                                self.message('Err. {}'.format(str(e)), self._base.const_critical_text)
+                args.append(self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 else input_file)
                 args.append(output_file)
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self._call_external(args)
@@ -3384,7 +3462,7 @@ class Args:
 
 class Application(object):
     __program_ver__ = 'v1.7h'
-    __program_date__ = '20161027'
+    __program_date__ = '20161127'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3642,8 +3720,12 @@ class Application(object):
             return False
         if (self._args.op and
                 self._args.op == COP_LAMBDA):
-            if (getBooleanValue(self._args.clouddownload) and
-                    getBooleanValue(self._args.cloudupload)):
+            if (not getBooleanValue(self._args.clouddownload)):
+                _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)
+                if (_resumeReporter and
+                        not _resumeReporter._isInputHTTP):
+                    return False
+            if (getBooleanValue(self._args.cloudupload)):
                 return True
         return False
 
@@ -3782,6 +3864,7 @@ class Application(object):
                     self._args.op == COP_LAMBDA):
                 if (self._args.op == COP_LAMBDA):
                     isinput_s3 = self._args.clouddownload = self._args.cloudupload = True     # make these cmd-line args (optional) to type at the cmd-line for op={COP_LAMBDA}
+                    cfg.setValue(Lambda.queue_length, self._args.queuelength)
                 g_rpt = Report(self._base)
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message('Unable to init (Report)', self._base.const_critical_text)
@@ -4544,12 +4627,13 @@ def main():
     parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest='outputprofile')
     parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket')
     parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket')
-    parser.add_argument('-op', help='Utility operation mode [upload/noconvert]', dest='op')
+    parser.add_argument('-op', help='Utility operation mode [upload/noconvert/lambda]', dest='op')
     parser.add_argument('-job', help='Name output job/log-prefix file name', dest='job')
     parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath')
     parser.add_argument('-hashkey', help='Hashkey for encryption to use in output paths for cloud storage. e.g. -hashkey=random@1. This will insert the encrypted text using the -hashkey (\'random\') as the first folder name for the output path', dest=CUSR_TEXT_IN_PATH)
     parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input')
     parser.add_argument('-s3output', help='Deprecated. Use (-cloudupload)', dest='s3output')
+    parser.add_argument('-queuelength', type=int, help='No of simultaneous rasters to process in lambda function. To use with -op=lambda', dest=Lambda.queue_length)
 
     args = parser.parse_args()
     app = Application(args)
