@@ -14,13 +14,13 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20161127
+# Version: 20161218
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
 # -tempinput -tempoutput -subs -clouddownload -cloudupload
 # -inputprofile -outputprofile -op -job -inputprofile -outputprofile
-# -inputbucket -outputbucket -clonepath -clouddownloadtype -clouduploadtype
+# -inputbucket -outputbucket -rasterproxypath -clouddownloadtype -clouduploadtype
 # Usage: python.exe OptimizeRasters.py <arguments>
 # Note: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
@@ -49,6 +49,7 @@ import argparse
 import math
 import ctypes
 import urllib
+import urllib2
 import ConfigParser
 import json
 import md5
@@ -61,6 +62,7 @@ eFAIL = 1
 # ends
 
 CEXEEXT = '.exe'
+CONST_OUTPUT_EXT = '.%s' % ('mrf')
 
 # const related to (Reporter) class
 CRPT_SOURCE = 'SOURCE'
@@ -90,6 +92,8 @@ CDEL_DELAY_SECS = 20
 CPRJ_NAME = 'ProjectName'
 CLOAD_RESTORE_POINT = '__LOAD_RESTORE_POINT__'
 CCMD_ARG_INPUT = '__CMD_ARG_INPUT__'
+
+CVSICURL_PREFIX = '/vsicurl/'
 
 # utility const
 CSIN_UPL = 'SIN_UPL'
@@ -165,9 +169,11 @@ CCFG_GDAL_PATH = 'GDALPATH'
 
 # til related
 CTIL_EXTENSION_ = '.til'
-CCACHE_EXT = '.mrf_cache'
-CMRF_DOC_ROOT = 'MRF_META'
 # ends
+
+CCACHE_EXT = '.mrf_cache'
+CMRF_DOC_ROOT = 'MRF_META'  # <{CMRF_DOC_ROOT}>  mrf XML root node
+CMRF_DOC_ROOT_LEN = len(CMRF_DOC_ROOT) + 2  # includes '<' and '>' in XML node.
 
 # global dbg flags
 CS3_MSG_DETAIL = False
@@ -950,7 +956,7 @@ class UpdateMRF:
                                 shutil.copy(_mk_path, _mk_copy_path)
                         except Exception as e:
                             if (self._base):
-                                self._base.message('-clonepath/{}'.format(str(e)), self._base.const_critical_text)
+                                self._base.message('-rasterproxypath/{}'.format(str(e)), self._base.const_critical_text)
                             continue
 
     def update(self, output):
@@ -1060,6 +1066,7 @@ class Report:
     CHDR_TEMPOUTPUT = CTEMPOUTPUT
     CHDR_CLOUDUPLOAD = 'cloudupload'
     CHDR_CLOUD_DWNLOAD = 'clouddownload'
+    CHDR_MODE = 'mode'
 
     def __init__(self, base):
         self._input_list = []
@@ -1185,7 +1192,7 @@ class Report:
         _get_store = self.findWith(_file)
         if (_get_store and
                 _get_store == _file):
-            return False        # no duplicate entires allowed.
+            return False        # no duplicate entries allowed.
         self._input_list.append(_file)
         return True
 
@@ -1236,6 +1243,8 @@ class Report:
                                     ln = _fptr.readline()
                                     continue
                                 _hdr_val = int(_hdr_val)    # filter {Lambda.queuelength}
+                            elif (_hdr_key == self.CHDR_MODE):
+                                _hdr_val = _hdr_val.lower()  # lower case (mode)
                             self.addHeader(_hdr_key, _hdr_val)
                             ln = _fptr.readline()
                             continue
@@ -2667,10 +2676,12 @@ class Copy:
                                     if (getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
                                         r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
                             if (_rpt and
-                                    _rpt._isInputHTTP):
+                                    _rpt._isInputHTTP and
+                                    (Report.CHDR_MODE in _rpt._header and
+                                     _rpt._header[Report.CHDR_MODE] != 'cachingmrf' and
+                                     _rpt._header[Report.CHDR_MODE] != 'rasterproxy')):
                                 _mkRemoteURL = os.path.join(_r, file)
                                 try:
-                                    import urllib2
                                     file_url = urllib2.urlopen(_mkRemoteURL if not isInputWebAPI else os.path.splitext(_mkRemoteURL)[0])
                                     isFileNameInHeader = False
                                     for v in file_url.headers.headers:
@@ -2688,7 +2699,7 @@ class Copy:
                                                     _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = v[f + len(token): e].strip().replace('"', '').replace('?', '_')
                                                 isFileNameInHeader = True
                                             break
-                                    if (self.m_user_config.getValue(CTEMPINPUT)):    # we've to dn the file first and save to the name requested.
+                                    if (self.m_user_config.getValue(CTEMPINPUT)):    # we've to download the file first and save to the name requested.
                                         r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
                                         if (not os.path.exists(r)):
                                             os.makedirs(r)
@@ -2901,7 +2912,7 @@ class compression(object):
         self.message('Creating VRT output file (%s)' % (output_file))
         return self._call_external(args)
 
-    def compress(self, input_file, output_file, args_callback=None, build_pyramids=True, post_processing_callback=None, post_processing_callback_args=None):
+    def compress(self, input_file, output_file, args_callback=None, build_pyramids=True, post_processing_callback=None, post_processing_callback_args=None, **kwargs):
         if (_rpt):
             if (input_file in _rpt._input_list_info and
                     Report.CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
@@ -2931,7 +2942,7 @@ class compression(object):
                 except Exception as exp:
                     time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
                     if (not os.path.exists(out_dir_path)):
-                        self.message('(%s)' % str(exp), const_critical_text)
+                        self.message('(%s)' % str(exp), self._base.const_critical_text)
                         if (_rpt):
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
@@ -2943,7 +2954,6 @@ class compression(object):
                 if (input_file.startswith('/vsicurl/')):
                     try:
                         _dn_vsicurl_ = input_file.split('/vsicurl/')[1]
-                        import urllib2
                         file_url = urllib2.urlopen(_dn_vsicurl_)
                         validateForClone = isModeClone
                         with open(output_file, 'wb') as fp:
@@ -2952,8 +2962,8 @@ class compression(object):
                                 chunk = file_url.read(buff)
                                 if (validateForClone):
                                     validateForClone = False
-                                    if (chunk[:10] != '<{}>'.format(CMRF_DOC_ROOT)):
-                                        self.message('Invalid MRF ({})'.format(_dn_vsicurl_), const_critical_text)
+                                    if (chunk[:CMRF_DOC_ROOT_LEN] != '<{}>'.format(CMRF_DOC_ROOT)):
+                                        self.message('Invalid MRF ({})'.format(_dn_vsicurl_), self._base.const_critical_text)
                                         raise Exception
                                 if (not chunk):
                                     break
@@ -2969,7 +2979,7 @@ class compression(object):
                 if (isModeClone):
                     # Simulate the MRF file update (to include the CachedSource) which was earlier done via the GDAL_Translate->MRF driver.
                     try:
-                        _CDOC_ROOT = 'MRF_META'
+                        _CDOC_ROOT = CMRF_DOC_ROOT
                         _CDOC_CACHED_SOURCE = 'CachedSource'
                         _CDOC_SOURCE = 'Source'
                         doc = minidom.parse(output_file)
@@ -2997,7 +3007,7 @@ class compression(object):
                             _mrfBody = _mrfBody[_indx:]
                             c.write(_mrfBody)
                     except:
-                        self.message('Invalid MRF ({})'.format(input_file), const_critical_text)
+                        self.message('Invalid MRF ({})'.format(input_file), self._base.const_critical_text)
                         if (_rpt):
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
@@ -3024,7 +3034,7 @@ class compression(object):
                             if (not getBooleanValue(self.m_user_config.getValue('KeepExtension')) and
                                     args[1] == '-of'):
                                 urlExt = args[2]
-                            post_process_output = output_file = '{}.{}'.format(urlFileName, urlExt)
+                            post_process_output = output_file = '{}{}{}'.format(urlFileName, '' if urlExt.startswith('.') else '.', urlExt)
                             try:
                                 createPath = os.path.dirname(output_file)
                                 if (not os.path.exists(createPath)):
@@ -3107,6 +3117,7 @@ class compression(object):
         if (get_mode):
             if (get_mode == 'cachingmrf' or
                 get_mode == 'clonemrf' or
+                    get_mode == 'rasterproxy' or
                     get_mode == 'splitmrf'):
                 return True
         # skip pyramid creation on (tiffs) related to (til) files.
@@ -3461,8 +3472,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7h'
-    __program_date__ = '20161127'
+    __program_ver__ = 'v1.7j'
+    __program_date__ = '20161218'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -3490,11 +3501,15 @@ class Application(object):
             if (not _r.init(self._args.input)):
                 self.writeToConsole('Err. ({})/init'.format(self._args.input))
                 return False
+            self.writeToConsole('ORJob> Reading/Preparing data. Please wait..')  # Big .orjob files can take some time.
             if (not _r.read()):
                 self.writeToConsole('Err. ({})/read'.format(self._args.input))
                 return False
+            self.writeToConsole('ORJob> Done.')  # msg end of read.
             if (CRPT_HEADER_KEY in _r._header):
                 config_ = _r._header[CRPT_HEADER_KEY]
+            if (Report.CHDR_MODE in _r._header):
+                self._args.mode = _r._header[Report.CHDR_MODE]  # mode in .orjob has priority over the template <Mode> value.
             _r = None
         self._args.config = os.path.abspath(config_)         # replace/force the original path to abspath.
         cfg = Config()
@@ -3534,6 +3549,7 @@ class Application(object):
             'mrf_landsat',
             'cachingmrf',
             'clonemrf',
+            'rasterproxy',
             'splitmrf',
             BundleMaker.CMODE
         }
@@ -3544,8 +3560,8 @@ class Application(object):
             cfg_mode = cfg.getValue('Mode')
         if (cfg_mode is None or
                 (not cfg_mode.lower() in cfg_modes)):
-            self._base.message('<Mode> value not set/illegal ({})'.format(str(cfg_mode)), self._base.const_critical_text)
-            return(terminate(self._base, eFAIL))
+            Message('<Mode> value not set/illegal ({})'.format(str(cfg_mode)), Base.const_critical_text)
+            return False
         cfg_mode = cfg_mode.lower()
         cfg.setValue('Mode', cfg_mode)
         # ends
@@ -4024,7 +4040,9 @@ class Application(object):
         cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_ if dst_ else '')
         # ends
 
-        # is clonepath defined?
+        # is -rasterproxypath/-clonepath defined at the cmd-line?
+        if (self._args.rasterproxypath):
+            self._args.clonepath = self._args.rasterproxypath   # -rasterproxypath takes precedence. -clonepath is now deprecated.
         if (self._args.clonepath and
                 cfg_mode.startswith('mrf')):
             self._args.clonepath = self._args.clonepath.replace('\\', '/')
@@ -4159,7 +4177,8 @@ class Application(object):
         is_caching = False
         if (cfg_mode == 'clonemrf' or
             cfg_mode == 'splitmrf' or
-                cfg_mode == 'cachingmrf'):
+                cfg_mode == 'cachingmrf' or
+                cfg_mode == 'rasterproxy'):
             is_caching = True
 
         if (is_caching):
@@ -4178,8 +4197,6 @@ class Application(object):
         CONST_CPY_ERR_0 = 'Unable to initialize (Copy) module!'
         CONST_CPY_ERR_1 = 'Unable to process input data/(Copy) module!'
 
-        CONST_OUTPUT_EXT = '.%s' % ('mrf')
-
         # keep original-source-ext
         cfg_keep_original_ext = getBooleanValue(cfg.getValue('KeepExtension'))
         cfg_threads = cfg.getValue('Threads')
@@ -4189,7 +4206,8 @@ class Application(object):
         except:
             cfg_threads = -1
         if (cfg_threads <= 0 or
-                cfg_threads > CCFG_THREADS):
+                (cfg_threads > CCFG_THREADS and
+                 not is_caching)):
             cfg_threads = CCFG_THREADS
             self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS), self._base.const_warning_text)
         # ends
@@ -4476,35 +4494,38 @@ class Application(object):
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
                 return
-            for req in raster_buff:
-                (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
-                (f, ext) = os.path.splitext(req['f'])
-                ext = ext.lower()
-                if (not cfg_keep_original_ext):
-                    output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
-                finalPath = output_file
-                if (is_output_temp):
-                    finalPath = output_file.replace(self._args.tempoutput, self._args.output)
-                if (cfg_mode != 'splitmrf'):     # uses GDAL utilities
-                    ret = comp.compress(input_file, output_file, args_Callback_for_meta,
-                                        post_processing_callback=fn_copy_temp_dst if is_output_temp else None)    # and not isinput_s3
-                else:
+
+            len_buffer = cfg_threads
+            threads = []
+            store_files_indx = 0
+            store_files_len = len(raster_buff)
+            while(1):
+                len_threads = len(threads)
+                while(len_threads):
+                    alive = [t.isAlive() for t in threads]
+                    cnt_dead = sum(not x for x in alive)
+                    if (cnt_dead):
+                        len_buffer = cnt_dead
+                        threads = [t for t in threads if t.isAlive()]
+                        break
+                buffer = []
+                for i in range(0, len_buffer):
+                    if (store_files_indx == store_files_len):
+                        break
+                    buffer.append(raster_buff[store_files_indx])
+                    store_files_indx += 1
+                if (not buffer and
+                        not threads):
+                    break
+                for f in buffer:
                     try:
-                        shutil.copyfile(input_file, finalPath)
+                        t = threading.Thread(target=threadProxyRaster, args=(f, self._base, comp, self._args))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
                     except Exception as e:
-                        self._base.message('[CPY] {} ({})'.format(input_file, str(e)), self._base.const_critical_text)
+                        self._base.message('Err. {}'.format(str(e)), self._base.const_critical_text)
                         continue
-                if (not os.path.exists(finalPath)):
-                    continue
-                # update .mrf.
-                updateMRF = UpdateMRF(self._base)
-                _output_home_path = self._args.output
-                if (updateMRF.init(finalPath, _output_home_path, cfg.getValue('Mode'),
-                                   self._args.cache, _output_home_path, cfg.getValue(COUT_VSICURL_PREFIX, False))):
-                    if (not updateMRF.update(finalPath)):
-                        self._base.message('Updating ({}) was not successful!'.format(finalPath), self._base.const_critical_text)
-                        continue
-                # ends
         # do we have failed upload files on list?
         if (is_cloud_upload and
                 S3_storage):
@@ -4606,7 +4627,73 @@ class Application(object):
         return(terminate(self._base, _status))
 
 
+def threadProxyRaster(req, base, comp, args):
+    _user_config = base.getUserConfiguration
+    (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], args.clouddownload)
+    (f, ext) = os.path.splitext(req['f'])
+    if (not getBooleanValue(_user_config.getValue('KeepExtension'))):
+        output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
+    finalPath = output_file
+    is_output_temp = getBooleanValue(_user_config.getValue(CISTEMPOUTPUT))
+    if (is_output_temp):
+        finalPath = output_file.replace(args.tempoutput, args.output)
+    cfg_mode = _user_config.getValue('Mode')
+    if (cfg_mode != 'splitmrf'):
+        if (cfg_mode == 'rasterproxy'):
+            # Determine file type by reading few bytes off its header.
+            sigMRF = '<{}>'.format(CMRF_DOC_ROOT.lower())[:4]   # mrf XML root node
+            sigMRFLength = len(sigMRF)  # reading as small as possble to determine the correct type to avoid large data transfers for bigger .orjob files.
+            bytesAtHeader = None
+            if (input_file.startswith(CVSICURL_PREFIX)):
+                _dn_vsicurl_ = input_file.split(CVSICURL_PREFIX)[1]
+                file_url = None
+                try:
+                    file_url = urllib2.urlopen(_dn_vsicurl_)
+                    bytesAtHeader = file_url.read(sigMRFLength)
+                except Exception as e:
+                    base.message(str(e), base.const_critical_text)
+                    if (_rpt):
+                        _rpt.updateRecordStatus(req['f'], CRPT_PROCESSED, CRPT_NO)
+                    return False
+                finally:
+                    if (file_url):
+                        file_url.close()
+            else:
+                try:
+                    with open(input_file, 'rb') as fptrProxy:
+                        bytesAtHeader = fptrProxy.read(sigMRFLength)
+                except Exception as e:
+                    base.message(str(e), base.const_critical_text)
+                    if (_rpt):
+                        _rpt.updateRecordStatus(input_file, CRPT_PROCESSED, CRPT_NO)
+                    return False
+            if (bytesAtHeader):
+                cfg_mode = 'cachingmrf' if bytesAtHeader.lower() != sigMRF else 'clonemrf'
+            # ends
+        ret = comp.compress(input_file, output_file, args_Callback_for_meta,
+                            post_processing_callback=fn_copy_temp_dst if is_output_temp else None)
+    else:
+        try:
+            shutil.copyfile(input_file, finalPath)
+        except Exception as e:
+            base.message('[CPY] {} ({})'.format(input_file, str(e)), base.const_critical_text)
+            return False
+    if (not os.path.exists(finalPath)):
+        return False
+    # update .mrf.
+    updateMRF = UpdateMRF(base)
+    _output_home_path = args.output
+    if (updateMRF.init(finalPath, _output_home_path, cfg_mode,
+                       args.cache, _output_home_path, _user_config.getValue(COUT_VSICURL_PREFIX, False))):
+        if (not updateMRF.update(finalPath)):
+            base.message('Updating ({}) was not successful!'.format(finalPath), base.const_critical_text)
+            return False
+    # ends
+    return True
+
+
 def main():
+    optional = '[Optional]'
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', help='Processing mode/output format', dest='mode')
     parser.add_argument('-input', help='Input raster files directory/job file to resume', dest=CRESUME_HDR_INPUT)
@@ -4617,8 +4704,8 @@ def main():
     parser.add_argument('-quality', help='JPEG quality if compression is jpeg', dest='quality')
     parser.add_argument('-prec', help='LERC precision', dest='prec')
     parser.add_argument('-pyramids', help='Generate pyramids? [true/false/only/external]', dest='pyramids')
-    parser.add_argument('-tempinput', help='Path to copy -input raters before conversion', dest=CTEMPINPUT)
-    parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path', dest=CTEMPOUTPUT)
+    parser.add_argument('-tempinput', help='{} Path to copy -input raters before conversion'.format(optional), dest=CTEMPINPUT)
+    parser.add_argument('-tempoutput', help='Path to output converted rasters before moving to (-output) path. {} This is only required if -cloudupload is (true)'.format(optional), dest=CTEMPOUTPUT)
     parser.add_argument('-clouddownload', help='Is -input a cloud storage? [true/false: default:false]', dest='clouddownload')
     parser.add_argument('-cloudupload', help='Is -output a cloud storage? [true/false]', dest='cloudupload')
     parser.add_argument('-clouduploadtype', choices=['amazon', 'azure'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype')
@@ -4629,8 +4716,9 @@ def main():
     parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket')
     parser.add_argument('-op', help='Utility operation mode [upload/noconvert/lambda]', dest='op')
     parser.add_argument('-job', help='Name output job/log-prefix file name', dest='job')
-    parser.add_argument('-clonepath', help='Path to auto-generate cloneMRF files during the conversion process', dest='clonepath')
     parser.add_argument('-hashkey', help='Hashkey for encryption to use in output paths for cloud storage. e.g. -hashkey=random@1. This will insert the encrypted text using the -hashkey (\'random\') as the first folder name for the output path', dest=CUSR_TEXT_IN_PATH)
+    parser.add_argument('-rasterproxypath', help='{} Path to auto-generate raster proxy files during the conversion process'.format(optional), dest='rasterproxypath')
+    parser.add_argument('-clonepath', help='Deprecated. Use (-rasterproxypath)', dest='clonepath')
     parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input')
     parser.add_argument('-s3output', help='Deprecated. Use (-cloudupload)', dest='s3output')
     parser.add_argument('-queuelength', type=int, help='No of simultaneous rasters to process in lambda function. To use with -op=lambda', dest=Lambda.queue_length)
