@@ -28,44 +28,18 @@ Raster Proxies are small files stored on local file systems that reference much 
 ## Instructions
 **OptimizeRasters Setup**
 
-1. Download the (OptimizeRasters setup file) from GitHub. In a browser, navigate to  https://github.com/Esri/OptimizeRasters/raw/master/Setup/OptimizeRastersToolsSetup.exe. The file should begin downloading immediately. 
+1. Click the link to download the [OptimizeRasters setup file](https://github.com/Esri/OptimizeRasters/raw/master/Setup/OptimizeRastersToolsSetup.exe) from GitHub. The file should begin downloading immediately. 
 
 2. Double click the downloaded file to install.
 
 **Optional Packages for Cloud Storage**
 
-To upload to Amazon S3 and Microsoft Azure cloud storage, there are some third party packages for Python that need to be installed. The easiest way to install these third party packages is to use a tool for installing Python packages called PIP. PIP is included with Python 2.7.9 and above, which is installed with ArcGIS 10.4 and above. However, if you have a previous version of ArcGIS, PIP will need to be installed manually. 
-
-    Installing PIP. 
-
-1. Open https://pip.pypa.io/en/latest/installing/ in a browser.
-
-2. To download the PIP installation file, look under the heading Installing with get-pip.py, right click on get-pip.py, select Save Link As…, navigate to the folder you wish to use, and select Save.
-
-3. Open a command prompt. Using full file locations, run the command “python get-pip.py”
-
-EXAMPLE: C:/Python27/ArcGIS10.4/python.exe C:/temp/download/get-pip.py
-   
-    Installing boto (required to use Amazon S3).
-
-1.	Open a command prompt. Navigate to the Scripts folder in the Python folder.
-
-EXAMPLE: cd C:/Python27/ArcGIS10.4/Scripts
-
-2.	Type the command, “pip install boto”
-
-    Installing Azure (required to use Microsoft Azure).
-
-1.	Open a command prompt. Navigate to the Scripts folder in the Python folder.
-
-EXAMPLE: cd C:/Python27/ArcGIS10.4/Scripts
-
-2.	Type the command, “pip install azure”
+To upload to Amazon S3 and Microsoft Azure cloud storage, there are some third party packages for Python that need to be installed. More information can be found in the [OptimizeRasters documentation](https://github.com/Esri/OptimizeRasters/tree/master/Documentation).
 
 ## Requirements
 
-* Python 2.7 or greater (installed with ArcMap 10.4 / Pro 1.3 ). 
-* The OptimizeRasters geoprocessing toolbox requires ArcGIS Map 10.4,1 / Pro 1.3 or higher.
+* Python 2.7 or greater (installed with ArcMap 10.4 / Pro 1.3). 
+* The OptimizeRasters geoprocessing toolbox requires ArcGIS Map 10.4.1 / Pro 1.3 or higher.
 * OptimizeRasters can be run from the command line even if ArcGIS is not installed.
 * There are OptimizeRasters versions for both Windows and Linux. 
 * OptimizeRasters can be used with Amazon Web Services Lambda serverless compute service, with some restrictions on data sizes.
