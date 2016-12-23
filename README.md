@@ -1,6 +1,6 @@
 # OptimizeRasters
 
-OptimizeRasters is a tool for accomplishing three tasks: converting raster data to optimized Tiled TIF or MRF files, moving data to cloud storage, and creating Raster Proxies. The result is more efficient, scalable, and elastic data access with a lower storage cost. 
+OptimizeRasters is a set of tools for accomplishing three tasks: converting raster data to optimized Tiled TIF or MRF files, moving data to cloud storage, and creating Raster Proxies. The result is more efficient, scalable, and elastic data access with a lower storage cost. 
 
 **Converting raster data to optimized formats**
 
