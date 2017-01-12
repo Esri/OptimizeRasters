@@ -96,4 +96,4 @@ limitations under the License.
 A copy of the license is available in the repository's [License.txt](License.txt?raw=true) file.
 
 [](Esri Tags: MRF,BOTO,AWS)
-[](Esri Language: Python)​
+[](Esri Language: Python)? 
