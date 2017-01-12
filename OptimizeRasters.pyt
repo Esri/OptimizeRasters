@@ -580,8 +580,8 @@ class OptimizeRasters(object):
         #outtempFolder.value = returnTempFolder()
 
         cloneMRFFolder = arcpy.Parameter(
-        displayName="CloneMRF Output Folder",
-        name="cloneMRFFolder",
+        displayName="Raster Proxy Output Folder",
+        name="rasterProxyFolder",
         datatype="DEFolder",
         parameterType="Optional",
         direction="Input")
@@ -748,7 +748,7 @@ class OptimizeRasters(object):
                 configValList = parameters[14].value
                 aVal = configValList[0][1].strip().lower()
                 op = configValList[len(configValList) - 1][1].strip().lower()
-                if (aVal == 'clonemrf' or aVal == 'cachingmrf'):
+                if (aVal == 'clonemrf' or aVal == 'cachingmrf' or aVal == 'rasterproxy'):
                         parameters[10].enabled = False
                         parameters[11].enabled = False
                         parameters[12].enabled = True
@@ -854,7 +854,7 @@ class OptimizeRasters(object):
         if cacheOutputFolder != None:
             args['cache'] = cacheOutputFolder
         if cloneMRFFolder != None:
-            args['clonepath'] = cloneMRFFolder
+            args['rasterproxy'] = cloneMRFFolder
 
         # let's run (OptimizeRasters)
         import OptimizeRasters
