@@ -32,7 +32,11 @@ Raster Proxies are small files stored on local file systems that reference much 
 
 **Optional Packages for Cloud Storage**
 
-To upload to Amazon S3 and Microsoft Azure cloud storage, there are some third party packages for Python that need to be installed. More information can be found in the [OptimizeRasters documentation](https://github.com/Esri/OptimizeRasters/tree/master/Documentation).
+To upload to Amazon S3 and Microsoft Azure cloud storage, there are some third-party packages for Python that need to be installed. 
+
+If Azure or boto is already installed, it is important to ensure you are running the most up-to-date version to avoid errors.
+
+More information about installing and updating third-party packages can be found in the [OptimizeRasters documentation](https://github.com/Esri/OptimizeRasters/tree/master/Documentation).
 
 ## Requirements
 
