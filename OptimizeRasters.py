@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20161218
+# Version: 20170202
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1976,8 +1976,8 @@ class Azure(Store):
                 break
             for e in buffer:
                 try:
-                    block_id = base64.b64encode(str(idx))
-                    self.message('Adding block-id ({})'.format(idx))
+                    block_id = base64.b64encode('%06d' % idx)
+                    self.message('Adding block-id ({}/{})'.format(idx, tot_blocks))
                     t = threading.Thread(target=self._runBlock,
                                          args=(self._blob_service, e, self._upl_container_name, blob_name, block_id))
                     t.daemon = True
@@ -3472,8 +3472,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7j'
-    __program_date__ = '20161218'
+    __program_ver__ = 'v1.7k'
+    __program_date__ = '20170202'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
