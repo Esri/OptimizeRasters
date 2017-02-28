@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20160922
+# Version: 20170228
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -854,7 +854,7 @@ class OptimizeRasters(object):
         if cacheOutputFolder != None:
             args['cache'] = cacheOutputFolder
         if cloneMRFFolder != None:
-            args['rasterproxy'] = cloneMRFFolder
+            args['rasterproxypath'] = cloneMRFFolder
 
         # let's run (OptimizeRasters)
         import OptimizeRasters
