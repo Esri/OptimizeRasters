@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170202
+# Version: 20170420
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2919,7 +2919,8 @@ class compression(object):
                 output_file = '{}/{}'.format(os.path.dirname(output_file), _rpt._input_list_info[input_file][Report.CRPT_URL_TRUENAME])
         _vsicurl_input = self.m_user_config.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(_vsicurl_input, '') if _vsicurl_input else input_file
-        if (getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
+        isTempInput = self._base.getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))
+        if (isTempInput):
             if (_rpt):
                 if (not _rpt._isInputHTTP):
                     _input_file = _input_file.replace(self.m_user_config.getValue(CTEMPINPUT, False), '' if _rpt.root == '/' else _rpt.root)
@@ -2973,8 +2974,8 @@ class compression(object):
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
                 else:
-                    if (getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT)) or
-                            not getBooleanValue(cfg.getValue('iss3'))):
+                    if (isTempInput or
+                            not self._base.getBooleanValue(self.m_user_config.getValue('iss3'))):
                         shutil.copyfile(input_file, output_file)
                 if (isModeClone):
                     # Simulate the MRF file update (to include the CachedSource) which was earlier done via the GDAL_Translate->MRF driver.
@@ -3031,7 +3032,7 @@ class compression(object):
                         if (trueFile in _rpt._input_list_info and
                                 Report.CRPT_URL_TRUENAME in _rpt._input_list_info[trueFile]):
                             (urlFileName, urlExt) = os.path.splitext(os.path.join(output_file.split('?')[0], _rpt._input_list_info[trueFile][Report.CRPT_URL_TRUENAME]))
-                            if (not getBooleanValue(self.m_user_config.getValue('KeepExtension')) and
+                            if (not self._base.getBooleanValue(self.m_user_config.getValue('KeepExtension')) and
                                     args[1] == '-of'):
                                 urlExt = args[2]
                             post_process_output = output_file = '{}{}{}'.format(urlFileName, '' if urlExt.startswith('.') else '.', urlExt)
@@ -3040,9 +3041,9 @@ class compression(object):
                                 if (not os.path.exists(createPath)):
                                     os.makedirs(createPath)
                             except Exception as e:
-                                self.message('Err. {}'.format(str(e)), self._base.const_critical_text)
-                args.append(self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 else input_file)
-                args.append(output_file)
+                                self.message(str(e), self._base.const_critical_text)
+                args.append(self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 and not isTempInput else '"{}"'.format(input_file))
+                args.append('"{}"'.format(output_file))
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self._call_external(args)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
@@ -3051,7 +3052,7 @@ class compression(object):
                         _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                     return ret
             if (build_pyramids):        # build pyramids is always turned off for rasters that belong to (.til) files.
-                if (getBooleanValue(do_pyramids) or     # accept any valid boolean value.
+                if (self._base.getBooleanValue(do_pyramids) or     # accept any valid boolean value.
                     do_pyramids == CCMD_PYRAMIDS_ONLY or
                         do_pyramids == CCMD_PYRAMIDS_EXTERNAL):
                     iss3 = self.m_user_config.getValue('iss3')
@@ -3066,7 +3067,7 @@ class compression(object):
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return ret  # we can't proceed if vrt couldn't be built successfully.
-                    ret = self.createaOverview(output_file)
+                    ret = self.createaOverview('"{}"'.format(output_file))
                     self.message('Status: (%s).' % ('OK' if ret else 'FAILED'), const_general_text if ret else const_critical_text)
                     if (not ret):
                         if (_rpt):
@@ -3100,8 +3101,8 @@ class compression(object):
         # ends
         # call any user-defined fnc for any post-processings.
         if (post_processing_callback):
-            if (getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
-                self.message('[S3-Push]..')
+            if (self._base.getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
+                self.message('[{}-Push]..'.format(self.m_user_config.getValue(COUT_CLOUD_TYPE).capitalize()))
             ret = post_processing_callback(post_process_output, post_processing_callback_args, {'f': post_process_output, 'cfg': self.m_user_config})
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
         # ends
@@ -3472,8 +3473,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7k'
-    __program_date__ = '20170202'
+    __program_ver__ = 'v1.7l'
+    __program_date__ = '20170420'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
