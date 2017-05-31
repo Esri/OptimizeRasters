@@ -1,4 +1,4 @@
-# OptimizeRasters
+#�OptimizeRasters
 
 OptimizeRasters is a set of tools for accomplishing three tasks: converting raster data to optimized Tiled TIF or MRF files, moving data to cloud storage, and creating Raster Proxies. The result is more efficient, scalable, and elastic data access with a lower storage cost. 
 
@@ -54,7 +54,7 @@ More information about installing and updating third-party packages can be found
 
 ## Issues
 
-Find a bug or want to request a new feature?  Please let us know by submitting an issue.
+Find a bug or want to request a new feature?  Please let us know by submitting an issue, or adding a comment to the [OptimizeRasters discussion](https://geonet.esri.com/message/690662-optimizerasters) on GeoNet.
 
 ## Contributing
 
