@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170420
+# Version: 20170601
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -221,6 +221,10 @@ class ProfileEditorUI(UI):
             else:
                 raise Exception('Invalid storage type')
         except Exception as e:
+            if (isinstance(e, boto.exception.S3ResponseError)):
+                exCode = e.code.lower()
+                if (exCode not in ['invalidaccesskeyid', 'signaturedoesnotmatch']):
+                    return True
             self._errorText.append('Invalid Credentials>')
             self._errorText.append(str(e))
             return False
@@ -1707,9 +1711,10 @@ class Azure(Store):
                 if (not self._account_name or
                         not self._account_key):
                     return False
-            from azure.storage.blob import BlobService
-            self._blob_service = BlobService(account_name=self._account_name, account_key=self._account_key)
+            from azure.storage.blob import BlockBlobService
+            self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key)
         except Exception as e:
+            self.message(str(e), self.const_critical_text)
             return False
         return True
 
@@ -1992,7 +1997,10 @@ class Azure(Store):
                     return False
         try:
             self.message('Finalizing uploads..')
-            ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, block_ids)
+            from azure.storage.blob.models import BlobBlock, BlobBlockList
+            blockList = BlobBlockList().uncommitted_blocks
+            [blockList.append(BlobBlock(id=block)) for block in block_ids]
+            ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, blockList)
         except Exception as e:
             Message(str(e), self.const_critical_text)
             return False
@@ -2045,7 +2053,8 @@ class S3Storage:
                     return False
             # ends
         _remote_path = remote_path
-        if (os.path.isfile(_remote_path)):      # are we reading a file list?
+        if (_remote_path and
+                os.path.isfile(_remote_path)):      # are we reading a file list?
             self._input_flist = _remote_path
             try:
                 global _rpt
@@ -2072,25 +2081,24 @@ class S3Storage:
 
     def getS3Content(self, prefix, cb=None, precb=None):
         is_link = self._input_flist is not None
-        keys = self.bucketupload.list(prefix) if not is_link else _rpt
         subs = True
         if (self.m_user_config):
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
             if (subs is not None):    # if there's a value, take it else defaults to (True)
-                subs = getBooleanValue(root_only_)
+                subs = self._base.getBooleanValue(root_only_)
+        keys = self.bucketupload.list('' if prefix == '/' else prefix, delimiter=None if subs else '/') if not is_link else _rpt  # delimiter = '/'
+        isRoot = self.remote_path == '/'
         # get the til files first
         if (til):
             try:
                 for key in keys:
                     key = self.bucketupload.get_key(key) if is_link else key
-                    if (not key):
+                    if (not key or
+                            key.name.endswith('/')):
                         continue
-                    if (not key.name.endswith('/')):
-                        if (not subs):
-                            if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
-                                continue
-                        if (key.name.lower().endswith(CTIL_EXTENSION_)):
-                            cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side
+                    if (key.name.lower().endswith(CTIL_EXTENSION_)):
+                        remotePath = key.name.replace(self.remote_path if not isRoot else '', '')    # remote path following the input folder/.
+                        cb(key, remotePath)       # callback on the client-side
             except Exception as e:
                 self._base.message(e.message, self._base.const_critical_text)
                 return False
@@ -2098,21 +2106,19 @@ class S3Storage:
         try:
             for key in keys:
                 key = self.bucketupload.get_key(key) if is_link else key
-                if (not key):
+                if (not key or
+                        key.name.endswith('/')):
                     continue
-                if (not key.name.endswith('/')):
-                    if (not subs):
-                        if (os.path.dirname(key.name) != os.path.dirname(self.remote_path)):
-                            continue
-                    if (cb):
-                        if (precb):
-                            if (precb(key.name.replace(self.remote_path, ''), self.remote_path, self.inputPath)):     # if raster/exclude list, do not proceed.
-                                if (not getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
-                                    continue
-                        if (til):
-                            if (key.name.lower().endswith(CTIL_EXTENSION_)):
+                if (cb):
+                    remotePath = key.name.replace(self.remote_path if not isRoot else '', '')    # remote path following the input folder/.
+                    if (precb):
+                        if (precb(remotePath, self.remote_path, self.inputPath)):     # if raster/exclude list, do not proceed.
+                            if (not getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
                                 continue
-                        cb(key, key.name.replace(self.remote_path, ''))       # callback on the client-side. Note. return value not checked.
+                    if (til):
+                        if (key.name.lower().endswith(CTIL_EXTENSION_)):
+                            continue
+                    cb(key, remotePath)     # callback on the client-side. Note. return value not checked.
         except Exception as e:
             self._base.message(e.message, const_critical_text)
             return False
@@ -3473,8 +3479,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v1.7l'
-    __program_date__ = '20170420'
+    __program_ver__ = 'v1.7m'
+    __program_date__ = '20170601'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4119,7 +4125,7 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
                 # instance of upload storage.
                 S3_storage = S3Storage(self._base)
-                if (self._args.output):
+                if (self._args.output is not None):
                     s3_output = self._args.output
                     cfg.setValue(COUT_S3_PARENTFOLDER, s3_output)
                 # do we overwrite the output_bucekt_name with cmd-line?
@@ -4324,7 +4330,7 @@ class Application(object):
             if (g_is_generate_report and
                     g_rpt):
                 for req in files:
-                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                    _src = '{}{}{}'.format(req['src'], '/' if req['src'] and not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
                     if (getBooleanValue(cfg.getValue(CISTEMPINPUT))):
                         _tempinput = cfg.getValue(CTEMPINPUT, False)
                         _tempinput = _tempinput[:-1] if _tempinput.endswith('/') and not self._args.input.endswith('/') else _tempinput
