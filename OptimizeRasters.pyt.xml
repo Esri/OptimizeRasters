@@ -1,2 +1,37 @@
-<?xml version="1.0"?>
-<metadata xml:lang="en"><Esri><CreaDate>20160114</CreaDate><CreaTime>17394200</CreaTime><ArcGISFormat>1.0</ArcGISFormat><ArcGISstyle>ISO 19139 Metadata Implementation Specification</ArcGISstyle><SyncOnce>TRUE</SyncOnce><ModDate>20170112</ModDate><ModTime>105714</ModTime><scaleRange><minScale>150000000</minScale><maxScale>5000</maxScale></scaleRange><ArcGISProfile>ISO19139</ArcGISProfile></Esri><toolbox name="OptimizeRasters" alias=""><arcToolboxHelpPath>c:\program files (x86)\arcgis\desktop10.4\Help\gp</arcToolboxHelpPath><toolsets/></toolbox><dataIdInfo><idCitation xmlns=""><resTitle>OptimizeRasters</resTitle></idCitation><idAbs>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;OptimizeRasters is a tool to convert rasters from its native format to an optimized format cloud storage use.. It is also facilates the transfer of rasters to and from cloud storage solutions. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</idAbs></dataIdInfo><distInfo><distributor><distorFormat><formatName>ArcToolbox Toolbox</formatName></distorFormat></distributor></distInfo><mdHrLv><ScopeCd value="005"/></mdHrLv></metadata>
+﻿<?xml version="1.0" encoding="utf-8"?>
+<metadata xml:lang="en">
+  <Esri>
+    <CreaDate>20160114</CreaDate>
+    <CreaTime>17394200</CreaTime>
+    <ArcGISFormat>1.0</ArcGISFormat>
+    <ArcGISstyle>ISO 19139 Metadata Implementation Specification</ArcGISstyle>
+    <SyncOnce>TRUE</SyncOnce>
+    <ModDate>20170525</ModDate>
+    <ModTime>195750</ModTime>
+    <scaleRange>
+      <minScale>150000000</minScale>
+      <maxScale>5000</maxScale>
+    </scaleRange>
+    <ArcGISProfile>ISO19139</ArcGISProfile>
+  </Esri>
+  <toolbox name="OptimizeRasters" alias="">
+    <arcToolboxHelpPath>c:\program files (x86)\arcgis\desktop10.5\Help\gp</arcToolboxHelpPath>
+    <toolsets />
+  </toolbox>
+  <dataIdInfo>
+    <idCitation xmlns="">
+      <resTitle>OptimizeRasters</resTitle>
+    </idCitation>
+    <idAbs>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;OptimizeRasters is a tool to convert rasters from its native format to an optimized format cloud storage use.. It is also facilates the transfer of rasters to and from cloud storage solutions. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</idAbs>
+  </dataIdInfo>
+  <distInfo>
+    <distributor>
+      <distorFormat>
+        <formatName>ArcToolbox Toolbox</formatName>
+      </distorFormat>
+    </distributor>
+  </distInfo>
+  <mdHrLv>
+    <ScopeCd value="005" />
+  </mdHrLv>
+</metadata>

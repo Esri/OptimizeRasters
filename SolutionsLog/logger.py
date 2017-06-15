@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: logger.py
 # Description: Class to log status from Imagery w/f components to log files.
-# Version: 20170212
+# Version: 20170525
 # Requirements: Python
 # Author: Esri Imagery Workflows team
 # ------------------------------------------------------------------------------
@@ -132,7 +132,7 @@ class Logger(object):
             if (messageType == self.const_critical_text):
                 errorTypeText = "critical"
             self.projects[key]['logs']['message'].append({'error': {'type': errorTypeText, 'text': message}})
-        _message = 'log-' + errorTypeText + ': ' + message  # print out error message to console while logging.
+        _message = 'log-{}:{}'.format(errorTypeText, message)  # print out error message to console while logging.
         if (self.isGPRun):
             try:
                 import arcpy
@@ -149,7 +149,10 @@ class Logger(object):
                 print (_message)        # if a client side msgCallback has been set.
             msg_type = 'general'        # msg-code
             if (self.m_base):
-                self.m_base.invoke_cli_msg_callback(msg_type, [_message])
+                if (hasattr(self.m_base, 'invoke_cli_msg_callback')):   # used by MDCS
+                    self.m_base.invoke_cli_msg_callback(msg_type, [_message])
+                elif(hasattr(self.m_base, 'writeToConsole')):  # used by OptimizeRasters
+                    self.m_base.writeToConsole(_message)
         return True
 
     def WriteLog(self, project):
@@ -195,7 +198,7 @@ class Logger(object):
                                 if (msg['type'] == 'status'):
                                     nodeName = 'Status'
                                 eleMessage = doc.createElement(nodeName)
-                                eleText = doc.createTextNode(msg['text'])
+                                eleText = doc.createTextNode(str(msg['text']))
                                 eleMessage.appendChild(eleText)
                                 msgNode = eleMessage
                             elif('error' in msg.keys()):
