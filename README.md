@@ -1,4 +1,6 @@
-# OptimizeRasters
+
+OptimizeRasters
+===============
 
 OptimizeRasters is a set of tools for accomplishing three tasks: converting raster data to optimized Tiled TIF or MRF files, moving data to cloud storage, and creating Raster Proxies. The result is more efficient, scalable, and elastic data access with a lower storage cost. 
 
@@ -54,20 +56,20 @@ More information about installing and updating third-party packages can be found
 
 ## Issues
 
-Find a bug or want to request a new feature?  Please let us know by submitting an issue.
+Find a bug or want to request a new feature? Please let us know by submitting an issue, or adding a comment to the [OptimizeRasters discussion](https://geonet.esri.com/message/690662-optimizerasters) on GeoNet.
 
 ## Contributing
 
 Esri welcomes contributions from anyone and everyone. Please see our [guidelines for contributing](https://github.com/esri/contributing).
 
 ## Licensing
-Copyright 2016 Esri
+Copyright 2016 Esri
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-   http://www.apache.org/licenses/LICENSE-2.0
+   http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -77,6 +79,4 @@ limitations under the License.
 
 A copy of the license is available in the repository's [license.txt](https://github.com/Esri/OptimizeRasters/blob/master/LICENSE) file.
 
-[](Esri Tags: MRF, BOTO, AWS)
-[](Esri Language: Python)
  
