@@ -45,7 +45,7 @@ def main():
         'input': r'!!path_to_input_data!!',    # input path. eg. c:/input/mydata
         'output': r'!!output_path!!',  # processed output path. eg. c:/output/mydata
         'subs': 'true',    # Do we include subfolders?
-        'config': '!!enter_path_to_template_file!!'  # eg. r'c:/Image_Mgmt_Workflows/OptimizeRasters/Templates/Imagery_to_MRF_LERC.xml'
+        'config': '!!enter_path_to_template_file!!' # eg. r'c:/Image_Mgmt_Workflows/OptimizeRasters/Templates/Imagery_to_MRF_LERC.xml'
     }
     app = OptimizeRasters.Application(args)  # The args{} can contain any valid cmd-line argument name without the prefix '-'
     app.registerMessageCallback(messages)   # Optional. If messages need to be brought back onto the caller's side.
