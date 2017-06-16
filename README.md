@@ -25,6 +25,15 @@ Raster Proxies are small files stored on local file systems that reference much 
 * Configurable using included editable XML files
 * Open source code, implemented in Python using GDAL to handle a variety of raster formats
 
+## What's New in OptimizeRasters 2.0.1
+* Boto3 support
+* Google Cloud Storage support
+* IAM Role support
+* Updated to use GDAL 2.1 without the Kakadu driver (equivalent to ArcGIS 10.5.1 GDAL DLLs)
+* New -mode added to generate an orjob file without processing it
+* Updated storage location for Azure credential file 
+* Additional minor fixes and performance enhancements
+
 ## Instructions
 **OptimizeRasters Setup**
 
@@ -42,8 +51,8 @@ More information about installing and updating third-party packages can be found
 
 ## Requirements
 
-* Python 2.7 or greater (installed with ArcMap 10.4 / Pro 1.3). 
-* The OptimizeRasters geoprocessing toolbox requires ArcGIS Map 10.4.1 / Pro 1.3 or higher.
+* Python 2.7 or Python 3+ (installed with ArcMap 10.4+ / Pro 1.3+). 
+* The OptimizeRasters geoprocessing toolbox requires ArcGIS Map 10.4.1+ / Pro 1.3+.
 * OptimizeRasters can be run from the command line even if ArcGIS is not installed.
 * There are OptimizeRasters versions for both Windows and Linux. 
 * OptimizeRasters can be used with Amazon Web Services Lambda serverless compute service, with some restrictions on data sizes.
