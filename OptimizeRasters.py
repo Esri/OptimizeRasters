@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170530
+# Version: 20170619
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2163,9 +2163,10 @@ class Azure(Store):
                 if (not self._account_name or
                         not self._account_key):
                     return False
-            from azure.storage.blob import BlobService
-            self._blob_service = BlobService(account_name=self._account_name, account_key=self._account_key)
+            from azure.storage.blob import BlockBlobService
+            self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key)
         except Exception as e:
+            self.message(str(e), self.const_critical_text)
             return False
         return True
 
@@ -2449,7 +2450,10 @@ class Azure(Store):
                     return False
         try:
             self.message('Finalizing uploads..')
-            ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, block_ids)
+            from azure.storage.blob.models import BlobBlock, BlobBlockList
+            blockList = BlobBlockList().uncommitted_blocks
+            [blockList.append(BlobBlock(id=block)) for block in block_ids]
+            ret = self._blob_service.put_block_list(self._upl_container_name, blob_name, blockList)
         except Exception as e:
             Message(str(e), self.const_critical_text)
             return False
@@ -3994,8 +3998,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1'
-    __program_date__ = '20170530'
+    __program_ver__ = 'v2.0.1a'
+    __program_date__ = '20170619'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
