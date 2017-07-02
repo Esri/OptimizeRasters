@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170619
+# Version: 20170702
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2563,6 +2563,17 @@ class S3Storage:
             return roleInfo
         return None
 
+    def getEndPoint(self, domain):
+        redirectEndPoint = domain
+        try:
+            urlResponse = urllib.urlopen(domain)
+            doc = minidom.parseString(urlResponse.read())
+            endPoint = doc.getElementsByTagName('Endpoint')
+            redirectEndPoint = 'http://{}/'.format(endPoint[0].firstChild.nodeValue)
+        except Exception as e:
+            pass
+        return redirectEndPoint
+
     @property
     def inputPath(self):
         return self.__m_input_path
@@ -2969,7 +2980,12 @@ def args_Callback(args, user_data=None):
             args.append('-co')
             args.append('OPTIONS="{}{}"'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_compression == _LERC2 or m_compression == _LERC else ''))
     args.append('-co')
-    args.append('{}={}'.format('BLOCKXSIZE' if m_mode.lower() == 'gtiff' else 'BLOCKSIZE', m_bsize))
+    if (m_mode.lower() == 'gtiff'):
+        args.append('{}={}'.format('BLOCKXSIZE', m_bsize))
+        args.append('-co')
+        args.append('{}={}'.format('BLOCKYSIZE', m_bsize))
+    else:
+        args.append('{}={}'.format('BLOCKSIZE', m_bsize))
     return args
 
 
@@ -3998,8 +4014,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1a'
-    __program_date__ = '20170619'
+    __program_ver__ = 'v2.0.1b'
+    __program_date__ = '20170702'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4695,7 +4711,7 @@ class Application(object):
                     self._base.message(err_init_msg.format('S3'), const_critical_text)
                     return(terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
-                domain = S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': S3_storage.m_bucketname, 'Key': ' '}).split('%20?')[0]
+                domain =  S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': S3_storage.m_bucketname, 'Key': ' '}).split('%20?')[0]
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format(domain.replace('https', 'http'),
                                                                          cfg.getValue(COUT_S3_PARENTFOLDER, False)) if not S3_storage._isBucketPublic else
                              '/vsicurl/http://{}.{}/{}'.format(S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN, cfg.getValue(COUT_S3_PARENTFOLDER, False)))
@@ -4845,8 +4861,8 @@ class Application(object):
                 if (not ret):
                     self._base.message('Unable to initialize S3-storage! Quitting..', self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
-                if (str(o_S3_storage.con.meta.client._endpoint.host).lower().endswith('.ecstestdrive.com')):   # handles EMC namespace cloud urls differently    # need a fix in boto3
-                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.public.ecstestdrive.com/{}/'.format(    # bucketupload.connection has been set to .name for now.
+                if (str(o_S3_storage.con.meta.client._endpoint.host).lower().endswith('.ecstestdrive.com')):   # handles EMC namespace cloud urls differently
+                    cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.public.ecstestdrive.com/{}/'.format(
                         o_S3_storage.CAWS_ACCESS_KEY_ID.split('@')[0], o_S3_storage.m_bucketname))
                 else:   # for all other standard cloud urls
                     domain = o_S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': ' '}).split('%20?')[0]
