@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20170525
+# Version: 20170712
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -25,7 +25,8 @@
 
 import arcpy
 from arcpy import env
-import sys, os
+import sys
+import os
 import subprocess
 import time
 if (sys.version_info[0] < 3):
@@ -40,16 +41,18 @@ AzureRoot = '.OptimizeRasters/Microsoft'
 GoogleRoot = '.OptimizeRasters/Google'
 AwsRoot = '.aws'
 
+
 def returnDate():
     sDate = str(datetime.date(datetime.today())).replace('-', '')
     sTime = str(datetime.time(datetime.today())).split('.')[0].replace(':', '')
-    return sDate+sTime
+    return sDate + sTime
+
 
 def setXMLXPathValue(doc, xPath, key, value):
     if (not doc or
         not xPath or
         not key or
-        not value):
+            not value):
         return False
     nodes = doc.getElementsByTagName(key)
     for node in nodes:
@@ -67,9 +70,10 @@ def setXMLXPathValue(doc, xPath, key, value):
             return True
     return False
 
-def returntemplatefiles ():
+
+def returntemplatefiles():
     selfscriptpath = os.path.dirname(__file__)
-    templateloc = os.path.join(selfscriptpath,'templates')
+    templateloc = os.path.join(selfscriptpath, 'templates')
     templatefilelist = os.listdir(templateloc)
     global allactualxmlFiles
     allactualxmlFiles = []
@@ -77,21 +81,22 @@ def returntemplatefiles ():
     for ft in templatefilelist:
         if ft.endswith('.xml'):
             allactualxmlFiles.append(ft)
-            ft = ft.replace('.xml','')
+            ft = ft.replace('.xml', '')
             allxmlFiles.append(ft)
 
-    userTempLoc = os.path.join(selfscriptpath,'UserTemplates')
+    userTempLoc = os.path.join(selfscriptpath, 'UserTemplates')
     if os.path.exists(userTempLoc) == True:
         userTempLoclist = os.listdir(userTempLoc)
         for ft in userTempLoclist:
             if ft.endswith('.xml'):
                 allactualxmlFiles.append(ft)
-                ft = ft.replace('.xml','')
+                ft = ft.replace('.xml', '')
                 allxmlFiles.append(ft)
 
     return allxmlFiles
 
-def returnjobFiles ():
+
+def returnjobFiles():
     selfscriptpath = os.path.dirname(__file__)
 
     jobfileList = os.listdir(selfscriptpath)
@@ -101,12 +106,13 @@ def returnjobFiles ():
     for ft in jobfileList:
         if ft.endswith('.orjob'):
             allactualjobfiles.append(ft)
-            ft = ft.replace('.orjob','')
+            ft = ft.replace('.orjob', '')
             alljobFiles.append(ft)
 
     return alljobFiles
 
-def setPaths(xFname,values):
+
+def setPaths(xFname, values):
     overExisting = True
     rootPath = 'OptimizeRasters/Defaults/'
     xfName2 = os.path.normpath(xFname)
@@ -114,30 +120,31 @@ def setPaths(xFname,values):
     for keyValueList in values:
         aKey = keyValueList[0]
         aVal = keyValueList[1]
-        pathtoreplace = rootPath+aKey
-        setXMLXPathValue(doc,pathtoreplace,aKey,aVal)
+        pathtoreplace = rootPath + aKey
+        setXMLXPathValue(doc, pathtoreplace, aKey, aVal)
     if 'UserTemplates' in xFname:
         if overExisting == True:
             fnToWrite = xfName2
         else:
             asuffix = returnDate()
-            fnToWrite = xfName2.replace('.xml','_'+asuffix+'.xml')
+            fnToWrite = xfName2.replace('.xml', '_' + asuffix + '.xml')
     else:
         selfscriptpath = os.path.dirname(__file__)
-        userLoc = os.path.join(selfscriptpath,'UserTemplates')
+        userLoc = os.path.join(selfscriptpath, 'UserTemplates')
         if os.path.exists(userLoc) == False:
             os.mkdir(userLoc)
         baseName = os.path.basename(xFname)
         asuffix = returnDate()
-        baseName = baseName.replace('.xml','_'+asuffix+'.xml')
-        fnToWrite = os.path.join(userLoc,baseName)
+        baseName = baseName.replace('.xml', '_' + asuffix + '.xml')
+        fnToWrite = os.path.join(userLoc, baseName)
     c = open(fnToWrite, "w")
     c.write(doc.toprettyxml(encoding='UTF-8'))
     c.close()
     return fnToWrite
 
+
 def returnPaths(xFname):
-    keyList = ['Mode','RasterFormatFilter','ExcludeFilter','IncludeSubdirectories','Compression','Quality','LERCPrecision','BuildPyramids','PyramidFactor','PyramidSampling','PyramidCompression','NoDataValue','BlockSize','Scale','KeepExtension','Threads', 'Op']
+    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op']
     xfName2 = os.path.normpath(xFname)
     if (not os.path.exists(xfName2)):
         return None
@@ -146,18 +153,20 @@ def returnPaths(xFname):
     for key in keyList:
         nodes = doc.getElementsByTagName(key)
         for node in nodes:
-            if node.firstChild !=None:
+            if node.firstChild is not None:
                 aVal = node.firstChild.data
             else:
                 aVal = ''
-            valueList.append([key,aVal])
-    return ([keyList,valueList])
+            valueList.append([key, aVal])
+    return ([keyList, valueList])
 
-def attchValues(toolcontrol,allValues):
+
+def attchValues(toolcontrol, allValues):
     keylist = allValues[0]
     valList = allValues[1]
     toolcontrol.value = valList
     return
+
 
 def returnTempFolder():
     templiist = []
@@ -169,24 +178,25 @@ def returnTempFolder():
             return tempVal
             break
 
-def config_Init(parentfolder,filename):
+
+def config_Init(parentfolder, filename):
     if (not parentfolder or
-        not filename):
+            not filename):
         return None
     global config
     global awsfile
     config = ConfigParser.RawConfigParser()
-    homedrive =  os.getenv('HOMEDRIVE')
-    homepath =  os.getenv('HOMEPATH')
-    homefolder = os.path.join(homedrive,homepath)
-    awsfolder = os.path.join(homefolder,parentfolder)
+    homedrive = os.getenv('HOMEDRIVE')
+    homepath = os.getenv('HOMEPATH')
+    homefolder = os.path.join(homedrive, homepath)
+    awsfolder = os.path.join(homefolder, parentfolder)
     if (filename == '*.json'):  # google cs filter
         for r, d, f in os.walk(awsfolder):
             for service in f:
-                config.add_section(os.path.join(r,service).replace('\\', '/'))
+                config.add_section(os.path.join(r, service).replace('\\', '/'))
             break
         return config
-    awsfile = os.path.join(awsfolder,filename)
+    awsfile = os.path.join(awsfolder, filename)
     if os.path.exists(awsfile) == True:
         print (awsfile)
         try:
@@ -203,8 +213,9 @@ def config_Init(parentfolder,filename):
             tmpFIle.close
         return config
 
-def config_writeSections(configfileName,peAction,section,option1,value1,option2,value2,option3,value3):
-    peAction_  = peAction.lower()
+
+def config_writeSections(configfileName, peAction, section, option1, value1, option2, value2, option3, value3):
+    peAction_ = peAction.lower()
     if peAction_ == 'overwrite existing':
         appConfig = config
         appConfig.remove_section(section)
@@ -220,15 +231,15 @@ def config_writeSections(configfileName,peAction,section,option1,value1,option2,
         mode = 'a'
     # let's validate the credentials before writing out.
     if (peAction_.startswith('overwrite') or     # update existing or add new but ignore for del.
-        mode == 'a'):
+            mode == 'a'):
         try:
             import OptimizeRasters
         except Exception as e:
-            arcpy.AddError (str(e))
+            arcpy.AddError(str(e))
             return False
         storageType = OptimizeRasters.CCLOUD_AMAZON
         if (option1 and
-            option1.lower().startswith('azure')):
+                option1.lower().startswith('azure')):
             storageType = OptimizeRasters.CCLOUD_AZURE
         profileEditorUI = OptimizeRasters.ProfileEditorUI(section, storageType, value1, value2)
         ret = profileEditorUI.validateCredentials()
@@ -238,7 +249,7 @@ def config_writeSections(configfileName,peAction,section,option1,value1,option2,
     # ends
     appConfig.add_section(section)
     isIAMRole = section.lower().startswith('iamrole:')
-    if (not isIAMRole): # if not IAM role, write out the credential key pair
+    if (not isIAMRole):  # if not IAM role, write out the credential key pair
         appConfig.set(section, option1, value1)
         appConfig.set(section, option2, value2)
     if (value3):
@@ -246,6 +257,7 @@ def config_writeSections(configfileName,peAction,section,option1,value1,option2,
     with open(configfileName, mode) as configfile:
         appConfig.write(configfile)
     return True
+
 
 def getAvailableBuckets(ctlProfileType, ctlProfileName):
     try:
@@ -267,16 +279,20 @@ def getAvailableBuckets(ctlProfileType, ctlProfileName):
         pass
     return []
 
+
 class Toolbox(object):
+
     def __init__(self):
         """Define the toolbox (the name of the toolbox is the name of the
         .pyt file)."""
         self.label = "Toolbox"
         self.alias = ""
         # List of tool classes associated with this toolbox
-        self.tools = [OptimizeRasters,ProfileEditor,ResumeJobs]
+        self.tools = [OptimizeRasters, ProfileEditor, ResumeJobs]
+
 
 class ResumeJobs(object):
+
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
         self.label = "Resume Jobs"
@@ -286,11 +302,11 @@ class ResumeJobs(object):
 
     def getParameterInfo(self):
         pendingJobs = arcpy.Parameter(
-        displayName="Pending Jobs",
-        name="pendingJobs",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Output")
+            displayName="Pending Jobs",
+            name="pendingJobs",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         pendingJobs.filter.type = "ValueList"
 
         pendingJobs.filter.list = returnjobFiles()
@@ -321,20 +337,22 @@ class ResumeJobs(object):
         template_path = os.path.realpath(__file__)
         configFN = '{}/{}'.format(os.path.dirname(template_path), os.path.basename(aJob)).replace('\\', '/')
         if (not os.path.exists(configFN)):      # detect errors early.
-            arcpy.AddError('Err. OptimizeRasters job file ({}) is not found!'.format(configFN));
+            arcpy.AddError('Err. OptimizeRasters job file ({}) is not found!'.format(configFN))
             return False
         args['input'] = configFN
        # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)
         if (not app.init()):
-            arcpy.AddError ('Err. Unable to initialize (OptimizeRasters module)')
+            arcpy.AddError('Err. Unable to initialize (OptimizeRasters module)')
             return False
         app.postMessagesToArcGIS = True
         return app.run()
         # ends
 
+
 class ProfileEditor(object):
+
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
         self.label = "Profile Editor"
@@ -344,65 +362,65 @@ class ProfileEditor(object):
 
     def getParameterInfo(self):
         profileType = arcpy.Parameter(
-        displayName="Profile Type",
-        name="profileType",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Output")
+            displayName="Profile Type",
+            name="profileType",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Output")
         profileType.filter.type = "ValueList"
-        profileType.filter.list = ['Amazon S3','Microsoft Azure']
+        profileType.filter.list = ['Amazon S3', 'Microsoft Azure']
         profileType.value = 'Amazon S3'
 
         profileName = arcpy.Parameter(
-        displayName="Profile Name",
-        name="profileName",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Profile Name",
+            name="profileName",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         #profileName.value = 'or_public_in'
 
         iAmRolePara = arcpy.Parameter(
-        displayName="IAM Role Profile",
-        name="iAmRolePara",
-        datatype="GPBoolean",
-        parameterType="Optional",
-        direction="Input")
+            displayName="IAM Role Profile",
+            name="iAmRolePara",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input")
 
         accessKey = arcpy.Parameter(
-        displayName="Access/Account Key ID",
-        name="accessKey",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Access/Account Key ID",
+            name="accessKey",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
 
-        secretAccessKey= arcpy.Parameter(
-        displayName="Secret Access/Account Key",
-        name="secretAccessKey",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+        secretAccessKey = arcpy.Parameter(
+            displayName="Secret Access/Account Key",
+            name="secretAccessKey",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
 
-        imRoleURL= arcpy.Parameter(
-        displayName="Endpoint URL",
-        name="imRoleURL",
-        datatype="GPString",
-        parameterType="Optional",
-        direction="Input")
+        imRoleURL = arcpy.Parameter(
+            displayName="Endpoint URL",
+            name="imRoleURL",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input")
 
         action = arcpy.Parameter(
-        displayName="Editor Option",
-        name="action",
-        datatype="GPString",
-        parameterType="Optional",
-        direction="Input")
+            displayName="Editor Option",
+            name="action",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input")
 
         action.filter.type = "ValueList"
-        action.filter.list = ['Overwrite Existing','Delete Existing']
+        action.filter.list = ['Overwrite Existing', 'Delete Existing']
         action.value = 'Overwrite Existing'
         action.enabled = False
 
         iAmRolePara.value = False
-        parameters = [profileType,profileName,iAmRolePara,accessKey,secretAccessKey,imRoleURL,action]
+        parameters = [profileType, profileName, iAmRolePara, accessKey, secretAccessKey, imRoleURL, action]
         return parameters
 
     def updateParameters(self, parameters):
@@ -415,7 +433,7 @@ class ProfileEditor(object):
             elif pType == 'Microsoft Azure':
                 pFolder = AzureRoot
                 pfileName = 'azure_credentials'
-            config_Init(pFolder,pfileName)
+            config_Init(pFolder, pfileName)
             if parameters[1].altered == True:
                 pName = parameters[1].valueAsText
                 if (config.has_section('{}{}'.format('iamrole:' if isIAMRole else '', pName))):
@@ -424,22 +442,22 @@ class ProfileEditor(object):
                     parameters[6].enabled = False
         if parameters[6].enabled == True:
             pass
-            if parameters[3].value == None :
+            if parameters[3].value is None:
                 parameters[3].value = 'None'
-            if parameters[4].value == None :
+            if parameters[4].value is None:
                 parameters[4].value = 'None'
         else:
             pass
-            if parameters[3].value == 'None' :
+            if parameters[3].value == 'None':
                 parameters[3].value = ''
-            if parameters[4].value == 'None' :
+            if parameters[4].value == 'None':
                 parameters[4].value = ''
         parameters[3].enabled = not isIAMRole   # access_key
         parameters[4].enabled = not isIAMRole   # secret_key
         if isIAMRole == True:
-            if parameters[3].valueAsText == '' or parameters[3].value == None:
+            if parameters[3].valueAsText == '' or parameters[3].value is None:
                 parameters[3].value = 'None'
-            if parameters[4].valueAsText == '' or parameters[4].value == None:
+            if parameters[4].valueAsText == '' or parameters[4].value is None:
                 parameters[4].value = 'None'
 
     def updateMessages(self, parameters):
@@ -454,7 +472,7 @@ class ProfileEditor(object):
                 pType = parameters[0].valueAsText
                 pName = parameters[1].valueAsText
                 if (parameters[1] == True):
-                    pName = 'iamrole:'+pName
+                    pName = 'iamrole:' + pName
 
                 if (config.has_section(pName)):
                     parameters[1].setWarningMessage('Profile name already exists. Select the appropriate action.')
@@ -467,9 +485,9 @@ class ProfileEditor(object):
 
     def execute(self, parameters, messages):
         pType = parameters[0].valueAsText
-        homedrive =  os.getenv('HOMEDRIVE')
-        homepath =  os.getenv('HOMEPATH')
-        homefolder = os.path.join(homedrive,homepath)
+        homedrive = os.getenv('HOMEDRIVE')
+        homepath = os.getenv('HOMEPATH')
+        homefolder = os.path.join(homedrive, homepath)
         if pType == 'Amazon S3':
             pFolder = AwsRoot
             pfileName = 'credentials'
@@ -482,7 +500,7 @@ class ProfileEditor(object):
             option1 = 'azure_account_name'
             option2 = 'azure_account_key'
             option3 = 'azure_endpoint_url'
-        awsfolder = os.path.join(homefolder,pFolder)
+        awsfolder = os.path.join(homefolder, pFolder)
         #awsfile = os.path.join(awsfolder,pfileName)
         pName = parameters[1].valueAsText
         if parameters[6].enabled == False:
@@ -493,16 +511,17 @@ class ProfileEditor(object):
             accessKeyID = parameters[3].valueAsText
             accessSeceretKey = parameters[4].valueAsText
         else:
-            pName = 'iamrole:'+ pName
+            pName = 'iamrole:' + pName
             option1 = None
             accessKeyID = ''
             option2 = None
             accessSeceretKey = ''
         endPointURL = parameters[5].valueAsText
-        config_writeSections(awsfile,peAction,pName,option1,accessKeyID,option2,accessSeceretKey,option3,endPointURL)
+        config_writeSections(awsfile, peAction, pName, option1, accessKeyID, option2, accessSeceretKey, option3, endPointURL)
 
 
 class OptimizeRasters(object):
+
     def __init__(self):
         """Define the tool (tool name is the name of the class)."""
         self.label = "OptimizeRasters"
@@ -513,126 +532,126 @@ class OptimizeRasters(object):
     def getParameterInfo(self):
         storageTypes = ['Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud']    # 'local' must be the first element.
         optTemplates = arcpy.Parameter(
-        displayName="Configuration Files",
-        name="optTemplates",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Configuration Files",
+            name="optTemplates",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         optTemplates.filter.type = "ValueList"
         optTemplates.filter.list = returntemplatefiles()
 
         inType = arcpy.Parameter(
-        displayName="Input Source",
-        name="inType",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Input Source",
+            name="inType",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         inType.filter.type = "ValueList"
         inType.filter.list = storageTypes
         inType.value = storageTypes[0]
 
         inprofiles = arcpy.Parameter(
-        displayName="Input Profile",
-        name="inprofiles",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Input Profile",
+            name="inprofiles",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         inprofiles.filter.type = "ValueList"
 
         inBucket = arcpy.Parameter(
-        displayName="Input Bucket/Container",
-        name="inBucket",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Input Bucket/Container",
+            name="inBucket",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         inBucket.filter.type = "ValueList"
 
         inPath = arcpy.Parameter(
-        displayName="Input Path",
-        name="inPath",
-        datatype=['DEFolder','GPString'],
-        parameterType="Required",
-        direction="Input")
+            displayName="Input Path",
+            name="inPath",
+            datatype=['DEFolder', 'GPString'],
+            parameterType="Required",
+            direction="Input")
 
         intempFolder = arcpy.Parameter(
-        displayName="Input Temporary Folder",
-        name="intempFolder",
-        datatype="DEFolder",
-        parameterType="Optional",
-        direction="Input")
+            displayName="Input Temporary Folder",
+            name="intempFolder",
+            datatype="DEFolder",
+            parameterType="Optional",
+            direction="Input")
 
         outType = arcpy.Parameter(
-        displayName=" Output Destination",
-        name="outType",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName=" Output Destination",
+            name="outType",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         outType.filter.type = "ValueList"
         outType.filter.list = storageTypes
         outType.value = storageTypes[0]
 
         outprofiles = arcpy.Parameter(
-        displayName="Output Profile to Use",
-        name="outprofiles",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Output Profile to Use",
+            name="outprofiles",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
         outprofiles.filter.type = "ValueList"
 
         outBucket = arcpy.Parameter(
-        displayName="Output Bucket/Container",
-        name="outBucket",
-        datatype="GPString",
-        parameterType="Required",
-        direction="Input")
+            displayName="Output Bucket/Container",
+            name="outBucket",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input")
 
         outPath = arcpy.Parameter(
-        displayName="Output Path",
-        name="outPath",
-        datatype=['DEFolder','GPString'],
-        parameterType="Required",
-        direction="Input")
+            displayName="Output Path",
+            name="outPath",
+            datatype=['DEFolder', 'GPString'],
+            parameterType="Required",
+            direction="Input")
 
         outtempFolder = arcpy.Parameter(
-        displayName="Output Temporary Folder",
-        name="outtempFolder",
-        datatype="DEFolder",
-        parameterType="Optional",
-        direction="Input")
+            displayName="Output Temporary Folder",
+            name="outtempFolder",
+            datatype="DEFolder",
+            parameterType="Optional",
+            direction="Input")
 
         cloneMRFFolder = arcpy.Parameter(
-        displayName="Raster Proxy Output Folder",
-        name="rasterProxyFolder",
-        datatype="DEFolder",
-        parameterType="Optional",
-        direction="Input")
+            displayName="Raster Proxy Output Folder",
+            name="rasterProxyFolder",
+            datatype="DEFolder",
+            parameterType="Optional",
+            direction="Input")
 
         cacheMRFFolder = arcpy.Parameter(
-        displayName="Cache Folder",
-        name="cacheMRFFolder",
-        datatype="DEFolder",
-        parameterType="Optional",
-        direction="Input")
+            displayName="Cache Folder",
+            name="cacheMRFFolder",
+            datatype="DEFolder",
+            parameterType="Optional",
+            direction="Input")
 
         editValue = arcpy.Parameter(
-        displayName="Edit Configuration Values",
-        name="editValue",
-        datatype="GPBoolean",
-        parameterType="Optional",
-        direction="Input")
+            displayName="Edit Configuration Values",
+            name="editValue",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input")
         editValue.category = 'Advanced'
 
         configVals = arcpy.Parameter(
-        displayName='Configuration Values:',
-        name='configVals',
-        datatype='GPValueTable',
-        parameterType='Optional',
-        direction='Input')
+            displayName='Configuration Values:',
+            name='configVals',
+            datatype='GPValueTable',
+            parameterType='Optional',
+            direction='Input')
         configVals.columns = [['GPString', 'Parameter'], ['GPString', 'Value']]
         configVals.enabled = False
         configVals.category = 'Advanced'
 
-        parameters = [optTemplates,inType,inprofiles,inBucket,inPath,intempFolder,outType,outprofiles,outBucket,outPath,outtempFolder,cloneMRFFolder,cacheMRFFolder,editValue,configVals]
+        parameters = [optTemplates, inType, inprofiles, inBucket, inPath, intempFolder, outType, outprofiles, outBucket, outPath, outtempFolder, cloneMRFFolder, cacheMRFFolder, editValue, configVals]
         return parameters
 
     def updateParameters(self, parameters):
@@ -649,30 +668,30 @@ class OptimizeRasters(object):
                 templateinUse = optTemplates
                 template_path = os.path.realpath(__file__)
                 _CTEMPLATE_FOLDER = 'Templates'
-                configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+                configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                 if not os.path.exists(configFN):
                     _CTEMPLATE_FOLDER = 'UserTemplates'
-                    configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+                    configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                 allValues = returnPaths(configFN)
                 if (allValues):
-                    attchValues(parameters[14],allValues)
+                    attchValues(parameters[14], allValues)
             else:
                 optTemplates = parameters[0].valueAsText
                 if templateinUse != optTemplates:
                     template_path = os.path.realpath(__file__)
                     _CTEMPLATE_FOLDER = 'Templates'
-                    configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+                    configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                     if not os.path.exists(configFN):
                         _CTEMPLATE_FOLDER = 'UserTemplates'
-                        configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+                        configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                     allValues = returnPaths(configFN)
                     if (allValues):
-                        attchValues(parameters[14],allValues)
+                        attchValues(parameters[14], allValues)
                     templateinUse = optTemplates
         if parameters[1].altered == True:
             if parameters[1].valueAsText == 'Local':
                 parameters[2].filter.list = []
-                parameters[3].filter.list =  []
+                parameters[3].filter.list = []
                 parameters[2].value = 'Profile'
                 parameters[2].enabled = False
                 parameters[3].enabled = False
@@ -683,12 +702,12 @@ class OptimizeRasters(object):
                     pfileName = 'credentials'
                     parameters[2].enabled = True
                     parameters[3].enabled = True
-                elif parameters[1].valueAsText =='Microsoft Azure':
+                elif parameters[1].valueAsText == 'Microsoft Azure':
                     pFolder = AzureRoot
                     pfileName = 'azure_credentials'
                     parameters[2].enabled = True
                     parameters[3].enabled = True
-                elif parameters[1].valueAsText =='Google Cloud':
+                elif parameters[1].valueAsText == 'Google Cloud':
                     pFolder = GoogleRoot
                     pfileName = '*.json'
                     parameters[2].enabled = True
@@ -698,7 +717,7 @@ class OptimizeRasters(object):
                 if parameters[2].value == 'Profile':
                     parameters[2].value = ''
                 if (pFolder):
-                    p2Config = config_Init(pFolder,pfileName)
+                    p2Config = config_Init(pFolder, pfileName)
                     if (p2Config):
                         p2List = p2Config.sections()
                         parameters[2].filter.list = p2List
@@ -716,7 +735,8 @@ class OptimizeRasters(object):
                 else:
                     parameters[3].filter.list = []
                     if (parameters[2].value is not None and
-                        not parameters[2].value.lower().startswith('iamrole:')):
+                        not parameters[2].value.lower().startswith('iamrole:') and
+                            not parameters[2].value.lower().startswith('aws_publicbucket')):
                         if (not parameters[2].value.lower().endswith('public-buckets.json')):
                             parameters[3].value = ''
             # ends
@@ -737,12 +757,12 @@ class OptimizeRasters(object):
                     pfileName = 'credentials'
                     parameters[7].enabled = True
                     parameters[8].enabled = True
-                elif parameters[6].valueAsText =='Microsoft Azure':
+                elif parameters[6].valueAsText == 'Microsoft Azure':
                     pFolder = AzureRoot
                     pfileName = 'azure_credentials'
                     parameters[7].enabled = True
                     parameters[8].enabled = True
-                elif parameters[6].valueAsText =='Google Cloud':
+                elif parameters[6].valueAsText == 'Google Cloud':
                     pFolder = GoogleRoot
                     pfileName = '*.json'
                     parameters[7].enabled = True
@@ -752,7 +772,7 @@ class OptimizeRasters(object):
                 if parameters[7].value == 'Profile':
                     parameters[7].value = ''
                 if (pFolder):
-                    p6Config = config_Init(pFolder,pfileName)
+                    p6Config = config_Init(pFolder, pfileName)
                     if (p6Config):
                         p6List = p6Config.sections()
                         parameters[7].filter.list = p6List
@@ -770,29 +790,29 @@ class OptimizeRasters(object):
                 else:
                     parameters[8].filter.list = []
                     if (parameters[7].value is not None and
-                        not parameters[7].value.lower().startswith('iamrole:')):
+                            not parameters[7].value.lower().startswith('iamrole:')):
                         if (not parameters[7].value.lower().endswith('public-buckets.json')):
                             parameters[8].value = ''
             # ends
         if parameters[14].altered == True:
-                configValList = parameters[14].value
-                aVal = configValList[0][1].strip().lower()
-                op = configValList[len(configValList) - 1][1].strip().lower()
-                if (aVal == 'clonemrf' or aVal == 'cachingmrf' or aVal == 'rasterproxy'):
-                        parameters[10].enabled = False
-                        parameters[11].enabled = False
-                        parameters[12].enabled = True
-                else:
-                    parameters[10].enabled = True
-                    parameters[11].enabled = True
-                    parameters[12].enabled = True
-                    if (op == 'copyonly'):
-                        parameters[11].enabled = False
-                        parameters[12].enabled = False
+            configValList = parameters[14].value
+            aVal = configValList[0][1].strip().lower()
+            op = configValList[len(configValList) - 1][1].strip().lower()
+            if (aVal == 'clonemrf' or aVal == 'cachingmrf' or aVal == 'rasterproxy'):
+                parameters[10].enabled = False
+                parameters[11].enabled = False
+                parameters[12].enabled = True
+            else:
+                parameters[10].enabled = True
+                parameters[11].enabled = True
+                parameters[12].enabled = True
+                if (op == 'copyonly'):
+                    parameters[11].enabled = False
+                    parameters[12].enabled = False
 
     def updateMessages(self, parameters):
         storageTypes = ('Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud')    # 'local' must be the first element.
-        errMessageListOnly  = 'Invalid Value. Pick from List only.'
+        errMessageListOnly = 'Invalid Value. Pick from List only.'
         if parameters[1].altered == True:
             pType = parameters[1].valueAsText
             if (pType not in storageTypes):
@@ -805,7 +825,7 @@ class OptimizeRasters(object):
                 parameters[6].setErrorMessage(errMessageListOnly)
             else:
                 parameters[6].clearMessage()
-                if (pType in storageTypes[1:]): # skip the first element/local.
+                if (pType in storageTypes[1:]):  # skip the first element/local.
                     if parameters[10].altered == False:
                         if parameters[10].enabled == True:
                             parameters[10].SetWarningMessage('For cloud storage output, a temporary output location is required.')
@@ -822,10 +842,10 @@ class OptimizeRasters(object):
         optTemplates = parameters[0].valueAsText
         template_path = os.path.realpath(__file__)
         _CTEMPLATE_FOLDER = 'Templates'
-        configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+        configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
         if os.path.exists(configFN) == False:
             _CTEMPLATE_FOLDER = 'UserTemplates'
-            configFN = os.path.join(os.path.join(os.path.dirname(template_path),_CTEMPLATE_FOLDER), optTemplates+'.xml')
+            configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
 
         inType = parameters[1].valueAsText
         inprofiles = parameters[2].valueAsText
@@ -843,7 +863,7 @@ class OptimizeRasters(object):
         if parameters[13].enabled == True:
             if parameters[13].value == True:
                 editedValues = parameters[14].value
-                configFN = setPaths(configFN,editedValues)
+                configFN = setPaths(configFN, editedValues)
         args['config'] = configFN
         args['output'] = outPath
         args['tempinput'] = intempFolder
@@ -855,7 +875,8 @@ class OptimizeRasters(object):
         else:
             args['clouddownload'] = 'true'
             args['inputbucket'] = inBucket      # case-sensitive
-            args['inputprofile'] = inprofiles
+            if (not inprofiles.lower().startswith('aws_publicbucket')):
+                args['inputprofile'] = inprofiles
             if inType == 'Amazon S3':
                 args['clouddownloadtype'] = 'amazon'
             elif inType == 'Microsoft Azure':
@@ -874,15 +895,15 @@ class OptimizeRasters(object):
                 clouduploadtype_ = 'google'
             args['clouduploadtype'] = clouduploadtype_
             args['outputbucket'] = outBucket
-        if cacheOutputFolder != None:
+        if cacheOutputFolder is not None:
             args['cache'] = cacheOutputFolder
-        if cloneMRFFolder != None:
+        if cloneMRFFolder is not None:
             args['rasterproxypath'] = cloneMRFFolder
         # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)
         if (not app.init()):
-            arcpy.AddError ('Err. Unable to initialize (OptimizeRasters module)')
+            arcpy.AddError('Err. Unable to initialize (OptimizeRasters module)')
             return False
         app.postMessagesToArcGIS = True
         return app.run()
