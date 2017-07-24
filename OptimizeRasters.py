@@ -14,13 +14,14 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170702
+# Version: 20170723
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
 # -tempinput -tempoutput -subs -clouddownload -cloudupload
 # -inputprofile -outputprofile -op -job -inputprofile -outputprofile
 # -inputbucket -outputbucket -rasterproxypath -clouddownloadtype -clouduploadtype
+# -usetoken
 # Usage: python.exe OptimizeRasters.py <arguments>
 # Note: OptimizeRasters.xml (config) file is placed alongside OptimizeRasters.py
 # OptimizeRasters.py is entirely case-sensitive, extensions/paths in the config
@@ -125,6 +126,8 @@ CRESUME_ARG = 'resume'
 CRESUME_ARG_VAL_RETRYALL = 'retryall'
 CRESUME_HDR_INPUT = 'input'
 CRESUME_HDR_OUTPUT = 'output'
+InputProfile = 'inputprofile'
+OutputProfile = 'outputprofile'
 # ends
 
 CINPUT_PARENT_FOLDER = 'Input_ParentFolder'
@@ -137,6 +140,7 @@ CISTEMPINPUT = 'istempinput'
 CHASH_DEF_INSERT_POS = 2
 CHASH_DEF_CHAR = '#'
 CHASH_DEF_SPLIT_CHAR = '@'
+UseToken = 'usetoken'
 
 # const node-names in the config file
 CCLOUD_AMAZON = 'amazon'
@@ -372,7 +376,7 @@ class Lambda:
         rptProfile = self._base.getUserConfiguration.getValue('{}_S3_AWS_ProfileName'.format(direction))
         _resumeReporter = self._base.getUserConfiguration.getValue(CPRT_HANDLER)    # gives a chance to overwrite the profile name in the parameter file with the orjob one.
         if (_resumeReporter):                                                       # unless the orjob was edited manually, the profile name on both would be the same.
-            selectProfile = 'inputprofile' if direction == 'In' else 'outputprofile'
+            selectProfile = InputProfile if direction == 'In' else OutputProfile
             if (selectProfile in _resumeReporter._header):
                 rptProfile = _resumeReporter._header[selectProfile]
         CERR_MSG = 'Credential keys don\'t exist/invalid'
@@ -453,8 +457,7 @@ class Lambda:
             return False
         try:
             doc = minidom.parseString(configContent)
-            if (not Report.CHDR_CLOUD_DWNLOAD in _orjob._header and
-                    not _orjob._isInputHTTP):   # skip looking into the parameter file for credentials if the input is a direct HTTP link with no reqruirement to pre-download the raster/file before processing.
+            if (not _orjob._isInputHTTP):   # skip looking into the parameter file for credentials if the input is a direct HTTP link with no reqruirement to pre-download the raster/file before processing.
                 if (not self._updateCredentials(doc, 'In')):
                     return False
             if (not self._updateCredentials(doc, 'Out')):
@@ -465,6 +468,8 @@ class Lambda:
             return False
         orjobHeader = ''
         for hdr in _orjob._header:
+            if (hdr in [InputProfile, OutputProfile]):  # lambda works with AWS key pairs and not profile names.
+                continue
             orjobHeader += '# {}={}\n'.format(hdr, _orjob._header[hdr])
         length = len(_orjob._input_list)
         jobQueue = self._base.getUserConfiguration.getValue(self.queue_length)
@@ -478,7 +483,6 @@ class Lambda:
         i = 0
         errLambda = False
         functionJobs = []
-
         functionName = None
         useLambdaFunction = False
         lambdaArgs = _orjob.operation.split(':')
@@ -757,6 +761,14 @@ class Base(object):
 
     def isLinux(self):
         return True if sys.platform.lower().startswith('linux') else False
+
+    def convertToTokenPath(self, inputPath):
+        if (not inputPath):
+            return None
+        if (self.getBooleanValue(self.getUserConfiguration.getValue(UseToken)) and
+                self.getBooleanValue(self.getUserConfiguration.getValue('iss3'))):
+            return inputPath.replace(self.getUserConfiguration.getValue(CIN_S3_PREFIX, False),
+                                     '/vsis3/{}/'.format(self.getUserConfiguration.getValue('In_S3_Bucket', False)))
 
     def copyBinaryToTmp(self, binarySrc, binaryDst):
         if (not os.path.exists(binaryDst)):
@@ -1272,6 +1284,9 @@ class UpdateMRF:
                 extensions_lup = {
                     'lerc': {'data': '.lrc', 'index': '.idx'}
                 }
+            useTokenPath = self._base.convertToTokenPath(doc.getElementsByTagName('Source')[0].firstChild.nodeValue)
+            if (useTokenPath is not None):
+                doc.getElementsByTagName('Source')[0].firstChild.nodeValue = useTokenPath
             nodeData = nodeRaster[0].getElementsByTagName('DataFile')
             if (not nodeData):
                 nodeData.append(doc.createElement('DataFile'))
@@ -2501,6 +2516,11 @@ class S3Storage:
                         self.CAWS_ACCESS_KEY_ID = roleInfo[self.RoleAccessKeyId]
                         self.CAWS_ACCESS_KEY_SECRET = roleInfo[self.RoleSecretAccessKey]
                         awsSessionToken = roleInfo[self.RoleToken]
+                        # let's initialize the AWS env variables to allow GDAL to work when invoked externally.
+                        os.environ['AWS_ACCESS_KEY_ID'] = self.CAWS_ACCESS_KEY_ID
+                        os.environ['AWS_SECRET_ACCESS_KEY'] = self.CAWS_ACCESS_KEY_SECRET
+                        os.environ['AWS_SESSION_TOKEN'] = awsSessionToken
+                        # ends
                     self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
                     session = boto3.Session(self.CAWS_ACCESS_KEY_ID if not sessionProfile else None, self.CAWS_ACCESS_KEY_SECRET if not sessionProfile else None,
                                             profile_name=_profile_name if sessionProfile else None, aws_session_token=awsSessionToken if awsSessionToken else None)
@@ -3032,7 +3052,7 @@ def args_Callback_for_meta(args, user_data=None):
             m_comp == _LERC2 or
                 m_comp == _LERC):
             args.append('-co')
-            args.append('OPTIONS={}{}'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_comp == _LERC2 or m_comp == _LERC else ''))
+            args.append('OPTIONS="{}{}"'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_comp == _LERC2 or m_comp == _LERC else ''))
     elif(m_comp == 'jpeg'):
         args.append('-co')
         args.append('QUALITY=%s' % (m_compression_quality))
@@ -3575,7 +3595,11 @@ class compression(object):
                                     os.makedirs(createPath)
                             except Exception as e:
                                 self.message(str(e), self._base.const_critical_text)
-                args.append(self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 and not isTempInput else '"{}"'.format(input_file))
+                inputRaster = self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 and not isTempInput else '"{}"'.format(input_file)
+                useTokenPath = self._base.convertToTokenPath(inputRaster)
+                if (useTokenPath is not None):
+                    inputRaster = useTokenPath
+                args.append(inputRaster)
                 args.append('"{}"'.format(output_file))
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self._call_external(args)
@@ -4014,8 +4038,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1b'
-    __program_date__ = '20170702'
+    __program_ver__ = 'v2.0.1c'
+    __program_date__ = '20170723'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4711,7 +4735,7 @@ class Application(object):
                     self._base.message(err_init_msg.format('S3'), const_critical_text)
                     return(terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
-                domain =  S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': S3_storage.m_bucketname, 'Key': ' '}).split('%20?')[0]
+                domain = S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': S3_storage.m_bucketname, 'Key': ' '}).split('%20?')[0]
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format(domain.replace('https', 'http'),
                                                                          cfg.getValue(COUT_S3_PARENTFOLDER, False)) if not S3_storage._isBucketPublic else
                              '/vsicurl/http://{}.{}/{}'.format(S3_storage.m_bucketname, CINOUT_S3_DEFAULT_DOMAIN, cfg.getValue(COUT_S3_PARENTFOLDER, False)))
@@ -4812,6 +4836,7 @@ class Application(object):
             self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS), self._base.const_warning_text)
         # ends
         # let's deal with copying when -input is on s3
+        cfg.setValue(UseToken, self._base.getBooleanValue(self._args.usetoken))
         if (isinput_s3):
             cfg.setValue('iss3', True)
             in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
@@ -5399,8 +5424,8 @@ def main():
     parser.add_argument('-cloudupload', help='Is -output a cloud storage? [true/false]', dest='cloudupload')
     parser.add_argument('-clouduploadtype', choices=['amazon', 'azure', 'google'], help='Upload Cloud Type [amazon/azure]', dest='clouduploadtype')
     parser.add_argument('-clouddownloadtype', choices=['amazon', 'azure', 'google'], help='Download Cloud Type [amazon/azure/google]', dest='clouddownloadtype')
-    parser.add_argument('-inputprofile', help='Input cloud profile name with credentials', dest='inputprofile')
-    parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest='outputprofile')
+    parser.add_argument('-inputprofile', help='Input cloud profile name with credentials', dest=InputProfile)
+    parser.add_argument('-outputprofile', help='Output cloud profile name with credentials', dest=OutputProfile)
     parser.add_argument('-inputbucket', help='Input cloud bucket/container name', dest='inputbucket')
     parser.add_argument('-outputbucket', help='Output cloud bucket/container name', dest='outputbucket')
     parser.add_argument('-op', help='Utility operation mode [{}/{}/{}/{}/{}]'.format(COP_UPL, COP_NOCONVERT, COP_LAMBDA, COP_COPYONLY, COP_CREATEJOB), dest=Report.CHDR_OP)
@@ -5411,6 +5436,7 @@ def main():
     parser.add_argument('-s3input', help='Deprecated. Use (-clouddownload)', dest='s3input')
     parser.add_argument('-s3output', help='Deprecated. Use (-cloudupload)', dest='s3output')
     parser.add_argument('-queuelength', type=int, help='No of simultaneous rasters to process in lambda function. To use with -op=lambda', dest=Lambda.queue_length)
+    parser.add_argument('-usetoken', help='Use token to access cloud data? [true/false: default:false]', dest=UseToken)
 
     args = parser.parse_args()
     app = Application(args)
