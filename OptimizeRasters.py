@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170723
+# Version: 20170813
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -949,7 +949,7 @@ class Base(object):
                 r = r.replace('\\', '/')
                 if (r == input_folder):
                     for _file in f:
-                        if (_file.startswith(file_name_prefix)):
+                        if (_file.startswith('{}.'.format(file_name_prefix))):
                             file_to_upload = os.path.join(r, _file)
                             if (azure_storage.upload(
                                 file_to_upload,
@@ -978,7 +978,7 @@ class Base(object):
                 r = r.replace('\\', '/')
                 if (r == input_folder):
                     for _file in f:
-                        if (_file.startswith(file_name_prefix)):
+                        if (_file.startswith('{}.'.format(file_name_prefix))):
                             file_to_upload = self.convertToForwardSlash(os.path.join(r, _file), False)
                             if (google_storage.upload(
                                 file_to_upload,
@@ -2819,10 +2819,9 @@ class S3Storage:
         for r, d, f in os.walk(input_path):
             for file in f:
                 mk_path = os.path.join(r, file).replace('\\', '/')
-                if (mk_path.startswith(p)):
-                    if (single_upload):
-                        if (mk_path != m_input_source):
-                            continue
+                if ((single_upload and
+                     (mk_path == m_input_source)) or
+                        mk_path.startswith('{}.'.format(p))):
                     try:
                         S3 = None
                         if (_rpt):
@@ -4038,8 +4037,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1c'
-    __program_date__ = '20170723'
+    __program_ver__ = 'v2.0.1d'
+    __program_date__ = '20170813'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
