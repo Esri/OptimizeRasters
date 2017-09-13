@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170813
+# Version: 20170913
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1611,6 +1611,11 @@ class Report:
             _frmt = '{}/{}/{}/{}\n'.replace('/', self.CVSCHAR)
             with open(self._report_file, 'w+') as _fptr:
                 for key in self._header:
+                    if (self.CHDR_OP == key):
+                        # op==createjob header is not written out into the output .orjob file.
+                        # This allows the .orjob file to be used with the -input arg to process the data separately.
+                        if (self._header[key] == COP_CREATEJOB):
+                            continue
                     _fptr.write('{} {}={}\n'.format(self.CHEADER_PREFIX, key, self._header[key]))
                 _fptr.write(_frmt.format(CRPT_SOURCE, CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED))
                 for f in self._input_list:
@@ -4037,8 +4042,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1d'
-    __program_date__ = '20170813'
+    __program_ver__ = 'v2.0.1e'
+    __program_date__ = '20170913'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4327,6 +4332,18 @@ class Application(object):
                 setattr(self._args, _key, _hdr[1].strip())
         return True
 
+    def __initOperationCreateJob(self):
+        global _rpt
+        _rpt = Report(self._base)
+        createdOrjob = cfg.getValue(CPRJ_NAME, False)
+        if (not createdOrjob.lower().endswith(Report.CJOB_EXT)):
+            createdOrjob += Report.CJOB_EXT
+        if (not _rpt.init(os.path.join(os.path.dirname(os.path.abspath(__file__)), createdOrjob)) or
+                not _rpt.read()):        # not checked for return.
+            self._base.message('Unable to init/read (Report/job/op/createJob)', self._base.const_critical_text)
+            return False
+        return True
+
     @property
     def isOperationCreateJob(self):
         if (self._args.op and
@@ -4418,6 +4435,7 @@ class Application(object):
         if (not cfg.getValue(CLOAD_RESTORE_POINT)):
             if (os.path.exists(_project_path)):
                 if (self.isOperationCreateJob):  # .orobs with -op={createJob} can't be run.
+                    self._base.message('{} Job ({}) already exists!'.format(CRESUME_MSG_PREFIX, _project_path))
                     return True
                 # process @ lambda?
                 if (self._isLambdaJob()):
@@ -5003,15 +5021,7 @@ class Application(object):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write()
                 if (self.isOperationCreateJob):
-                    _rpt = Report(self._base)
-                    createdOrjob = cfg.getValue(CPRJ_NAME, False)
-                    if (not createdOrjob.lower().endswith(Report.CJOB_EXT)):
-                        createdOrjob += Report.CJOB_EXT
-                    if (not _rpt.init(os.path.join(os.path.dirname(os.path.abspath(__file__)), createdOrjob)) or
-                            not _rpt.read()):        # not checked for return.
-                        self._base.message('Unable to init/read (Report/job/op/createJob)', self._base.const_critical_text)
-                        return False
-                    return True
+                    return self.__initOperationCreateJob()
                 # process @ lambda?
                 if (self._isLambdaJob()):
                     return(terminate(self._base, eOK if self._runLambdaJob(g_rpt._report_file) else eFAIL))
@@ -5200,6 +5210,8 @@ class Application(object):
                 for arg in vars(self._args):
                     g_rpt.addHeader(arg, getattr(self._args, arg))
                 g_rpt.write()
+                if (self.isOperationCreateJob):
+                    return self.__initOperationCreateJob()
                 self._args.op = None
                 cfg.setValue(CCMD_ARG_INPUT, self._args.input)      # preserve the original -input path
                 self._args.input = _project_path
