@@ -1,62 +1,62 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <metadata xml:lang="en">
-  <Esri>
-    <CreaDate>20160119</CreaDate>
-    <CreaTime>10590600</CreaTime>
-    <ArcGISFormat>1.0</ArcGISFormat>
-    <ArcGISstyle>ISO 19139 Metadata Implementation Specification</ArcGISstyle>
-    <SyncOnce>TRUE</SyncOnce>
-    <ModDate>20160125</ModDate>
-    <ModTime>15152100</ModTime>
-    <scaleRange>
-      <minScale>150000000</minScale>
-      <maxScale>5000</maxScale>
-    </scaleRange>
-    <ArcGISProfile>ISO19139</ArcGISProfile>
-  </Esri>
-  <tool name="ProfileEditor" displayname="Profile Editor" toolboxalias="" xmlns="">
-    <arcToolboxHelpPath>c:\program files (x86)\arcgis\desktop10.3\Help\gp</arcToolboxHelpPath>
-    <parameters>
-      <param name="profileType" displayname="Profile Type" type="Required" direction="Output" datatype="String" expression="Amazon S3">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;The type of cloud storage solution to create a profile for.&lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-      <param name="profileName" displayname="Profile Name" type="Required" direction="Input" datatype="String" expression="profileName">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Name of the profile that is associated with the cloud storage access credentials. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;The profile name is a pointer used by OptimizeRasters to extract the associated keys required to access the desired cloud storage solution. &lt;/SPAN&gt;&lt;/P&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Profile eidtor is meant to enter new profile names for storage. As a precautionary measure the user has to type in the name of existing profile to edit or delete it. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;To &lt;/SPAN&gt;&lt;SPAN STYLE="font-weight:bold;"&gt;Edit &lt;/SPAN&gt;&lt;SPAN&gt;an existing name, type it here and enter in the changed details. Pick the option to overwrite the profile name to store the edits. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;To &lt;/SPAN&gt;&lt;SPAN STYLE="font-weight:bold;"&gt;Delete &lt;/SPAN&gt;&lt;SPAN&gt;an existing profile name, type it here and pick the option from the actions list below. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-      <param name="iAmRolePara" displayname="IAM Role Profile" type="Optional" direction="Input" datatype="GPBoolean" expression="iAmRolePara">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Check the IAM Role profile if OptimizeRasters is to run on a trusted EC2 instance.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;IAM role enables OptimizeRasters to run on an EC2 instance to securely access AWS resources without credential keys involved.&lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-      <param name="accessKey" displayname="Access/Account Key ID" type="Required" direction="Input" datatype="String" expression="accessKey">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter the Access key ID for the entered profile name. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;Refer to your cloud storage solution documentation for more information. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-      <param name="secretAccessKey" displayname="Secret Access/Account Key" type="Required" direction="Input" datatype="String" expression="secretAccessKey">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter the Secret Access key for the entered profile name. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;Refer to your cloud storage solution documentation for more information. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-      <param name="imRoleURL" displayname="Endpoint URL" type="Optional" direction="Input" datatype="String" expression="imRoleURL">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter any custom endpoint URL if it's different from the default for the access type selected.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;An endpoint is a URL that is the entry point for the data access storage.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;[Defaults]&lt;br/&gt;Amazon S3 = http://blob.core.windows.net&lt;br/&gt;Microsoft Azure = http://s3.amazonaws.com&lt;br/&gt;
+	<Esri>
+		<CreaDate>20160119</CreaDate>
+		<CreaTime>10590600</CreaTime>
+		<ArcGISFormat>1.0</ArcGISFormat>
+		<ArcGISstyle>ISO 19139 Metadata Implementation Specification</ArcGISstyle>
+		<SyncOnce>TRUE</SyncOnce>
+		<ModDate>20160125</ModDate>
+		<ModTime>15152100</ModTime>
+		<scaleRange>
+			<minScale>150000000</minScale>
+			<maxScale>5000</maxScale>
+		</scaleRange>
+		<ArcGISProfile>ISO19139</ArcGISProfile>
+	</Esri>
+	<tool name="ProfileEditor" displayname="Profile Editor" toolboxalias="" xmlns="">
+		<arcToolboxHelpPath>c:\program files (x86)\arcgis\desktop10.3\Help\gp</arcToolboxHelpPath>
+		<parameters>
+			<param name="profileType" displayname="Profile Type" type="Required" direction="Output" datatype="String" expression="Amazon S3">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;The type of cloud storage solution to create a profile for.&lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
+			</param>
+			<param name="profileName" displayname="Profile Name" type="Required" direction="Input" datatype="String" expression="profileName">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Name of the profile that is associated with the cloud storage access credentials. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;The profile name is a pointer used by OptimizeRasters to extract the associated keys required to access the desired cloud storage solution. &lt;/SPAN&gt;&lt;/P&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Profile eidtor is meant to enter new profile names for storage. As a precautionary measure the user has to type in the name of existing profile to edit or delete it. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;To &lt;/SPAN&gt;&lt;SPAN STYLE="font-weight:bold;"&gt;Edit &lt;/SPAN&gt;&lt;SPAN&gt;an existing name, type it here and enter in the changed details. Pick the option to overwrite the profile name to store the edits. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;To &lt;/SPAN&gt;&lt;SPAN STYLE="font-weight:bold;"&gt;Delete &lt;/SPAN&gt;&lt;SPAN&gt;an existing profile name, type it here and pick the option from the actions list below. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
+			</param>
+			<param name="iAmRolePara" displayname="IAM Role Profile" type="Optional" direction="Input" datatype="GPBoolean" expression="iAmRolePara">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Check the IAM Role profile if OptimizeRasters is to run on a trusted EC2 instance.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;IAM role enables OptimizeRasters to run on an EC2 instance to securely access AWS resources without credential keys involved.&lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
+			</param>
+			<param name="accessKey" displayname="Access/Account Key ID" type="Required" direction="Input" datatype="String" expression="accessKey">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter the Access key ID for the entered profile name. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;Refer to your cloud storage solution documentation for more information. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
+			</param>
+			<param name="secretAccessKey" displayname="Secret Access/Account Key" type="Required" direction="Input" datatype="String" expression="secretAccessKey">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter the Secret Access key for the entered profile name. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;Refer to your cloud storage solution documentation for more information. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
+			</param>
+			<param name="imRoleURL" displayname="Endpoint URL" type="Optional" direction="Input" datatype="String" expression="imRoleURL">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter any custom endpoint URL if it's different from the default for the access type selected.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;An endpoint is a URL that is the entry point for the data access storage.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;[Defaults]&lt;br/&gt;Amazon S3 = http://blob.core.windows.net&lt;br/&gt;Microsoft Azure = http://s3.amazonaws.com&lt;br/&gt;
 &lt;/P&gt;
 &lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-      <param name="action" displayname="Editor Option" type="Optional" direction="Input" datatype="String" expression="{Overwrite Existing | Delete Existing}">
-        <dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Pick an appropriate action from the Editor Option pull down list. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;This is only activated if an existing profile name is found. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
-      </param>
-    </parameters>
-    <summary>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Stores credentials such as Profile Name, Secret ID and Secret Key for use with cloud storage solutions such as Amazon S3 or Microsoft Azure. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;For the moment, Amzon S3 is supported. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</summary>
-  </tool>
-  <dataIdInfo>
-    <idCitation>
-      <resTitle>Profile Editor</resTitle>
-    </idCitation>
-    <idAbs>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Stores credentials such as Profile Name, Secret ID and Secret Key for use with cloud storage solutions such as Amazon S3 or Microsoft Azure. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;For the moment, Amzon S3 is supported. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</idAbs>
-  </dataIdInfo>
-  <distInfo>
-    <distributor>
-      <distorFormat>
-        <formatName>ArcToolbox Tool</formatName>
-      </distorFormat>
-    </distributor>
-  </distInfo>
-  <mdHrLv>
-    <ScopeCd value="005" />
-  </mdHrLv>
+			</param>
+			<param name="action" displayname="Editor Option" type="Optional" direction="Input" datatype="String" expression="{Overwrite Existing | Delete Existing}">
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Pick an appropriate action from the Editor Option pull down list. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;This is only activated if an existing profile name is found. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
+			</param>
+		</parameters>
+		<summary>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Stores credentials such as Profile Name, Secret ID and Secret Key for use with cloud storage solutions such as Amazon S3 or Microsoft Azure. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;For the moment, Amzon S3 is supported. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</summary>
+	</tool>
+	<dataIdInfo>
+		<idCitation>
+			<resTitle>Profile Editor</resTitle>
+		</idCitation>
+		<idAbs>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Stores credentials such as Profile Name, Secret ID and Secret Key for use with cloud storage solutions such as Amazon S3 or Microsoft Azure. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;For the moment, Amzon S3 is supported. &lt;/SPAN&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</idAbs>
+	</dataIdInfo>
+	<distInfo>
+		<distributor>
+			<distorFormat>
+				<formatName>ArcToolbox Tool</formatName>
+			</distorFormat>
+		</distributor>
+	</distInfo>
+	<mdHrLv>
+		<ScopeCd value="005"/>
+	</mdHrLv>
 </metadata>

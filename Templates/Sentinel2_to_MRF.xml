@@ -41,6 +41,8 @@
     <!--Path to save log/completed job files-->
     <LogPath></LogPath>
     <!--Input cloud storage type to process/download data. Acceptable values are [Amazon, Azure]-->
+    <!--User GDAL_Translate values. These values will be passed on without any modification--> 
+    <GDAL_Translate_UserParameters></GDAL_Translate_UserParameters>		
     <In_Cloud_Type></In_Cloud_Type>
     <!--Output cloud storage type to upload data. Acceptable values are [Amazon, Azure]-->
     <Out_Cloud_Type></Out_Cloud_Type>

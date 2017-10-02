@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170913
+# Version: 20170926
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -49,11 +49,13 @@ import datetime
 import argparse
 import math
 import ctypes
-import urllib
 if (sys.version_info[0] < 3):
     import ConfigParser
+    from urllib import urlopen, urlencode
 else:
     import configparser as ConfigParser
+    from urllib.request import urlopen
+    from urllib.parse import urlencode
 import json
 import hashlib
 import binascii
@@ -830,10 +832,7 @@ class Base(object):
                 _storePaths.append(path)
                 continue
             data = {'url': path}
-            if (sys.version_info[0] < 3):
-                encoded = urllib.urlencode(data)
-            else:
-                encoded = urllib.parse.urlencode(data)
+            encoded = urlencode(data)
             _storePaths.append(encoded.split('=')[1])
         return '/'.join(_storePaths)
 
@@ -2577,7 +2576,7 @@ class S3Storage:
     def getIamRoleInfo(self, roleName):
         roleMetaUrl = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/{}'.format(roleName)
         try:
-            urlResponse = urllib.urlopen(roleMetaUrl)
+            urlResponse = urlopen(roleMetaUrl)
             roleInfo = json.loads(urlResponse.read())
         except Exception as e:
             self._base.message('IAM Role not found ({})'.format(roleName), self._base.const_critical_text)
@@ -2591,7 +2590,7 @@ class S3Storage:
     def getEndPoint(self, domain):
         redirectEndPoint = domain
         try:
-            urlResponse = urllib.urlopen(domain)
+            urlResponse = urlopen(domain)
             doc = minidom.parseString(urlResponse.read())
             endPoint = doc.getElementsByTagName('Endpoint')
             redirectEndPoint = 'http://{}/'.format(endPoint[0].firstChild.nodeValue)
@@ -3239,9 +3238,15 @@ class Copy:
                                      _rpt._header[Report.CHDR_MODE] != 'rasterproxy')):
                                 _mkRemoteURL = os.path.join(_r, file)
                                 try:
-                                    file_url = urllib.urlopen(_mkRemoteURL if not isInputWebAPI else os.path.splitext(_mkRemoteURL)[0])
+                                    file_url = urlopen(_mkRemoteURL if not isInputWebAPI else os.path.splitext(_mkRemoteURL)[0])
+                                    respHeaders = []
+                                    if (sys.version_info[0] < 3):
+                                        respHeaders = file_url.headers.headers
+                                    else:
+                                        for hdr in file_url.getheaders():
+                                            respHeaders.append('{}: {}'.format(hdr[0], hdr[1]))
                                     isFileNameInHeader = False
-                                    for v in file_url.headers.headers:
+                                    for v in respHeaders:
                                         if (v.startswith('Content-Disposition')):
                                             if (isPlanet):
                                                 if (_mkRemoteURL in _rpt._input_list_info):
@@ -3512,7 +3517,7 @@ class compression(object):
                 if (input_file.startswith('/vsicurl/')):
                     try:
                         _dn_vsicurl_ = input_file.split('/vsicurl/')[1]
-                        file_url = urllib.urlopen(_dn_vsicurl_)
+                        file_url = urlopen(_dn_vsicurl_)
                         validateForClone = isModeClone
                         with open(output_file, 'wb') as fp:
                             buff = 2024 * 1024
@@ -3782,6 +3787,8 @@ class compression(object):
             is_error = False
             for w in warnings:
                 w = w.strip()
+                if (isinstance(w, bytes)):
+                    w = bytes.decode(w)
                 if (not is_error):
                     if (w.find('ERROR') >= 0):
                         is_error = True
@@ -4042,8 +4049,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1e'
-    __program_date__ = '20170913'
+    __program_ver__ = 'v2.0.1f'
+    __program_date__ = '20170926'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5373,7 +5380,7 @@ def threadProxyRaster(req, base, comp, args):
                 _dn_vsicurl_ = input_file.split(CVSICURL_PREFIX)[1]
                 file_url = None
                 try:
-                    file_url = urllib.urlopen(_dn_vsicurl_)
+                    file_url = urlopen(_dn_vsicurl_)
                     bytesAtHeader = file_url.read(sigMRFLength)
                 except Exception as e:
                     base.message(str(e), base.const_critical_text)
@@ -5413,6 +5420,16 @@ def threadProxyRaster(req, base, comp, args):
         if (not updateMRF.update(finalPath)):
             base.message('Updating ({}) was not successful!'.format(finalPath), base.const_critical_text)
             return False
+    # ends
+    # remove ancillary extension files that are no longer required for (rasterproxy) files on the client side.
+    refBasePath = finalPath[:-len(CONST_OUTPUT_EXT)]
+    for ext in ['.idx', '.lrc']:
+        try:
+            path = refBasePath + ext
+            if (os.path.exists(path)):
+                os.remove(path)
+        except Exception as e:
+            base.message('Unable to delete ({}).\n{}'.format(path, str(e)), base.const_warning_text)
     # ends
     return True
 

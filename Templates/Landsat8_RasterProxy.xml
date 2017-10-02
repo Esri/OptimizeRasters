@@ -40,6 +40,8 @@
     <Threads>4</Threads>
     <!--Path to save log/completed job files-->
     <LogPath></LogPath>
+    <!--User GDAL_Translate values. These values will be passed on without any modification--> 
+    <GDAL_Translate_UserParameters></GDAL_Translate_UserParameters>		
     <!--Input cloud storage type to process/download data. Acceptable values are [Amazon, Azure]-->
     <In_Cloud_Type>Amazon</In_Cloud_Type>
     <!--Output cloud storage type to upload data. Acceptable values are [Amazon, Azure]-->

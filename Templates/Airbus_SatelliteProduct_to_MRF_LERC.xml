@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!--Please note: Paths and extensions defined herein are considered as case-sensitive in OptimizeRasters.py-->
 <OptimizeRasters>
   <Description>This Template should be used to optimize and convert the Products from AirBus to MRF format. It uses LERC compression to compress the data. The output MRf files will be built with 2 levels of pyramids. The output file extensions are preserved so that they work with the ArcGIS Raster Type. The folder structure and required metadata files are also copied.</Description>
@@ -40,6 +40,8 @@
     <Threads>4</Threads>
     <!--Path to save log/completed job files-->
     <LogPath></LogPath>
+    <!--User GDAL_Translate values. These values will be passed on without any modification--> 
+    <GDAL_Translate_UserParameters></GDAL_Translate_UserParameters>		
     <!--Input cloud storage type to process/download data. Acceptable values are [Amazon, Azure]-->
     <In_Cloud_Type></In_Cloud_Type>
     <!--Output cloud storage type to upload data. Acceptable values are [Amazon, Azure]-->
