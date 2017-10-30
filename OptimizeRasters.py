@@ -59,6 +59,7 @@ else:
 import json
 import hashlib
 import binascii
+from datetime import datetime
 # ends
 
 # enum error codes
@@ -68,6 +69,7 @@ eFAIL = 1
 
 CEXEEXT = '.exe'
 CONST_OUTPUT_EXT = '.%s' % ('mrf')
+CloudOGTIFFExt = '.cogtiff'
 
 # const related to (Reporter) class
 CRPT_SOURCE = 'SOURCE'
@@ -543,7 +545,6 @@ class Lambda:
             for i in range(0, MaxJobs):
                 payload = {'Records': [{'Sns': {'Message': message[i]}}]}
                 payloads.append(payload)
-            from datetime import datetime
             timeStart = datetime.now()
             pool = ThreadPool(LambdaFunction, base=self._base, function_name=functionName, aws_access_key_id=self._sns_aws_access_key, aws_secret_access_key=self._sns_aws_secret_access_key)
             pool.init(maxWorkers=100)
@@ -1058,7 +1059,7 @@ class GDALInfo(object):
             return False
         args = [self._GDALPath]
         args.append(input)
-        self.message('Using GDALInfo..', self._base.const_general_text)
+        self.message('Using GDALInfo ({})..'.format(input), self._base.const_general_text)
         return self._call_external(args)
 
     def message(self, msg, status=0):
@@ -1106,7 +1107,7 @@ class GDALInfo(object):
     def _call_external(self, args):
         p = subprocess.Popen(' '.join(args), shell=True, stdout=subprocess.PIPE)
         message = '/'
-        CSIZE_PREFIX = 'Size is'
+        CSIZE_PREFIX = b'Size is'
         while (message):
             message = p.stdout.readline()
             if (message):
@@ -1114,7 +1115,7 @@ class GDALInfo(object):
                 if (_strip.find(CSIZE_PREFIX) != -1):
                     wh = _strip.split(CSIZE_PREFIX)
                     if (len(wh) > 1):
-                        wh = wh[1].split(',')
+                        wh = wh[1].split(b',')
                         if (self.CW in self._propertyNames):
                             self.width = int(wh[0].strip())
                         if (self.CH in self._propertyNames):
@@ -1330,6 +1331,7 @@ class Report:
     CHDR_CLOUD_DWNLOAD = 'clouddownload'
     CHDR_MODE = 'mode'
     CHDR_OP = 'op'
+    SnapshotDelay =  20  # Delay in secs before the partial status of the .orjob gets written to the local disk.
 
     def __init__(self, base):
         self._input_list = []
@@ -1343,6 +1345,7 @@ class Report:
         self._m_rasterAssociates.addRelatedExtensions('img;IMG', 'ige;IGE')  # To copy files required by raster formats to the primary raster copy location (-tempinput?) before any conversion could take place.
         self._m_rasterAssociates.addRelatedExtensions('ntf;NTF;tif;TIF', 'RPB;rpb')  # certain associated files need to be present alongside rasters for GDAL to work successfully.
         self._m_skipExtentions = ('til.ovr')   # status report for these extensions will be skipped. Case insensitive comparison.
+        self._rptPreviousTime = datetime.now()
 
     def init(self, report_file, root=None):
         if (not self._base or
@@ -1386,18 +1389,26 @@ class Report:
 
     @staticmethod
     def getUniqueFileName():
-        from datetime import datetime
         _dt = datetime.now()
         _prefix = 'OR'
         _jobName = _prefix + "_%04d%02d%02dT%02d%02d%02d%06d" % (_dt.year, _dt.month, _dt.day,
                                                                  _dt.hour, _dt.minute, _dt.second, _dt.microsecond)
         return _jobName
 
+    def _createSnapshot(self):  # take snapshot/updates .job file partially.
+        rptCurrentTime = datetime.now()
+        rptDuration = (rptCurrentTime - self._rptPreviousTime).total_seconds()
+        if (rptDuration > self.SnapshotDelay):
+            result = self.write()
+            self._base.message('Orjob/Snapshot/Status>{}@{}'.format(str(result), str(str(datetime.utcnow()))))
+            self._rptPreviousTime = rptCurrentTime
+
     def updateRecordStatus(self, input, type, value):  # input is the (src) path name which is case sensitive.
         if (input is None or
             type is None or
                 value is None):
             return False
+        self._createSnapshot()
         _input = input.strip()
         if (_input.lower().endswith(self._m_skipExtentions)):
             return True     # not flagged as an err
@@ -3609,7 +3620,11 @@ class compression(object):
                 if (useTokenPath is not None):
                     inputRaster = useTokenPath
                 args.append(inputRaster)
-                args.append('"{}"'.format(output_file))
+                useCOGTIFF = self.m_user_config.getValue('cog') == True
+                if (useCOGTIFF):
+                    output_file += CloudOGTIFFExt
+                useVsimem = self._base.getBooleanValue(self.m_user_config.getValue('vsimem'))
+                args.append('"{}{}"'.format('/vsimem/' if useVsimem else '', output_file))
                 self.message('Applying compression (%s)' % (input_file))
                 ret = self._call_external(args)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
@@ -3654,6 +3669,37 @@ class compression(object):
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
+                    if (useCOGTIFF):
+                        inputDeflated = output_file
+                        output_file = output_file.replace(CloudOGTIFFExt, '')
+                        posCompression = -1
+                        try:
+                            posCompression = args.index('COMPRESS=deflate')
+                            args[posCompression] = 'COMPRESS=JPEG'
+                            args.pop()  # prev / output
+                            args.pop()  # prev / input
+                        except:
+                            self.message('Compression must be set to (Deflate) in the parameter file.', self._base.const_critical_text)
+                            if (_rpt):
+                                _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
+                            return False
+                        args.append('-co')
+                        args.append('PHOTOMETRIC=YCBCR')
+                        args.append('-co')
+                        args.append('COPY_SRC_OVERVIEWS=YES')
+                        args.append(inputDeflated)
+                        args.append(output_file)
+                        self.message('Creating cloud optimized GeoTIFF (%s)' % (output_file))
+                        ret = self._call_external(args)
+                        try:
+                            os.remove(inputDeflated)
+                        except:
+                            self.message('Unable to delete the temporary file at ({})'.format(inputDeflated), self._base.const_warning_text)
+                        self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
+                        if (not ret):
+                            if (_rpt):
+                                _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
+                            return ret
         # Do auto generate cloneMRF?
         if (self.m_user_config.getValue(CCLONE_PATH)):
             updateMRF = UpdateMRF(self._base)
@@ -4049,8 +4095,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1f'
-    __program_date__ = '20170926'
+    __program_ver__ = 'v2.0.1g'
+    __program_date__ = '20171025'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4122,6 +4168,7 @@ class Application(object):
             'tif',
             'tif_lzw',
             'tif_jpeg',
+            'tif_cog',
             'tif_mix',
             'tif_dg',
             'tiff_landsat',
@@ -4146,6 +4193,9 @@ class Application(object):
             Message('<Mode> value not set/illegal ({})'.format(str(cfg_mode)), Base.const_critical_text)
             return False
         cfg_mode = cfg_mode.lower()
+        if (cfg_mode == 'tif_cog'):  # suffix for creating cloud optimized geoTiffs
+            cfg.setValue('cog', True)
+            cfg_mode = 'tif'    # reset mode
         cfg.setValue('Mode', cfg_mode)
         # ends
         return True
