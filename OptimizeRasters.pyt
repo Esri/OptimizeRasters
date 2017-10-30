@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20171002
+# Version: 20171030
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -29,6 +29,7 @@ import sys
 import os
 import subprocess
 import time
+import io
 if (sys.version_info[0] < 3):
     import ConfigParser
 else:
@@ -137,14 +138,13 @@ def setPaths(xFname, values):
         asuffix = returnDate()
         baseName = baseName.replace('.xml', '_' + asuffix + '.xml')
         fnToWrite = os.path.join(userLoc, baseName)
-    c = open(fnToWrite, "w")
-    c.write(doc.toprettyxml(encoding='UTF-8'))
-    c.close()
+    with io.open(fnToWrite, 'w', encoding='utf-8') as writer:
+        writer.write(doc.toxml())
     return fnToWrite
 
 
 def returnPaths(xFname):
-    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op','GDAL_Translate_UserParameters']
+    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters']
     xfName2 = os.path.normpath(xFname)
     if (not os.path.exists(xfName2)):
         return None
