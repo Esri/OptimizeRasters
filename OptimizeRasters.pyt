@@ -258,7 +258,7 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
         appConfig.write(configfile)
     return True
 
-
+#I Can't see option to get available buckets for Amazon only for Google and Azure, currently using the toolbox it is not possible to upload/download images to/from S3 due to this issue> I added the necessary line I think its required, but haven't checked its operation - please revise.
 def getAvailableBuckets(ctlProfileType, ctlProfileName):
     try:
         import OptimizeRasters
@@ -269,6 +269,8 @@ def getAvailableBuckets(ctlProfileType, ctlProfileName):
                 return []
             elif (inputSourceType.find('azure') != -1):
                 storageType = OptimizeRasters.Store.TypeAzure
+            elif (inputSourceType.find('amazon') != -1):
+                storageType = OptimizeRasters.Store.TypeAmazon
             elif (inputSourceType.find('google') != -1):
                 storageType = OptimizeRasters.Store.TypeGoogle
             ORUI = OptimizeRasters.OptimizeRastersUI(ctlProfileName.value, storageType)
