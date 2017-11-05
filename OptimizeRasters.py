@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20170926
+# Version: 20171102
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1331,7 +1331,7 @@ class Report:
     CHDR_CLOUD_DWNLOAD = 'clouddownload'
     CHDR_MODE = 'mode'
     CHDR_OP = 'op'
-    SnapshotDelay =  20  # Delay in secs before the partial status of the .orjob gets written to the local disk.
+    SnapshotDelay = 20  # Delay in secs before the partial status of the .orjob gets written to the local disk.
 
     def __init__(self, base):
         self._input_list = []
@@ -2664,7 +2664,9 @@ class S3Storage:
                                 outputPath = self.m_user_config.getValue(CTEMPOUTPUT, False) + S3_path  # -tempoutput must be set with -cloudoutput=true
                             til.addTIL(key)
                             til.setOutputPath(key, outputPath)
-                            til.processInMemoryTILContent(key, key.get_contents_as_string())
+                            tilObj = self.con.meta.client.get_object(Bucket=self.m_bucketname, Key=key)
+                            tilContentsAsString = tilObj['Body'].read().decode('utf-8')
+                            til.processInMemoryTILContent(key, tilContentsAsString)
                 except Exception as e:
                     self._base.message(e.message, self._base.const_critical_text)
                     return False
@@ -2937,6 +2939,9 @@ def args_Callback(args, user_data=None):
             if (userParameters):
                 [args.append(i) for i in userParameters.split()]
             compression_ = user_data[CIDX_USER_CONFIG].getValue('Compression')
+            useCOGTIFF = user_data[CIDX_USER_CONFIG].getValue('cog') == True
+            if (useCOGTIFF):
+                compression_ = 'Deflate'
             if (compression_):
                 m_compression = compression_
             compression_quality_ = user_data[CIDX_USER_CONFIG].getValue('Quality')
@@ -3672,19 +3677,16 @@ class compression(object):
                     if (useCOGTIFF):
                         inputDeflated = output_file
                         output_file = output_file.replace(CloudOGTIFFExt, '')
-                        posCompression = -1
-                        try:
-                            posCompression = args.index('COMPRESS=deflate')
-                            args[posCompression] = 'COMPRESS=JPEG'
-                            args.pop()  # prev / output
-                            args.pop()  # prev / input
-                        except:
-                            self.message('Compression must be set to (Deflate) in the parameter file.', self._base.const_critical_text)
-                            if (_rpt):
-                                _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
-                            return False
-                        args.append('-co')
-                        args.append('PHOTOMETRIC=YCBCR')
+                        compression = self.m_user_config.getValue('Compression')
+                        CompressPrefix = 'COMPRESS='
+                        x = [x.startswith(CompressPrefix) for x in args]
+                        posCompression = x.index(True)
+                        args[posCompression] = '{}{}'.format(CompressPrefix, compression)
+                        args.pop()  # prev / output
+                        args.pop()  # prev / input
+                        if (compression == 'jpeg'):
+                            args.append('-co')
+                            args.append('PHOTOMETRIC=YCBCR')
                         args.append('-co')
                         args.append('COPY_SRC_OVERVIEWS=YES')
                         args.append(inputDeflated)
@@ -4096,7 +4098,7 @@ class Args:
 
 class Application(object):
     __program_ver__ = 'v2.0.1g'
-    __program_date__ = '20171025'
+    __program_date__ = '20171102'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4709,7 +4711,6 @@ class Application(object):
                  not self._args.input)):
                 self._base.message('-input/-output is not specified!', self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
-
         # set output in cfg.
         dst_ = self._args.output
         if (dst_ and
@@ -4718,23 +4719,19 @@ class Application(object):
 
         cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_ if dst_ else '')
         # ends
-
         # is -rasterproxypath/-clonepath defined at the cmd-line?
         if (self._args.rasterproxypath):
             self._args.clonepath = self._args.rasterproxypath   # -rasterproxypath takes precedence. -clonepath is now deprecated.
-        if (self._args.clonepath and
-                cfg_mode.startswith('mrf')):
+        if (self._args.clonepath):
             self._args.clonepath = self._args.clonepath.replace('\\', '/')
             if (not self._args.clonepath.endswith('/')):
                 self._args.clonepath += '/'
             cfg.setValue(CCLONE_PATH, self._args.clonepath)
         # ends
-
         # cache path
         if (self._args.cache):
             cfg.setValue(CCACHE_PATH, self._args.cache)
         # ends
-
         # read in build pyramids value
         do_pyramids = 'true'
         if (not self._args.pyramids):
@@ -4742,7 +4739,6 @@ class Application(object):
         if (self._args.pyramids):
             do_pyramids = self._args.pyramids = str(self._args.pyramids).lower()
         # ends
-
         # set jpeg_quality from cmd to override cfg value. Must be set before compression->init()
         if (self._args.quality):
             cfg.setValue('Quality', self._args.quality)
@@ -4767,24 +4763,20 @@ class Application(object):
         cfg.setValue('Pyramids', do_pyramids)
         cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids))
         # ends
-
         # read in the gdal_path from config.
         gdal_path = cfg.getValue(CCFG_GDAL_PATH, False)      # note: validity is checked within (compression-mod)
         # ends
-
         comp = compression(gdal_path, base=self._base)
         ret = comp.init(0)      # warning/error messages get printed within .init()
         if (not ret):
             self._base.message('Unable to initialize/compression module', self._base.const_critical_text)
             return(terminate(self._base, eFAIL))
-
         # s3 upload settings.
         out_s3_profile_name = self._args.outputprofile
         if (not out_s3_profile_name):
             out_s3_profile_name = cfg.getValue('Out_S3_AWS_ProfileName', False)
         if (out_s3_profile_name):
             cfg.setValue('Out_S3_AWS_ProfileName', out_s3_profile_name)
-
         s3_output = cfg.getValue(COUT_S3_PARENTFOLDER, False)
         s3_id = cfg.getValue('Out_S3_ID', False)
         s3_secret = cfg.getValue('Out_S3_Secret', False)
@@ -5089,17 +5081,33 @@ class Application(object):
                 self.run()
                 return
             # ends
-            a = []
+            raster_buff = files
+            len_buffer = cfg_threads
             threads = []
-            batch = cfg_threads
-            s = 0
-            while True:
-                m = s + batch
-                if (m >= files_len):
-                    m = files_len
-                threads = []
-                for i in range(s, m):
-                    req = files[i]
+            store_files_indx = 0
+            store_files_len = len(raster_buff)
+            doRasterProxy = cfg.getValue(CCLONE_PATH) and not cfg_mode.startswith('mrf')
+            while(1):
+                len_threads = len(threads)
+                while(len_threads):
+                    alive = [t.isAlive() for t in threads]
+                    cnt_dead = sum(not x for x in alive)
+                    if (cnt_dead):
+                        len_buffer = cnt_dead
+                        threads = [t for t in threads if t.isAlive()]
+                        break
+                buffer = []
+                for i in range(0, len_buffer):
+                    if (store_files_indx == store_files_len):
+                        break
+                    buffer.append(raster_buff[store_files_indx])
+                    store_files_indx += 1
+                if (not buffer and
+                        not threads):
+                    break
+                for req in buffer:
+                    if (doRasterProxy):
+                        threadProxyRaster(req, self._base, comp, self._args)
                     (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     f, e = os.path.splitext(output_file)
                     if (not cfg_keep_original_ext):
@@ -5139,106 +5147,100 @@ class Application(object):
                         if (doProcessRaster):
                             t = threading.Thread(target=comp.compress,
                                                  args=(input_file, output_file, args_Callback, _build_pyramids, self._base.S3Upl if is_cloud_upload else fn_copy_temp_dst if is_output_temp and not is_cloud_upload else None, user_args_Callback))
-                            t.daemon = True
-                            t.start()
-                            threads.append(t)
-                for t in threads:
-                    t.join()
-                # process til file if all the associate files have been processed
-                if (til):
-                    for _til in til:
-                        _doPostProcessing = True
-                        if (cfg.getValue(CLOAD_RESTORE_POINT)):
-                            if (_rpt.getRecordStatus(_til, CRPT_PROCESSED) == CRPT_YES):
-                                self._base.message('{} {}'.format(CRESUME_MSG_PREFIX, _til))
-                                _doPostProcessing = False
-                        if (not til.isAllFilesProcessed(_til)):
-                            if (_doPostProcessing):
-                                self._base.message('TIL> Not yet completed for ({})'.format(_til))
-                        if (til.isAllFilesProcessed(_til)):
-                            til_output_path = til.getOutputPath(_til)
-                            if (_doPostProcessing):
-                                if (not til_output_path):
-                                    self._base.message('TIL output-path returned empty/Internal error', self._base.const_warning_text)
-                                    continue
-                                if (not til.defaultTILProcessing):
-                                    ret = comp.createaOverview(til_output_path)
-                                    if (not ret):
-                                        self._base.message('Unable to build pyramids on ({})'.format(til_output_path), self._base.const_warning_text)
-                                        continue
-                                tilOutputExtension = 'mrf'
-                                tilsInfoKey = _til.lower()  # keys in TIL._tils_info are in lowercase.
-                                ret = comp.compress('{}{}'.format(til_output_path, '.ovr' if not til.defaultTILProcessing else ''), '{}.{}'.format(til_output_path, tilOutputExtension), args_Callback)
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
+            # til work
+            if (til):
+                for _til in til:
+                    _doPostProcessing = True
+                    if (cfg.getValue(CLOAD_RESTORE_POINT)):
+                        if (_rpt.getRecordStatus(_til, CRPT_PROCESSED) == CRPT_YES):
+                            self._base.message('{} {}'.format(CRESUME_MSG_PREFIX, _til))
+                            _doPostProcessing = False
+                    if (not til.isAllFilesProcessed(_til)):
+                        if (_doPostProcessing):
+                            self._base.message('TIL> Not yet completed for ({})'.format(_til))
+                    if (til.isAllFilesProcessed(_til)):
+                        til_output_path = til.getOutputPath(_til)
+                        if (_doPostProcessing):
+                            if (not til_output_path):
+                                self._base.message('TIL output-path returned empty/Internal error', self._base.const_warning_text)
+                                continue
+                            if (not til.defaultTILProcessing):
+                                ret = comp.createaOverview(til_output_path)
                                 if (not ret):
-                                    self._base.message('Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path), self._base.const_warning_text)
+                                    self._base.message('Unable to build pyramids on ({})'.format(til_output_path), self._base.const_warning_text)
                                     continue
-                                try:
-                                    if (til.defaultTILProcessing):   # remove all the internally referenced (raster/tiff) files by the .TIL file that are no longer needed post conversion.
-                                        for associate in til._tils_info[tilsInfoKey][TIL.CKEY_FILES]:
-                                            processedPath = os.path.join(os.path.dirname(til_output_path), associate)
-                                            try:
-                                                os.remove(processedPath)
-                                            except Exception as e:
-                                                self._base.message(str(e), self._base.const_critical_text)
-                                                continue
-                                    else:
-                                        # let's rename (.mrf) => (.ovr)
-                                        os.remove('{}.ovr'.format(til_output_path))
-                                        os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
-                                except Exception as e:
-                                    self._base.message('({})'.format(str(e)), self._base.const_warning_text)
-                                    continue
-                                # update .ovr file updates at -clonepath
-                                try:
-                                    if (self._args.clonepath):
-                                        _clonePath = til_output_path.replace(self._args.output if not self._args.tempoutput or (self._args.tempoutput and not self._base.getBooleanValue(self._args.cloudupload)) else self._args.tempoutput, '')
-                                        _mk_input_path = os.path.join(self._args.clonepath, '{}.mrf'.format(_clonePath))
-                                        doc = minidom.parse(_mk_input_path)
-                                        xmlString = doc.toxml()
-                                        xmlString = xmlString.replace('.mrf<', '.ovr<')
-                                        xmlString = xmlString.replace('.{}'.format(CCACHE_EXT), '.ovr.{}'.format(CCACHE_EXT))
-                                        _indx = xmlString.find('<{}>'.format(CMRF_DOC_ROOT))
-                                        if (_indx == -1):
-                                            raise Exception('Err. Invalid MRF/header')
-                                        xmlString = xmlString[_indx:]
-                                        _mk_save_path = '{}{}.ovr'.format(self._args.clonepath, _clonePath.replace('.mrf', ''))
-                                        with open(_mk_save_path, 'w+') as _fpOvr:
-                                            _fpOvr.write(xmlString)
-                                except Exception as e:
-                                    self._base.message('Unable to update .ovr for [{}] ({})'.format(til_output_path, str(e)), self._base.const_warning_text)
-                                    continue
-                                # ends
-                            # upload (til) related files (.idx, .ovr, .lrc)
-                            if (is_cloud_upload and
-                                    S3_storage):
-                                ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
-                                retry_failed_lst = []
-                                failed_upl_lst = S3_storage.getFailedUploadList()
-                                if (failed_upl_lst):
-                                    [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
-                                # let's delete all the associate files related to (TIL) files.
-                                if (self._base.getBooleanValue(cfg.getValue(COUT_DELETE_AFTER_UPLOAD))):
-                                    (p, n) = os.path.split(til_output_path)
-                                    for r, d, f in os.walk(p):
-                                        for file in f:
-                                            if (r != p):
-                                                continue
-                                            mk_filename = os.path.join(r, file).replace('\\', '/')
-                                            if (til.fileTILRelated(mk_filename)):
-                                                if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
-                                                    continue
-                                                try:
-                                                    self._base.message('[Del] {}'.format(mk_filename))
-                                                    os.remove(mk_filename)
-                                                except Exception as e:
-                                                    self._base.message('[Del] Err. {} ({})'.format(mk_filename, str(e)), self._base.const_critical_text)
-                                # ends
+                            tilOutputExtension = 'mrf'
+                            tilsInfoKey = _til.lower()  # keys in TIL._tils_info are in lowercase.
+                            ret = comp.compress('{}{}'.format(til_output_path, '.ovr' if not til.defaultTILProcessing else ''), '{}.{}'.format(til_output_path, tilOutputExtension), args_Callback)
+                            if (not ret):
+                                self._base.message('Unable to convert (til.ovr=>til.mrf) for file ({}.ovr)'.format(til_output_path), self._base.const_warning_text)
+                                continue
+                            try:
+                                if (til.defaultTILProcessing):   # remove all the internally referenced (raster/tiff) files by the .TIL file that are no longer needed post conversion.
+                                    for associate in til._tils_info[tilsInfoKey][TIL.CKEY_FILES]:
+                                        processedPath = os.path.join(os.path.dirname(til_output_path), associate)
+                                        try:
+                                            os.remove(processedPath)
+                                        except Exception as e:
+                                            self._base.message(str(e), self._base.const_critical_text)
+                                            continue
+                                else:
+                                    # let's rename (.mrf) => (.ovr)
+                                    os.remove('{}.ovr'.format(til_output_path))
+                                    os.rename('{}.mrf'.format(til_output_path), '{}.ovr'.format(til_output_path))
+                            except Exception as e:
+                                self._base.message('({})'.format(str(e)), self._base.const_warning_text)
+                                continue
+                            # update .ovr file updates at -clonepath
+                            try:
+                                if (self._args.clonepath):
+                                    _clonePath = til_output_path.replace(self._args.output if not self._args.tempoutput or (self._args.tempoutput and not self._base.getBooleanValue(self._args.cloudupload)) else self._args.tempoutput, '')
+                                    _mk_input_path = os.path.join(self._args.clonepath, '{}.mrf'.format(_clonePath))
+                                    doc = minidom.parse(_mk_input_path)
+                                    xmlString = doc.toxml()
+                                    xmlString = xmlString.replace('.mrf<', '.ovr<')
+                                    xmlString = xmlString.replace('.{}'.format(CCACHE_EXT), '.ovr.{}'.format(CCACHE_EXT))
+                                    _indx = xmlString.find('<{}>'.format(CMRF_DOC_ROOT))
+                                    if (_indx == -1):
+                                        raise Exception('Err. Invalid MRF/header')
+                                    xmlString = xmlString[_indx:]
+                                    _mk_save_path = '{}{}.ovr'.format(self._args.clonepath, _clonePath.replace('.mrf', ''))
+                                    with open(_mk_save_path, 'w+') as _fpOvr:
+                                        _fpOvr.write(xmlString)
+                            except Exception as e:
+                                self._base.message('Unable to update .ovr for [{}] ({})'.format(til_output_path, str(e)), self._base.const_warning_text)
+                                continue
                             # ends
-                # ends
-                s = m
-                if s == files_len or s == 0:
-                    break
-        # ends
+                        # upload (til) related files (.idx, .ovr, .lrc)
+                        if (is_cloud_upload and
+                                S3_storage):
+                            ret = S3_storage.upload_group('{}.CHS'.format(til_output_path))
+                            retry_failed_lst = []
+                            failed_upl_lst = S3_storage.getFailedUploadList()
+                            if (failed_upl_lst):
+                                [retry_failed_lst.append(_x['local']) for _x in failed_upl_lst['upl']]
+                            # let's delete all the associate files related to (TIL) files.
+                            if (self._base.getBooleanValue(cfg.getValue(COUT_DELETE_AFTER_UPLOAD))):
+                                (p, n) = os.path.split(til_output_path)
+                                for r, d, f in os.walk(p):
+                                    for file in f:
+                                        if (r != p):
+                                            continue
+                                        mk_filename = os.path.join(r, file).replace('\\', '/')
+                                        if (til.fileTILRelated(mk_filename)):
+                                            if (mk_filename in retry_failed_lst):        # Don't delete files included in the (failed upload list)
+                                                continue
+                                            try:
+                                                self._base.message('[Del] {}'.format(mk_filename))
+                                                os.remove(mk_filename)
+                                            except Exception as e:
+                                                self._base.message('[Del] Err. {} ({})'.format(mk_filename, str(e)), self._base.const_critical_text)
+                            # ends
+                        # ends
+            # ends
         # block to deal with caching ops.
         if (is_caching and
                 do_pyramids != CCMD_PYRAMIDS_ONLY):
@@ -5521,7 +5523,11 @@ def main():
     # app.registerMessageCallback(messageDebug)
     if (not app.init()):
         return eFAIL
-    return app.run()
+    jobStart = datetime.now()
+    status = app.run()
+    duration = (datetime.now() - jobStart).total_seconds()
+    print ('Time taken> {}s'.format(duration))
+    return status
 
 if __name__ == '__main__':
     ret = main()
