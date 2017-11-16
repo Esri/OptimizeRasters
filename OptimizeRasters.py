@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20171102
+# Version: 20171116
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -5106,8 +5106,6 @@ class Application(object):
                         not threads):
                     break
                 for req in buffer:
-                    if (doRasterProxy):
-                        threadProxyRaster(req, self._base, comp, self._args)
                     (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
                     f, e = os.path.splitext(output_file)
                     if (not cfg_keep_original_ext):
