@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20171116
+# Version: 20171122
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -70,6 +70,8 @@ eFAIL = 1
 CEXEEXT = '.exe'
 CONST_OUTPUT_EXT = '.%s' % ('mrf')
 CloudOGTIFFExt = '.cogtiff'
+UpdateOrjobStatus = 'updateOrjobStatus'
+CreateOverviews = 'createOverviews'
 
 # const related to (Reporter) class
 CRPT_SOURCE = 'SOURCE'
@@ -688,6 +690,7 @@ class ThreadPool(object):
 
 
 class RasterAssociates(object):
+    RasterAuxExtensions = ['.lrc', '.idx', '.pjg', '.ppng', '.pft', '.pjp', '.pzp']
 
     def __init__(self):
         self._info = {}
@@ -709,6 +712,20 @@ class RasterAssociates(object):
                 continue
             self._info[p] = self._stripExtensions(relatedExts)
         return True
+
+    @staticmethod
+    def removeRasterProxyAncillaryFiles(inputPath):
+        # remove ancillary extension files that are no longer required for (rasterproxy) files on the client side.
+        refBasePath = inputPath[:-len(CONST_OUTPUT_EXT)]
+        errorEntries = []
+        for ext in RasterAssociates.RasterAuxExtensions:
+            try:
+                path = refBasePath + ext
+                if (os.path.exists(path)):
+                    os.remove(path)
+            except Exception as e:
+                errorEntries.append('{}'.format(str(e)))
+        return errorEntries
 
     @staticmethod
     def findExtension(path):
@@ -1189,7 +1206,7 @@ class UpdateMRF:
             r = r.replace('\\', '/')
             if (r == input_folder):
                 for _file in f:
-                    if (True in [_file.lower().endswith(x) for x in ['.lrc', '.idx', '.pjg', '.ppng', '.pft', '.pjp', '.pzp']]):
+                    if (True in [_file.lower().endswith(x) for x in RasterAssociates.RasterAuxExtensions]):
                         continue
                     _mk_path = r + '/' + _file
                     if (_mk_path.startswith(_prefix)):
@@ -1226,6 +1243,9 @@ class UpdateMRF:
             comp_val = None         # for (splitmrf)
             doc = minidom.parse(self._input)
             _rasterSource = self._input
+            autoCreateRasterProxy = False
+            if (self._mode):
+                autoCreateRasterProxy = not self._mode.endswith('mrf')
             if (self._outputURLPrefix and   # -cloudupload?
                     self._homePath):
                 usrPath = self._base.getUserConfiguration.getValue(CUSR_TEXT_IN_PATH, False)
@@ -1241,7 +1261,8 @@ class UpdateMRF:
                         suffix = self._base.insertUserTextToOutputPath(_rasterSource[_idx:], usrPath, usrPathPos)
                         _rasterSource = _rasterSource[:_idx] + suffix
             else:   # if -tempoutput is set, readjust the CachedSource/Source path to point to -output.
-                if (self._base.getUserConfiguration.getValue(CTEMPOUTPUT)):
+                if (self._base.getUserConfiguration.getValue(CTEMPOUTPUT) or
+                        autoCreateRasterProxy):
                     _output = self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT)
                     if (_output):
                         _rasterSource = _rasterSource.replace(self._homePath, _output)
@@ -1270,6 +1291,12 @@ class UpdateMRF:
                         if (node[0].hasChildNodes()):
                             comp_val = node[0].firstChild.nodeValue.lower()
             cache_output = self._base.convertToForwardSlash(os.path.dirname(output))
+            # make sure the 'CacheSource/Source' is pointing at the processed raster output
+            if (autoCreateRasterProxy):
+                node = doc.getElementsByTagName('Source')
+                if (node):
+                    node[0].firstChild.nodeValue = os.path.join(_rasterSource, os.path.basename(self._input))
+            # ends
             if (self._cachePath):
                 cache_output = self._cachePath
             if (not self._base.getUserConfiguration):
@@ -1543,7 +1570,8 @@ class Report:
                             continue
                     if (not _fname or
                             not hdr_skipped):        # do not accept empty lines.
-                        if (len(lns) == 4):      # skip line if it's the column header without the '#' prefix?
+                        if (ln.find(CRPT_SOURCE) >= 0 and
+                                ln.find(CRPT_COPIED)):      # skip line if it's the column header without the '#' prefix?
                             ln = _fptr.readline()
                         if (_fname):
                             hdr_skipped = True
@@ -3226,17 +3254,19 @@ class Copy:
                             break
                     if (not _isCpy):
                         continue
-                isInputWebAPI = False
+                isInputWebAPI = isInputHttp = False
                 if (_rpt and
                         _rpt._isInputHTTP):
+                    isInputHttp = True
                     (f, e) = os.path.splitext(file)
-                    if (not e):     # if no file extension at the end of URL, it's assumed we're talking to a service which in turn returns a raster.
+                    if (not e):     # if no file extension at the end of URL, it's assumed we're talking to a web service endpoint which in turn returns a raster.
                         isInputWebAPI = True
                 isPlanet = self.src.find(CPLANET_IDENTIFY) != -1
                 if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
                     not file.lower().endswith(CTIL_EXTENSION_) or       # skip 'exclude' list items and always copy (.til) files to destination.
                         isInputWebAPI or
-                        isPlanet):
+                        isPlanet or
+                        isInputHttp):
                     if (('exclude' in self.cb_list)):
                         if (self.cb_list['exclude'] is not None):
                             if (self.m_user_config is not None):
@@ -3277,11 +3307,16 @@ class Copy:
                                                     _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = v[f + len(token): e].strip().replace('"', '').replace('?', '_')
                                                 isFileNameInHeader = True
                                             break
-                                    if (self.m_user_config.getValue(CTEMPINPUT)):    # we've to download the file first and save to the name requested.
-                                        r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
+                                    localPath = self.m_user_config.getValue(CTEMPINPUT)
+                                    if (localPath is None):
+                                        if (self.m_user_config.getValue(COP) == COP_COPYONLY):
+                                            localPath = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT)
+                                    if (localPath):    # we've to download the file first and save to the name requested.
+                                        r = r.replace(self.src, localPath)
                                         if (not os.path.exists(r)):
                                             os.makedirs(r)
                                         file = _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] if isFileNameInHeader else file
+                                        self._base.message('{}'.format(file_url.geturl()))
                                         with open(os.path.join(r, file), 'wb') as fp:
                                             buff = 2024 * 1024
                                             while True:
@@ -3491,6 +3526,10 @@ class compression(object):
         return self._call_external(args)
 
     def compress(self, input_file, output_file, args_callback=None, build_pyramids=True, post_processing_callback=None, post_processing_callback_args=None, **kwargs):
+        isRasterProxyCaller = False
+        if (UpdateOrjobStatus in kwargs):
+            if (not kwargs[UpdateOrjobStatus]):
+                isRasterProxyCaller = True
         if (_rpt):
             if (input_file in _rpt._input_list_info and
                     Report.CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
@@ -3653,7 +3692,7 @@ class compression(object):
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return ret  # we can't proceed if vrt couldn't be built successfully.
-                    ret = self.createaOverview('"{}"'.format(output_file))
+                    ret = self.createaOverview('"{}"'.format(output_file), **kwargs)
                     self.message('Status: (%s).' % ('OK' if ret else 'FAILED'), const_general_text if ret else const_critical_text)
                     if (not ret):
                         if (_rpt):
@@ -3674,7 +3713,8 @@ class compression(object):
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
-                    if (useCOGTIFF):
+                    if (useCOGTIFF and
+                            not isRasterProxyCaller):
                         inputDeflated = output_file
                         output_file = output_file.replace(CloudOGTIFFExt, '')
                         compression = self.m_user_config.getValue('Compression')
@@ -3702,16 +3742,32 @@ class compression(object):
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return ret
-        # Do auto generate cloneMRF?
+        # Do we auto generate raster proxy files as part of the raster conversion process?
         if (self.m_user_config.getValue(CCLONE_PATH)):
-            updateMRF = UpdateMRF(self._base)
-            _output_home_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)
-            _tempOutputPath = self.m_user_config.getValue(CTEMPOUTPUT, False)
-            if (_tempOutputPath):
-                _output_home_path = _tempOutputPath
-            if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH), self.m_user_config.getValue('Mode'),
-                               self.m_user_config.getValue(CCACHE_PATH), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
-                updateMRF.copyInputMRFFilesToOutput()
+            mode = self.m_user_config.getValue('Mode')
+            modifyProxy = True
+            RecursiveCall = 'recursiveCall'
+            if (not mode.endswith('mrf') and
+                    RecursiveCall not in kwargs):
+                rasterProxyPath = os.path.join(self.m_user_config.getValue(CCLONE_PATH, False), os.path.basename(output_file))
+                ret = self.compress(output_file, rasterProxyPath, args_Callback_for_meta,
+                                    post_processing_callback=post_processing_callback, updateOrjobStatus=False, createOverviews=False, recursiveCall=True)
+                errorEntries = RasterAssociates.removeRasterProxyAncillaryFiles(rasterProxyPath)
+                if (errorEntries):
+                    for err in errorEntries:
+                        self.message('Unable to delete ({})'.format(err), self._base.const_warning_text)
+                modifyProxy = False
+            if (modifyProxy):
+                updateMRF = UpdateMRF(self._base)
+                _output_home_path = self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)  # cmdline arg -output
+                _tempOutputPath = self.m_user_config.getValue(CTEMPOUTPUT, False)
+                if (_tempOutputPath):
+                    _output_home_path = _tempOutputPath
+                if (RecursiveCall in kwargs):
+                    _output_home_path = output_file = os.path.join(self.m_user_config.getValue(CCLONE_PATH, False), os.path.basename(output_file))
+                if (updateMRF.init(output_file, self.m_user_config.getValue(CCLONE_PATH, False), mode,
+                                   self.m_user_config.getValue(CCACHE_PATH, False), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
+                    updateMRF.copyInputMRFFilesToOutput()
         # ends
         # call any user-defined fnc for any post-processings.
         if (post_processing_callback):
@@ -3730,10 +3786,15 @@ class compression(object):
                     for TilRaster in til._tils_info[originalSourcePath.lower()][TIL.CKEY_FILES]:
                         _rpt.updateRecordStatus(self._base.convertToForwardSlash(os.path.dirname(originalSourcePath), True) + TilRaster, CRPT_PROCESSED, CRPT_YES)
                 return ret
+            if (isRasterProxyCaller):
+                return ret
             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_YES)
         return ret
 
-    def createaOverview(self, input_file, isBQA=False):
+    def createaOverview(self, input_file, isBQA=False, **kwargs):
+        if (CreateOverviews in kwargs):
+            if (not kwargs[CreateOverviews]):
+                return True  # skip if called by a create raster proxy operation.
         m_py_factor = '2'
         m_py_sampling = 'average'
         get_mode = self.m_user_config.getValue('Mode')
@@ -4097,8 +4158,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1g'
-    __program_date__ = '20171102'
+    __program_ver__ = 'v2.0.1h'
+    __program_date__ = '20171122'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5017,7 +5078,6 @@ class Application(object):
         # control flow if conversions required.
         if (not is_caching):
             if (not isinput_s3 and
-                    not self._args.input.lower().startswith('http') and
                     not cfg_mode == BundleMaker.CMODE):
                 ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
                 if (not ret):
@@ -5034,7 +5094,6 @@ class Application(object):
                 raster_buff = [{'dst': self._args.output,
                                 'f': f,
                                 'src': p}]
-
             files = raster_buff
             files_len = len(files)
             if (files_len):
@@ -5275,7 +5334,6 @@ class Application(object):
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
                 return
-
             len_buffer = cfg_threads
             threads = []
             store_files_indx = 0
@@ -5472,14 +5530,10 @@ def threadProxyRaster(req, base, comp, args):
             return False
     # ends
     # remove ancillary extension files that are no longer required for (rasterproxy) files on the client side.
-    refBasePath = finalPath[:-len(CONST_OUTPUT_EXT)]
-    for ext in ['.idx', '.lrc']:
-        try:
-            path = refBasePath + ext
-            if (os.path.exists(path)):
-                os.remove(path)
-        except Exception as e:
-            base.message('Unable to delete ({}).\n{}'.format(path, str(e)), base.const_warning_text)
+    errorEntries = RasterAssociates.removeRasterProxyAncillaryFiles(finalPath)
+    if (errorEntries):
+        for err in errorEntries:
+            base.message('Unable to delete ({})'.format(err), base.const_warning_text)
     # ends
     return True
 
