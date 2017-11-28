@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20171122
+# Version: 20171128
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -72,6 +72,7 @@ CONST_OUTPUT_EXT = '.%s' % ('mrf')
 CloudOGTIFFExt = '.cogtiff'
 UpdateOrjobStatus = 'updateOrjobStatus'
 CreateOverviews = 'createOverviews'
+DefJpegQuality = 85
 
 # const related to (Reporter) class
 CRPT_SOURCE = 'SOURCE'
@@ -2955,7 +2956,7 @@ def args_Callback(args, user_data=None):
     _JPEG12 = 'jpeg12'
     m_compression = _LERC    # default if external config is faulty
     m_lerc_prec = None
-    m_compression_quality = 85
+    m_compression_quality = DefJpegQuality
     m_bsize = CCFG_BLOCK_SIZE
     m_mode = 'chs'
     m_nodata_value = None
@@ -3064,7 +3065,7 @@ def args_Callback_for_meta(args, user_data=None):
     m_pyramid = True
     m_comp = _LERC
     m_lerc_prec = None
-    m_compression_quality = 85
+    m_compression_quality = DefJpegQuality
     if (user_data):
         try:
             scale_ = user_data[CIDX_USER_CONFIG].getValue('Scale')
@@ -3693,7 +3694,7 @@ class compression(object):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return ret  # we can't proceed if vrt couldn't be built successfully.
                     ret = self.createaOverview('"{}"'.format(output_file), **kwargs)
-                    self.message('Status: (%s).' % ('OK' if ret else 'FAILED'), const_general_text if ret else const_critical_text)
+                    self.message('Status: (%s).' % ('OK' if ret else 'FAILED'), self._base.const_general_text if ret else self._base.const_critical_text)
                     if (not ret):
                         if (_rpt):
                             _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
@@ -3709,7 +3710,7 @@ class compression(object):
                             self.message('rename (%s=>%s)' % (in_, out_))
                             os.rename(in_, out_)
                         except:
-                            self.message('Unable to rename/remove (%s)' % (output_file), const_warning_text)
+                            self.message('Unable to rename/remove (%s)' % (output_file), self._base.const_warning_text)
                             if (_rpt):
                                 _rpt.updateRecordStatus(_input_file, CRPT_PROCESSED, CRPT_NO)
                             return False
@@ -3727,11 +3728,33 @@ class compression(object):
                         if (compression == 'jpeg'):
                             args.append('-co')
                             args.append('PHOTOMETRIC=YCBCR')
+                            QualityPrefix = 'JPEG_QUALITY='
+                            x = [x.startswith(QualityPrefix) for x in args]
+                            posQuality = -1
+                            cfgJpegQuality = self.m_user_config.getValue('Quality')
+                            if (cfgJpegQuality is None):
+                                cfgJpegQuality = DefJpegQuality
+                            if (x and
+                                    True in x):
+                                posQuality = x.index(True)
+                            if (posQuality == -1):
+                                args.append('-co')
+                                args.append('{}{}'.format(QualityPrefix, cfgJpegQuality))
+                            else:
+                                args[posQuality] = '{}{}'.format(QualityPrefix, cfgJpegQuality)
                         args.append('-co')
                         args.append('COPY_SRC_OVERVIEWS=YES')
                         args.append(inputDeflated)
                         args.append(output_file)
                         self.message('Creating cloud optimized GeoTIFF (%s)' % (output_file))
+                        # remove any user defined GDAL translate parameters when calling GDAL_Translate for the second time to generate COG rasters.
+                        jstr = ' '.join(args)
+                        userGdalParameters = self.m_user_config.getValue('GDAL_Translate_UserParameters')
+                        x = jstr.find(userGdalParameters)
+                        if (x != -1):
+                            jstr = jstr.replace(userGdalParameters, '')
+                        # ends
+                        args = jstr.split()
                         ret = self._call_external(args)
                         try:
                             os.remove(inputDeflated)
@@ -4159,7 +4182,7 @@ class Args:
 
 class Application(object):
     __program_ver__ = 'v2.0.1h'
-    __program_date__ = '20171122'
+    __program_date__ = '20171128'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4392,6 +4415,12 @@ class Application(object):
             if (not _rpt.read(self.__jobContentCallback)):
                 self._base.message('Unable to read the -input job file.', self._base.const_critical_text)
                 return False
+            if (CRESUME_HDR_OUTPUT in self._usr_args):
+                # override the output path in the .orjob file if a custom 'output' path exists.
+                userOutput = self._base.convertToForwardSlash(self._usr_args[CRESUME_HDR_OUTPUT])
+                self._base.getUserConfiguration.setValue(CCFG_PRIVATE_OUTPUT, userOutput)
+                self._args.output = userOutput
+                # ends
         self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
         # verify user defined text for cloud output path
         usrPath = self._args.hashkey
