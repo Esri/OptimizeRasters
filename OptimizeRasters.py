@@ -4417,9 +4417,10 @@ class Application(object):
                 return False
             if (CRESUME_HDR_OUTPUT in self._usr_args):
                 # override the output path in the .orjob file if a custom 'output' path exists.
-                userOutput = self._base.convertToForwardSlash(self._usr_args[CRESUME_HDR_OUTPUT])
-                self._base.getUserConfiguration.setValue(CCFG_PRIVATE_OUTPUT, userOutput)
-                self._args.output = userOutput
+                if (isinstance(self._usr_args, dict)): #  do only if called by user code. self._usr_args type is 'argparse' when called by cmd-line
+                    userOutput = self._base.convertToForwardSlash(self._usr_args[CRESUME_HDR_OUTPUT])
+                    self._base.getUserConfiguration.setValue(CCFG_PRIVATE_OUTPUT, userOutput)
+                    self._args.output = userOutput
                 # ends
         self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
         # verify user defined text for cloud output path
