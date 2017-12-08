@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20171128
+# Version: 20171207
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -44,7 +44,6 @@ import time
 from xml.dom import minidom
 import subprocess
 import shutil
-import datetime
 
 import argparse
 import math
@@ -1554,7 +1553,8 @@ class Report:
                         _hdr = _fname.replace(self.CHEADER_PREFIX, '').split('=')
                         if (len(_hdr) > 1):
                             _hdr_key = _hdr[0].strip()
-                            _hdr_val = _hdr[1].strip()
+                            _hdr.pop(0)
+                            _hdr_val = '='.join(_hdr).strip()
                             if (_hdr_key == CTEMPINPUT or
                                     _hdr_key == CTEMPOUTPUT):
                                 if (not _hdr_val.endswith('/')):
@@ -2217,13 +2217,18 @@ class Azure(Store):
 
     def init(self):
         try:
-            if (self._profile_name):    # profile name if defined supersedes (account_name, account_key)
-                (self._account_name, self._account_key) = self.readProfile(self.COUT_AZURE_ACCOUNTNAME_INFILE, self.COUT_AZURE_ACCOUNTKEY_INFILE)
-                if (not self._account_name or
-                        not self._account_key):
-                    return False
+            sasToken = None
+            if (self._profile_name):
+                if (self._profile_name.lower().startswith('http')):
+                    sasToken = self._profile_name.replace('?', '&')
+                    self._account_name = self._profile_name.split('.')[0].split('//')[1]
+                if (sasToken is None):
+                    (self._account_name, self._account_key) = self.readProfile(self.COUT_AZURE_ACCOUNTNAME_INFILE, self.COUT_AZURE_ACCOUNTKEY_INFILE)
+                    if (not self._account_name or
+                            not self._account_key):
+                        return False
             from azure.storage.blob import BlockBlobService
-            self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key)
+            self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key, sas_token=sasToken)
         except Exception as e:
             self.message(str(e), self.const_critical_text)
             return False
@@ -2424,7 +2429,7 @@ class Azure(Store):
         #   return True                          #  "
         # return True     # debug. Must be removed before release.
         isContainerCreated = False
-        t0 = datetime.datetime.now()
+        t0 = datetime.now()
         time_to_wait_before_retry = 3
         max_time_to_wait = 60
         self.message('Accessing container ({})..'.format(self._upl_container_name))
@@ -2440,12 +2445,12 @@ class Azure(Store):
                     if (get_err_msg.find('already exists')):
                         isContainerCreated = True
                     break
-                tm_pre = datetime.datetime.now()
+                tm_pre = datetime.now()
                 while(True):
-                    time_delta = datetime.datetime.now() - tm_pre
+                    time_delta = datetime.now() - tm_pre
                     if (time_delta.seconds > time_to_wait_before_retry):
                         break
-                t1 = datetime.datetime.now() - t0
+                t1 = datetime.now() - t0
                 if (t1.seconds > max_time_to_wait):
                     self.message('Timed out to create container.', self.const_critical_text)
                     break
@@ -2470,7 +2475,7 @@ class Azure(Store):
         idx = 1
         self.message('Uploading ({})'.format(blob_path))
         self.message('Total blocks to upload ({})'.format(tot_blocks))
-        st = datetime.datetime.now()
+        st = datetime.now()
         while(1):
             len_threads = len(threads)
             while(len_threads > 0):
@@ -2519,7 +2524,7 @@ class Azure(Store):
         finally:
             if (f):
                 f.close()
-        self.message('Duration. ({} sec)'.format((datetime.datetime.now() - st).seconds))
+        self.message('Duration. ({} sec)'.format((datetime.now() - st).seconds))
         self.message('Done.')
         return True
 
@@ -4182,7 +4187,7 @@ class Args:
 
 class Application(object):
     __program_ver__ = 'v2.0.1h'
-    __program_date__ = '20171128'
+    __program_date__ = '20171207'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4417,7 +4422,7 @@ class Application(object):
                 return False
             if (CRESUME_HDR_OUTPUT in self._usr_args):
                 # override the output path in the .orjob file if a custom 'output' path exists.
-                if (isinstance(self._usr_args, dict)): #  do only if called by user code. self._usr_args type is 'argparse' when called by cmd-line
+                if (isinstance(self._usr_args, dict)):  # do only if called by user code. self._usr_args type is 'argparse' when called by cmd-line
                     userOutput = self._base.convertToForwardSlash(self._usr_args[CRESUME_HDR_OUTPUT])
                     self._base.getUserConfiguration.setValue(CCFG_PRIVATE_OUTPUT, userOutput)
                     self._args.output = userOutput
@@ -4477,9 +4482,11 @@ class Application(object):
             _hdr = _fname.replace(Report.CHEADER_PREFIX, '').split('=')
             if (len(_hdr) > 1):
                 _key = _hdr[0].strip()
+                _hdr.pop(0)
+                _val = '='.join(_hdr).strip()
                 if (_key == CRESUME_HDR_INPUT):
                     return True
-                setattr(self._args, _key, _hdr[1].strip())
+                setattr(self._args, _key, _val)
         return True
 
     def __initOperationCreateJob(self):
@@ -5407,7 +5414,7 @@ class Application(object):
                         try:
                             if (not os.path.isdir(self._log_path)):
                                 os.makedirs(self._log_path)
-                            ousr_date = datetime.datetime.now()
+                            ousr_date = datetime.now()
                             err_upl_file = os.path.join(self._log_path, '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day,
                                                                                                                          ousr_date.hour, ousr_date.minute, ousr_date.second))
                             _fptr = open(err_upl_file, 'w+')
