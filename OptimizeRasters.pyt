@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20171030
+# Version: 20180107
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -238,10 +238,12 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
             arcpy.AddError(str(e))
             return False
         storageType = OptimizeRasters.CCLOUD_AMAZON
-        if (option1 and
-                option1.lower().startswith('azure')):
-            storageType = OptimizeRasters.CCLOUD_AZURE
-        profileEditorUI = OptimizeRasters.ProfileEditorUI(section, storageType, value1, value2)
+        if (option1):
+            if (option1.lower().startswith('azure')):
+                storageType = OptimizeRasters.CCLOUD_AZURE
+            elif (option1.lower().startswith('alibaba')):
+                storageType = OptimizeRasters.ProfileEditorUI.TypeAlibaba
+        profileEditorUI = OptimizeRasters.ProfileEditorUI(section, storageType, value1, value2, aws_endpoint_url=value3)
         ret = profileEditorUI.validateCredentials()
         if (not ret):
             [arcpy.AddError(i) for i in profileEditorUI.errors]
