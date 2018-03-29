@@ -60,7 +60,7 @@ More information about installing and updating third-party packages can be found
 ## Resources
 
 * [OptimizeRasters documentation](https://github.com/Esri/OptimizeRasters/tree/master/Documentation)
-* [MRF white paper]( http://esriurl.com/MRF%E2%80%9D)
+* [MRF white paper]( http://esriurl.com/MRF)
 
 
 ## Issues
