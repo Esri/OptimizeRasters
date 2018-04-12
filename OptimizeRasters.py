@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20180107
+# Version: 20180412
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -847,10 +847,15 @@ class Base(object):
     def convertToTokenPath(self, inputPath):
         if (not inputPath):
             return None
+        tokenPath = None
         if (self.getBooleanValue(self.getUserConfiguration.getValue(UseToken)) and
-                self.getBooleanValue(self.getUserConfiguration.getValue('iss3'))):
-            return inputPath.replace(self.getUserConfiguration.getValue(CIN_S3_PREFIX, False),
-                                     '/vsis3/{}/'.format(self.getUserConfiguration.getValue('In_S3_Bucket', False)))
+            self.getBooleanValue(self.getUserConfiguration.getValue('iss3'))):
+            cloudHandler = 'vsis3'
+            if (self.getUserConfiguration.getValue(CIN_CLOUD_TYPE, True) == CCLOUD_AZURE):
+                cloudHandler = 'vsiaz'
+            tokenPath = inputPath.replace(self.getUserConfiguration.getValue(CIN_S3_PREFIX, False),
+                '/{}/{}/'.format(cloudHandler, self.getUserConfiguration.getValue('In_S3_Bucket', False)))
+        return tokenPath
 
     def copyBinaryToTmp(self, binarySrc, binaryDst):
         if (not os.path.exists(binaryDst)):
@@ -3378,7 +3383,7 @@ class Copy:
                             if (self.m_user_config):
                                 if (self.m_user_config.getValue(CLOAD_RESTORE_POINT)):
                                     if (getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
-                                        r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT))
+                                        r = r.replace(self.src, self.m_user_config.getValue(CTEMPINPUT, False))
                             if (_rpt and
                                     _rpt._isInputHTTP and
                                     (Report.CHDR_MODE in _rpt._header and
@@ -3854,9 +3859,10 @@ class compression(object):
                         # remove any user defined GDAL translate parameters when calling GDAL_Translate for the second time to generate COG rasters.
                         jstr = ' '.join(args)
                         userGdalParameters = self.m_user_config.getValue('GDAL_Translate_UserParameters')
-                        x = jstr.find(userGdalParameters)
-                        if (x != -1):
-                            jstr = jstr.replace(userGdalParameters, '')
+                        if (userGdalParameters):
+                            x = jstr.find(userGdalParameters)
+                            if (x != -1):
+                                jstr = jstr.replace(userGdalParameters, '')
                         # ends
                         args = jstr.split()
                         ret = self._call_external(args)
@@ -4291,8 +4297,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1i'
-    __program_date__ = '20180107'
+    __program_ver__ = 'v2.0.1j'
+    __program_date__ = '20180412'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4717,6 +4723,7 @@ class Application(object):
         inAmazon = cloudDownloadType == CCLOUD_AMAZON or not cloudDownloadType
         if (inAmazon):
             cloudDownloadType = Store.TypeAmazon
+        cfg.setValue(CIN_CLOUD_TYPE, cloudDownloadType)
         # ends
         # are we doing input from S3|Azure?
         isinput_s3 = self._base.getBooleanValue(self._args.s3input)
