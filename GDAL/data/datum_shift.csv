@@ -713,3 +713,116 @@ Do not confuse with AIOC95 vertical datum as used in southern Caspian Sea and at
 709,15750,4605,4326,Dereived at 2 stations.,"For military purposes. Accuracy 25m in each of X, Y and Z axes.",1200,16.58,17.75,-63.63,-62.21,1,0,9603,-7,215,225,,,,,0
 710,1446,4606,4326,,"?",1201,13.38,14.37,-62.71,-60.14,1,0,9603,-149,128,296,,,,,1
 711,1959,4607,4326,Derived at 4 points.,1m accuracy.,1202,12.15,13.76,-62.75,-60.39,1,0,9603,195.671,332.517,274.607,,,,,1
+712,15807,4718,4326,Derived at 1 satellite station.,Military and topographic mapping. Accuracy +/- 25m in each axis.,3197,-9.98,-9.2,159.55,160.88,1,0,9603,252,-209,-751,,,,,0
+713,1968,4664,4326,Calculated in 2001.,For low resolution applications.,2871,37.65,37.96,-25.92,-25.08,1,0,9603,-204.633,140.216,55.199,,,,,0
+714,1969,4664,4326,Calculated in 2001.,For medium resolution applications.,2871,37.65,37.96,-25.92,-25.08,1,0,9607,-211.939,137.626,58.3,0.089,-0.251,-0.079,0.384,0
+715,1970,4664,4326,Mean for all islands in group.,For low resolution applications.,1345,36.87,37.96,-25.92,-24.62,1,0,9603,-204.619,140.176,55.226,,,,,1
+716,1971,4664,4326,Mean for all islands in group.,For medium resolution applications.,1345,36.87,37.96,-25.92,-24.62,1,0,9607,-208.719,129.685,52.092,0.195,0.014,-0.327,0.198,0
+717,15881,4750,4326,Parameter values taken from ST87 Ouvea to RGNC91-93 (1) ( code 15885) assuming that RGNC91-93 is equivalent to WGS 84 to within the accuracy of the transformation.,Accuracy better than +/- 1 metre.,2813,-20.77,-20.34,166.44,166.71,1,0,9603,-56.263,16.136,-22.856,,,,,1
+718,1972,4665,4326,,For low resolution applications.,2872,38.57,38.86,-27.44,-26.97,1,0,9603,-106.301,166.27,-37.916,,,,,0
+719,1973,4665,4326,,For medium resolution applications.,2872,38.57,38.86,-27.44,-26.97,1,0,9607,-105.854,165.589,-38.312,0.003,0.026,-0.024,-0.048,0
+720,1974,4665,4326,,For low resolution applications.,2873,38.46,38.7,-28.9,-28.54,1,0,9603,-106.248,166.244,-37.845,,,,,0
+721,1975,4665,4326,,For medium resolution applications.,2873,38.46,38.7,-28.9,-28.54,1,0,9607,-104,162.924,-38.882,0.075,0.071,-0.051,-0.338,0
+722,1976,4665,4326,,For low resolution applications.,2874,38.32,38.61,-28.61,-27.98,1,0,9603,-106.044,166.655,-37.876,,,,,0
+723,1977,4665,4326,,For medium resolution applications.,2874,38.32,38.61,-28.61,-27.98,1,0,9607,-95.323,166.098,-69.942,0.215,1.031,-0.047,1.922,0
+724,1978,4665,4326,,For low resolution applications.,2875,38.48,38.8,-28.37,-27.71,1,0,9603,-106.253,166.239,-37.854,,,,,0
+725,1979,4665,4326,,For medium resolution applications.,2875,38.48,38.8,-28.37,-27.71,1,0,9607,-100.306,161.246,-48.761,0.192,0.385,-0.076,0.131,0
+726,1980,4665,4326,Mean for all islands in group.,For low resolution applications.,1301,38.32,39.14,-28.9,-26.97,1,0,9603,-106.226,166.366,-37.893,,,,,1
+727,1981,4665,4326,Mean for all islands in group.,For medium resolution applications.,1301,38.32,39.14,-28.9,-26.97,1,0,9607,-103.088,162.481,-28.276,-0.167,-0.082,-0.168,-1.504,0
+728,1986,4666,4326,May be taken as a transformation from Lisbon 1890 to ETRS89 - see tfm code 5039.,For low resolution applications.,1294,36.95,42.16,-9.56,-6.19,1,0,9603,508.088,-191.042,565.223,,,,,1
+729,1990,4666,4326,,For medium resolution applications.,1294,36.95,42.16,-9.56,-6.19,1,0,9607,631.392,-66.551,481.442,-1.09,4.445,4.487,-4.43,0
+730,15804,4717,4326,Derived at 19 satellite stations.,US space and military operations. Accuracy +/- 3 m in each axis.,3206,20.86,30.83,-82.33,-72.68,1,0,9603,-2,151,181,,,,,1
+731,5267,5264,4326,DRUKREF 03 and WGS 84 are both realisations of ITRS.,For applications to an accuracy of 1 metre.,1048,26.7,28.33,88.75,92.12,1,0,9603,0,0,0,,,,,1
+732,1993,4667,4326,For all practical purposes this transformation is exact.,Boundary demarcation.,2876,29.06,30.32,46.36,48.61,1,0,9603,0,0,0,,,,,1
+733,6895,4752,4326,Derived at 9 stations. Replaces Viti Levu 1912 to WGS 84 (1) (code 15897).,For military and topographic mapping. Accuracy +/-3m in each axis.,3195,-18.32,-17.25,177.19,178.75,1,0,9603,98,390,-22,,,,,1
+734,15897,4752,4326,Derived at 1 satellite station. Replaced by Viti Levu 1912 to WGS 84 (2) (code 6895).,For military and topographic mapping. Accuracy +/-25m in each axis.,3195,-18.32,-17.25,177.19,178.75,1,0,9603,51,391,-36,,,,,0
+735,5470,5451,4326,Parameter values taken from Ocotepeque to CR05 (1) (tfm code 6890) assuming that CR05 is equivalent to WGS 84 within the accuracy of the transformation.,Topographic mapping.,3232,7.98,11.22,-85.97,-82.53,1,0,9603,213.11,9.37,-74.95,,,,,0
+736,5473,5451,4326,"Rotations in original source given in radians are equivalent to Rx = 2.35"", Ry = -0.06"", Rz = 6.39"".",Topographic mapping.,3232,7.98,11.22,-85.97,-82.53,1,1,9607,213.116,9.358,-74.946,2.351,-0.06147,6.39,-5.22,0
+737,5474,5451,4326,,Topographic mapping.,3876,7.98,17.83,-92.29,-82.53,1,1,9603,205.435,-29.099,292.202,,,,,0
+738,6891,5451,4326,"Concatenation (via NAD27) of transformations 6888 and 1171. Accuracy not given, but accuracy of constituent transformations given as 9m and 10m respectively.",For military purposes.,3876,7.98,17.83,-92.29,-82.53,1,0,9603,205,96,-98,,,,,1
+739,15752,4668,4326,Derived at 22 stations.,For military purposes. Accuracy 3m in each axis.,1297,34.88,71.21,-10.56,31.59,1,0,9603,-86,-98,-119,,,,,1
+740,15810,4735,4326,Derived at 1 satellite station.,Military and topographic mapping. Accuracy +/- 25m in each axis.,3192,5.21,5.43,162.85,163.1,1,0,9603,647,1777,-1124,,,,,1
+741,6701,5246,4326,Approximation at the +/- 1m level assuming that GDBD2009 is equivalent to WGS 84 within the accuracy of the transformation.,Accuracy 1m.,1055,4.01,6.31,112.37,115.37,1,0,9603,0,0,0,,,,,1
+742,4477,4463,4326,Approximation at the +/- 1m level assuming that RGSPM06 is equivalent to WGS 84.,Accuracy +/- 1 metre.,1220,43.41,47.37,-57.1,-55.9,1,0,9603,0,0,0,,,,,1
+743,5501,5489,4326,Approximation at the +/- 1m level assuming that RGAF09 is equivalent to WGS 84 within the accuracy of the transformation.,Accuracy +/- 1 metre.,2824,14.08,18.54,-63.66,-57.52,1,0,9603,0,0,0,,,,,1
+744,15912,4755,4326,Approximation at the +/- 1m level assuming that DGN95 is equivalent to WGS 84 within the accuracy of the transformation.,Accuracy 1 metre.,1122,-13.25,7.79,92.01,141.46,1,0,9603,0,0,0,,,,,1
+745,1555,4158,4326,Derived in 1989 by ONI for Amoco.,Oil exploration.,3143,9.99,10.9,-61.97,-60.86,1,0,9603,-0.465,372.095,171.736,,,,,1
+746,1556,4158,4326,Described by NIMA as Naparima to WGS 84. In Trinidad the source CRS is better known as Naparima 1955. EPSG has duplicated the tfm using the alternative source CRSs. See also tfm code 1307.,For military purposes only. Accuracy given by NIMA 15m in each axis. EPSG believes there is an 8-10m blunder in dX.,3143,9.99,10.9,-61.97,-60.86,1,0,9603,-2,374,172,,,,,0
+747,4476,4470,4326,Approximation at the +/- 1m level assuming that RGM04 is equivalent to WGS 84.,Accuracy +/- 1 metre.,1159,-14.49,-11.33,43.68,46.7,1,0,9603,0,0,0,,,,,1
+748,5194,4756,4326,Used by Total in Mekong delta.,Academic research not officially adopted.,3770,9.34,11.03,104.25,107.11,1,0,9607,-192.873,-39.382,-111.202,0.00205,0.0005,-0.00335,0.0188,0
+749,6960,4756,4326,,Academic research not officially adopted.,3328,8.5,23.33,102.14,109.52,1,0,9607,-191.90441429,-39.30318279,-111.45032835,-0.00928836,0.01975479,-0.00427372,0.252906278,1
+750,1931,4643,4326,,Accuracy better than +/- 1 metre.,2821,-19.85,-19.5,163.54,163.75,1,0,9606,-480.26,-438.32,-643.429,16.3119,20.1721,-4.0349,-111.7002,1
+751,4290,4475,4326,Parameter values taken from Cadastre 1997 to RGM04 (1) (transformation code 4478) assuming that RGM04 is coincident with WGS 84 within the accuracy of the transformation.,Accuracy +/- 1 metre.,3340,-13.05,-12.61,44.98,45.35,1,0,9603,-381.788,-57.501,-256.673,,,,,1
+752,5374,5354,4326,,Accuracy 1m.,1049,-22.91,-9.67,-69.66,-57.52,1,0,9603,0,0,0,,,,,1
+753,15787,4701,4326,Derived by Topnav in 1991 at station TSH 85.,Oil exploration. Accuracy 5m.,3171,-6.04,-4.28,12.17,16.28,1,0,9603,-79.9,-158,-168.9,,,,,1
+754,4832,4483,4326,,Accuracy 1m.,1160,12.1,32.72,-122.19,-84.64,1,0,9603,0,0,0,,,,,1
+755,1917,4633,4326,Withdrawn by information source and replaced by improved information from local authority - see tfm code 15902.,Accuracy +/- 10 metres.,2814,-21.24,-20.62,166.98,167.52,1,0,9603,336,223,-231,,,,,0
+756,1927,4633,4326,Withdrawn by information source and replaced by improved information - see tfm code 15902.,Accuracy better than +/- 1 metre.,2814,-21.24,-20.62,166.98,167.52,1,0,9606,137.092,131.66,91.475,-1.9436,-11.5993,-4.3321,-7.4824,0
+757,15902,4633,4326,Parameter values taken from IGN56 Lifou to RGNC91-93 (1) ( code 15883) assuming that RGNC91-93 is equivalent to WGS 84 to within the accuracy of the transformation.,Accuracy 1 metre.,2814,-21.24,-20.62,166.98,167.52,1,0,9603,335.47,222.58,-230.94,,,,,1
+758,15925,4758,4326,,For all practical purposes JAD2001 can be considered to be coincident with WGS 84.,1128,14.08,19.36,-80.6,-74.51,1,0,9603,0,0,0,,,,,1
+759,6711,6706,4326,Approximation at the +/- 1m level assuming that ETRS89 is equivalent to WGS 84. RDN2008 is a regional realisation of ETRS89.,Accuracy +/- 1 metre.,1127,34.76,47.1,5.93,18.99,1,0,9603,0,0,0,,,,,1
+760,15845,4161,4326,Transformation parameter precision given to millimetres in information source but due to accuracy rounded to nearest decimetre for EPSG database.,Geodetic surveying within the oil industry. Accuracy 25 m.,1265,-46.7,-45.19,-69.5,-67.1,1,0,9603,27.5,14,186.4,,,,,1
+761,15931,4759,4326,Approximation at the +/- 1m level assuming that NAD83(NSRS2007) is equivalent to WGS 84 within the accuracy of the transformation.,For applications to an accuracy of 1 metre.,1511,14.92,74.71,167.65,-63.88,1,0,9603,0,0,0,,,,,1
+762,1540,4163,4326,,Accuracy better than 1 metre.,1257,8.95,19,41.08,57.96,1,0,9603,0,0,0,,,,,1
+763,4905,5013,4326,,PTRA08 and WGS 84 are realisations of ITRS coincident to within 1 metre. This transformation has an accuracy equal to the coincidence figure.,3670,29.24,43.07,-35.58,-12.48,1,0,9603,0,0,0,,,,,1
+764,6195,5527,4326,"Parameter values from SAD69(96) to SIRGAS 2000 (2)) (tfm code 5881) assuming that SIRGAS 2000 and WGS 84 are equal within the accuracy of the transformation, based on SAD69 to SIRGAS 2000 (1)) (tfm code 15485). Used by Petrobras and ANP from 1994.",Accuracy generally better than 1m except in Amazon basin where it degenerates to 5m. Should be used only to transform data obtained independently of the classical geodetic network (GPS observations conducted after 1994).,1053,-35.71,7.04,-74.01,-25.28,1,0,9603,-67.35,3.88,-38.22,,,,,1
+765,15806,4719,4326,Derived at 1 satellite station.,Military and topographic mapping. Accuracy +/- 25m in each axis,3188,-27.25,-27.01,-109.51,-109.16,1,0,9603,211,147,111,,,,,1
+766,15860,4702,4326,Mauritania 1999 can be considered to be the same as WGS 84 within the accuracy of this transformation.,Minerals management. Accuracy 1m.,1157,14.72,27.3,-20.04,-4.8,1,0,9603,0,0,0,,,,,1
+767,15971,4762,4326,Approximation at the +/- 1m level assuming that BDA2000 is equivalent to WGS 84.,Accuracy +/- 1 metre.,1047,28.91,35.73,-68.83,-60.7,1,0,9603,0,0,0,,,,,1
+768,5375,5360,4326,,Accuracy 1m.,1066,-59.87,-17.5,-113.21,-65.72,1,0,9603,0,0,0,,,,,1
+769,15972,4763,4326,Approximation at the +/- 1m level assuming that Pitcairn 2006 is equivalent to WGS 84.,Accuracy +/- 1 metre.,3208,-25.14,-25,-130.16,-130.01,1,0,9603,0,0,0,,,,,1
+770,1558,4166,4326,Derived at 5 stations.,For military purposes. Accuracy 1m in each axis.,3266,33.14,38.64,124.53,131.01,1,0,9603,0,0,0,,,,,1
+771,4084,4081,4326,Approximation at the +/- 1m level assuming that REGCAN95 is equivalent to WGS 84.,Accuracy +/- 1m.,3199,24.6,32.76,-21.93,-11.75,1,0,9603,0,0,0,,,,,1
+772,15974,4764,4326,Approximation at the +/- 1m level assuming that RSRGD2000 is equivalent to WGS 84.,Accuracy +/- 1 metre.,3558,-90,-59.99,144.99,-144.99,1,0,9603,0,0,0,,,,,1
+773,5553,5546,4326,"Exact in 1994 but due to significant and variable tectonic activity in PNG, in 2011 PNG94 and WGS 84 differ generally by 2m but in areas of significant tectonic activity differences can exceed 9m.",Approximation at the 2-10m level.,1187,-14.75,2.58,139.2,162.81,1,0,9603,0,0,0,,,,,1
+774,15870,4679,4326,Derived at 5 points in 2002.,Hydrographic survey,2967,19.37,21.34,-17.08,-15.88,1,0,9603,-80.01,253.26,291.19,,,,,1
+775,15976,4765,4326,Approximation at the +/- 1m level assuming that ETRS89 is equivalent to WGS 84.,Accuracy +/- 1 metre.,1212,45.42,46.88,13.38,16.61,1,0,9603,0,0,0,,,,,1
+776,15820,4730,4326,Derived at 1 satellite station.,For military and topographic mapping. Accuracy 25m in each axis.,3194,-17.32,-14.57,166.47,168.71,1,0,9603,170,42,84,,,,,1
+777,15709,4680,4326,Derived by IGN in 1992 at 7 stations within Nouakchott city.,Oil exploration.,2972,17.89,18.25,-16.11,-15.83,1,0,9603,124.5,-63.5,-281,,,,,1
+778,15908,4754,4326,Derived at 5 stations throughout Libya used to define LGD2006 in May 2006.,For applications to an accuracy of 0.1 metre.,1143,19.5,35.23,9.31,26.21,1,0,9603,-208.4058,-109.8777,-2.5764,,,,,1
+779,5585,4023,4326,Parameter values from MOLDREF99 to ETRS89 (1) (code 5584). Assumes ETRS89 and WGS 84 can be considered the same to within the accuracy of the transformation.,For applications with an accuracy of 1m.,1162,45.44,48.47,26.63,30.13,1,0,9603,0,0,0,,,,,1
+780,15831,4737,4326,Approximation at the +/- 1m level assuming that ITRF2000 is equivalent to WGS 84.,Accuracy +/- 1 metre.,1135,28.6,40.27,122.71,134.28,1,0,9603,0,0,0,,,,,1
+781,5590,5561,4326,Derived through concatenation of UCS-2000 to S-42 (1) (tfm code 5586 reversed) [an approximation] and S-42 to WGS 84 (16) (tfm code 15865) [derived for whole FSU rather than Ukraine]. Replaced by UCS-2000 to WGS 84 (2) (tfm code 5840).,Accuracy 5 metres.,1242,43.18,52.38,22.15,40.18,1,0,9607,25,-141,-78.5,0,-0.35,-0.736,0,1
+782,5823,5561,4326,Parameter values taken from Ukraine 2000 to ITRF2005 (1) (code 5822) assuming that ITRS2005 is equivalent to WGS 84 within the accuracy of the transformation.,Approximation at the +/- 1m level assuming that ITRS2005 is equivalent to WGS 84.,1242,43.18,52.38,22.15,40.18,1,1,9603,24,-121,-76,,,,,0
+783,5840,5561,4326,Parameter values taken from UCS-2000 to ITRF2005 (1) (code 5822) assuming that WGS 84 is equivalent to ITRS2005 within the accuracy of the transformation. Replaces UCS-2000 to WGS 84 (1) (tfm code 5590).,Approximation at the +/- 1m level assuming that WGS 84 is equivalent to ITRS2005.,1242,43.18,52.38,22.15,40.18,1,0,9603,24,-121,-76,,,,,0
+784,15700,4682,4326,Derived at origin station in Dhaka.,Oil exploration.,1041,18.56,26.63,88.04,92.67,1,1,9603,283.8,735.9,261.1,,,,,0
+785,15779,4682,4326,Derived at origin station in Dhaka. Source information given to 3 decimal places but rounded by OGP to be commensurate with stated accuracy.,Oil exploration.,1041,18.56,26.63,88.04,92.67,1,0,9603,283.7,735.9,261.1,,,,,1
+786,1919,4635,4326,,Accuracy better than +/- 1 metre.,2813,-20.77,-20.34,166.44,166.71,1,1,9606,-122.383,-188.696,103.344,3.5107,-4.9668,-5.7047,4.4798,0
+787,15708,4683,4326,Derived during GPS campaign which established PRS92 coordinates at 330 first order stations.,Accuracy: 1-10 parts per million.,1190,3,22.18,116.04,129.95,1,0,9607,-127.62,-67.24,-47.04,3.068,-4.903,-1.578,-1.06,1
+788,1837,4257,4326,,Oil exploration.,1316,-6.54,-1.88,118.71,120.78,1,0,9603,-587.8,519.75,145.76,,,,,1
+789,15713,4684,4326,Derived at 1 station.,For military purposes only. Accuracy 25m in each axis.,3274,-0.69,7.08,72.81,73.69,1,0,9603,-133,-321,50,,,,,1
+790,6177,6135,4326,Approximation at the +/- 1m level assuming that CIGD11 is equivalent to WGS 84.,Accuracy +/- 1m.,1063,17.58,20.68,-83.6,-78.72,1,0,9603,0,0,0,,,,,1
+791,4064,4046,4326,Approximation at the +/- 1m level assuming that RGRDC 2005 is equivalent to WGS 84 within the accuracy of the transformation.,Accuracy 1m.,3613,-13.46,-3.41,11.79,29.81,1,0,9603,0,0,0,,,,,1
+792,15918,4214,4326,Provided by BGP to TOTAL in June 2006.,Geophysical exploration in Ordos basin. Accuracy stated as 1m within basin.,3466,35,39,107,110.01,1,0,9603,12.646,-155.176,-80.863,,,,,0
+793,15919,4214,4326,Derived via WGS 72BE. Original transformation derived in 1979 at 4 stations on Yellow Sea coast.,Geophysical exploration in Yellow Sea.,3469,31.23,37.4,119.23,125.06,1,0,9606,15.53,-113.82,-41.38,0,0,0.814,-0.38,0
+794,15920,4214,4326,"Derived via WGS 72BE. Original transformation derived by GSI in 1980-81. The GSI memo incorrectly gave the parameters as from WGS 72 to Beijing 1954, but it has been determined by the OGP that the memo should have stated from Beijing 1954 to WGS 72BE.",Geophysical exploration in South China Sea.,3470,18.31,22.89,110.13,116.76,1,0,9606,31.4,-144.3,-74.8,0,0,0.814,-0.38,0
+795,15921,4214,4326,Provided by BGP to ELF in 1994.,Geophysical exploration in Tarim basin. Accuracy stated as 1m within basin.,3507,37,41.99,77.45,88,1,0,9603,15.8,-154.4,-82.3,,,,,1
+796,15935,4214,4326,Concatenated via WGS 72BE. Recomputation by Shelltech in 1981 of SSB 1980 observation.,Geophysical exploration in Bei Bu basin. Accuracy stated as 1m within basin.,3561,17.81,21.69,107.15,110.17,1,0,9606,18,-136.8,-73.7,0,0,0.814,-0.38,0
+797,15936,4214,4326,Provided by Sinopec to TOTAL in January 2007.,Geophysical exploration in Ordos basin. Accuracy stated as 1m within basin.,3466,35,39,107,110.01,1,0,9603,11.911,-154.833,-80.079,,,,,0
+798,15875,4721,4326,Derived at 20 stations. Also published by NGA in GeoTrans v3.4 software with parameter values rounded to integer.,"For military purposes. Accuracy 5m, 3m and 2m in X, Y and Z axes.",3398,-19.22,-16.1,176.81,-179.77,1,0,9603,265.025,384.929,-194.046,,,,,1
+799,7445,6311,4326,Parameter values from CGRS93 to ETRS89 (1) (code 7444). Approximation at the +/- 1m level assuming that ETRS89 is equivalent to WGS 84.,Small scale hydrographic and aviation  mapping.,3236,34.59,35.74,32.2,34.65,1,0,9606,8.846,-4.394,-1.122,0.00237,0.146528,-0.130428,0.783926,1
+800,5599,5593,4326,,Approximation at the 1m level.,3889,54.33,54.83,10.66,12.01,1,0,9603,0,0,0,,,,,1
+801,15832,4687,4326,"Transformation is to original definition of WGS 84. It is consistent with later WGS 84 realisations G730, G873 and G1150 to no better than 1m.",Accuracy +/- 0.5 metre (to original definition of WGS 84 - see remarks).,1098,-31.24,-4.52,-158.13,-131.97,1,0,9607,0.072,-0.507,-0.245,0.0183,-0.0003,0.007,-0.0093,1
+802,15833,4687,4326,Approximation at the +/- 1m level assuming that RGPF is equivalent to WGS 84.,Accuracy +/- 1 metre.,1098,-31.24,-4.52,-158.13,-131.97,1,0,9603,0,0,0,,,,,0
+803,1921,4636,4326,,Accuracy +/- 10 metres.,2817,-66.78,-66.1,139.44,141.5,1,0,9603,365,194,166,,,,,1
+804,15772,4688,4326,Approximation at the +/- 1m level assuming that RGPF is equivalent to WGS 84. Parameter values taken from Fatu Iva 72 to RGPF (1) (tfm code 15760).,Accuracy +/- 2 metres.,3133,-10.6,-10.36,-138.75,-138.54,1,0,9607,347.103,1078.125,2623.922,33.8875,-70.6773,9.3943,186.074,1
+805,5236,5233,4326,Derived at 58 stations.,Accuracy 14m.,3310,5.86,9.88,79.64,81.95,1,0,9607,-0.293,766.95,87.713,-0.195704,-1.695068,-3.473016,-0.039338,1
+806,4077,4075,4326,Approximation at the +/- 1m level assuming that ETRS89 is equivalent to WGS 84. SREF98 is a regional realisation of ETRS89.,Accuracy +/- 1 metre.,3534,41.85,46.19,18.81,23.01,1,0,9603,0,0,0,,,,,1
+807,4835,4690,4326,Approximation at the +/- 1m level assuming that RGPF is equivalent to WGS 84. Parameter values taken from Tahiti 79 to RGPF (1) (tfm code 15756).,Accuracy +/- 1 metre.,3124,-17.93,-17.44,-149.7,-149.09,1,0,9607,221.525,152.948,176.768,2.3847,1.3896,0.877,11.4741,1
+808,1922,4637,4326,,Accuracy +/- 10 metres.,2818,-67.13,-65.61,136,142,1,0,9603,325,154,172,,,,,1
+809,15797,4712,4326,Derived at 2 satellite stations.,For military purposes only. Accuracy 25m in each axis.,3182,-8.03,-7.83,-14.46,-14.24,1,0,9603,-205,107,53,,,,,1
+810,15769,4691,4326,Approximation at the +/- 1m level assuming that RGPF is equivalent to WGS 84. Parameter values taken from Moorea 87 to RGPF (1) (tfm code 15757).,Accuracy +/- 1 metre.,3125,-17.63,-17.41,-150,-149.73,1,0,9607,215.525,149.593,176.229,3.2624,1.692,1.1571,10.4773,1
+811,6142,4723,4326,Parameter values are taken from GCGD59 to CIGD11 (1) (code 6136) assuming that CIGD11 and WGS 84 can be considered the same to within the accuracy of the transformation.,For applications to an accuracy of 1m.,3185,19.21,19.41,-81.46,-81.04,1,0,9607,-179.483,-69.379,-27.584,7.862,-8.163,-6.042,-13.925,1
+812,15830,4723,4326,Determined from 6 satellite stations.,Topographic survey. Accuracy +/- 1m.,3185,19.21,19.41,-81.46,-81.04,1,0,9603,67.8,106.1,138.8,,,,,0
+813,4066,4695,4326,Parameter values taken from Katanga 1955 to RGRDC 2005 (1) (code 4065) assuming that RGRDC 2005 is equivalent to WGS 84 within the accuracy of the transformation.,Accuracy 1.5m.,3614,-12.01,-11.13,26.38,27.75,1,0,9603,-103.746,-9.614,-255.95,,,,,1
+814,15746,4693,4326,Derived in Tombak district in March 2005. Used for South Pars phase 11 and Pars LNG plants.,Petroleum Exploration and Production.,3141,27.63,27.81,52.09,52.26,1,0,9603,0,-0.15,0.68,,,,,1
+815,1441,4601,4326,,?,1273,16.94,17.22,-61.95,-61.61,1,0,9603,-255,-15,71,,,,,1
+816,15811,4601,4326,Determined from 1 satellite station.,Military mapping. Accuracy +/- 25m in each axis.,1273,16.94,17.22,-61.95,-61.61,1,0,9603,-270,13,62,,,,,0
+817,1442,4602,4326,,?,3239,15.14,15.69,-61.55,-61.2,1,0,9603,725,685,536,,,,,1
+818,1443,4603,4326,,?,3118,11.94,12.29,-61.84,-61.54,1,0,9603,72,213.7,93,,,,,1
+819,1444,4604,4326,Derived at 1 satellite station.,Accuracy 25m in each axis.,3279,16.62,16.87,-62.29,-62.08,1,0,9603,174,359,365,,,,,1
+820,1445,4605,4326,,?,3297,17.06,17.46,-62.92,-62.5,1,0,9603,9,183,236,,,,,1
+821,15750,4605,4326,Derived at 2 stations.,"For military purposes. Accuracy 25m in each of X, Y and Z axes.",3297,17.06,17.46,-62.92,-62.5,1,0,9603,-7,215,225,,,,,0
+822,1446,4606,4326,,?,3298,13.66,14.16,-61.13,-60.82,1,0,9603,-149,128,296,,,,,1
+823,6897,4606,4326,Derived at 3 stations.,For military purposes only. Accuracy 1m in each axis.,3298,13.66,14.16,-61.13,-60.82,1,0,9603,-153,153,307,,,,,0
+824,1959,4607,4326,Derived at 4 points.,1m accuracy.,3300,12.54,13.44,-61.52,-61.07,1,0,9603,195.671,332.517,274.607,,,,,1

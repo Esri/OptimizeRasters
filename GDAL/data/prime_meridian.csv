@@ -12,8 +12,4 @@
 8911,Stockholm,18.03298,9110,,,EPSG,1995-06-02 00:00:00,96.29,0
 8912,Athens,23.4258815,9110,Used in Greece for older mapping based on Hatt projection.,Topography Department; National Technical University of Athens.,EPSG,1997-06-16 00:00:00,,0
 8913,Oslo,10.43225,9110,Formerly known as Kristiania or Christiania.,Statens Kartverk - Geodesidivisjonen,EPSG,1999-10-20 00:00:00,,0
-8914,Paris,2.1035062500000000,9102,,,EPSG,,,0
-89012,Greenwich_IDF2,0.2,9110,,,IDF2,1995-06-02 00:00:00,96.29,0
-89013,Greenwich_IDF3,0.3,9110,,,IDF3,1995-06-02 00:00:00,96.29,0
-89014,Greenwich_IDF4,0.4,9110,,,IDF4,1995-06-02 00:00:00,96.29,0
-89015,Greenwich_IDF5,0.5,9110,,,IDF5,1995-06-02 00:00:00,96.29,0
+8914,Paris_RGS,2.1035062500000000,9102,,,EPSG,,,0
