@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# Copyright 2017 Esri
+# Copyright 2018 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 #------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20180107
+# Version: 20180621
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -56,6 +56,14 @@ def setXMLXPathValue(doc, xPath, key, value):
             not value):
         return False
     nodes = doc.getElementsByTagName(key)
+    if (not nodes):
+        userNode = doc.createElement(key)
+        userNode.appendChild(doc.createTextNode(value))
+        defNodes = doc.getElementsByTagName('Defaults')
+        if (not defNodes):  # shouldn't happen
+            return False
+        defNodes[0].appendChild(userNode)
+        nodes = doc.getElementsByTagName(key)
     for node in nodes:
         parents = []
         c = node
@@ -144,7 +152,7 @@ def setPaths(xFname, values):
 
 
 def returnPaths(xFname):
-    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters']
+    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters', 'UseToken']
     xfName2 = os.path.normpath(xFname)
     if (not os.path.exists(xfName2)):
         return None
@@ -152,6 +160,9 @@ def returnPaths(xFname):
     valueList = []
     for key in keyList:
         nodes = doc.getElementsByTagName(key)
+        if (nodes.length == 0):
+            valueList.append([key, ''])
+            continue
         for node in nodes:
             if node.firstChild is not None:
                 aVal = node.firstChild.data
@@ -229,9 +240,11 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
     else:
         appConfig = ConfigParser.RawConfigParser()
         mode = 'a'
+    isIAMRole = section.lower().startswith('iamrole:')
     # let's validate the credentials before writing out.
-    if (peAction_.startswith('overwrite') or     # update existing or add new but ignore for del.
-            mode == 'a'):
+    if (not isIAMRole and
+            (peAction_.startswith('overwrite') or     # update existing or add new but ignore for del.
+            mode == 'a')):
         try:
             import OptimizeRasters
         except Exception as e:
@@ -250,7 +263,6 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
             return False
     # ends
     appConfig.add_section(section)
-    isIAMRole = section.lower().startswith('iamrole:')
     if (not isIAMRole):  # if not IAM role, write out the credential key pair
         appConfig.set(section, option1, value1)
         appConfig.set(section, option2, value2)
@@ -487,9 +499,6 @@ class ProfileEditor(object):
 
     def execute(self, parameters, messages):
         pType = parameters[0].valueAsText
-        homedrive = os.getenv('HOMEDRIVE')
-        homepath = os.getenv('HOMEPATH')
-        homefolder = os.path.join(homedrive, homepath)
         if pType == 'Amazon S3':
             pFolder = AwsRoot
             pfileName = 'credentials'
@@ -502,8 +511,6 @@ class ProfileEditor(object):
             option1 = 'azure_account_name'
             option2 = 'azure_account_key'
             option3 = 'azure_endpoint_url'
-        awsfolder = os.path.join(homefolder, pFolder)
-        #awsfile = os.path.join(awsfolder,pfileName)
         pName = parameters[1].valueAsText
         if parameters[6].enabled == False:
             peAction = ''
