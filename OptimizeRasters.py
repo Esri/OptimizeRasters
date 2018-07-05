@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20180620
+# Version: 20180705
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -69,6 +69,7 @@ eFAIL = 1
 CEXEEXT = '.exe'
 CONST_OUTPUT_EXT = '.%s' % ('mrf')
 CloudOGTIFFExt = '.cogtiff'
+COGTIFFAuxFile = '.tif.cogtiff.aux.xml'
 UpdateOrjobStatus = 'updateOrjobStatus'
 CreateOverviews = 'createOverviews'
 DefJpegQuality = 85
@@ -751,7 +752,7 @@ class ThreadPool(object):
 
 
 class RasterAssociates(object):
-    RasterAuxExtensions = ['.lrc', '.idx', '.pjg', '.ppng', '.pft', '.pjp', '.pzp']
+    RasterAuxExtensions = ['.lrc', '.idx', '.pjg', '.ppng', '.pft', '.pjp', '.pzp', '.tif.cog.pzp', '.tif.cog.idx', '.tif.cogtiff.aux.xml']
 
     def __init__(self):
         self._info = {}
@@ -783,6 +784,9 @@ class RasterAssociates(object):
             try:
                 path = refBasePath + ext
                 if (os.path.exists(path)):
+                    if (path.endswith(COGTIFFAuxFile)):
+                        os.rename(path, path.replace(CloudOGTIFFExt, ''))
+                        continue
                     os.remove(path)
             except Exception as e:
                 errorEntries.append('{}'.format(str(e)))
@@ -1331,6 +1335,7 @@ class UpdateMRF:
             comp_val = None         # for (splitmrf)
             doc = minidom.parse(self._input)
             _rasterSource = self._input
+            isCOGTIFF = self._base.getUserConfiguration.getValue('cog')
             autoCreateRasterProxy = False
             if (self._mode):
                 autoCreateRasterProxy = not self._mode.endswith('mrf')
@@ -1383,7 +1388,7 @@ class UpdateMRF:
             if (autoCreateRasterProxy):
                 node = doc.getElementsByTagName('Source')
                 if (node):
-                    node[0].firstChild.nodeValue = os.path.join(_rasterSource, os.path.basename(self._input))
+                    node[0].firstChild.nodeValue = os.path.join(_rasterSource, os.path.basename(self._input).split(CloudOGTIFFExt)[0])
             # ends
             if (self._cachePath):
                 cache_output = self._cachePath
@@ -1431,15 +1436,18 @@ class UpdateMRF:
             if (rpCSV):
                 _mrfBody = _mrfBody.replace('\n', '') + '\n'
                 self._base._modifiedProxies.append(_mrfBody)
-                if (self._or_mode == 'rasterproxy'):  # if using the template 'CreateRasterProxy', keep only the .csv file.
+                if (self._or_mode == 'rasterproxy' or
+                    self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
                     try:
                         os.remove(self._input)
                         os.remove('{}.aux.xml'.format(self._input))
                     except BaseException:
                         pass    # not an error
             else:
-                with open(output, 'w') as c:
+                with open(output.split(CloudOGTIFFExt)[0] if isCOGTIFF else output, 'w') as c:
                     c.write(_mrfBody)
+                if (isCOGTIFF):
+                    os.remove(output)
         except Exception as e:
             if (self._base):
                 self._base.message('Updating ({}) was not successful!\nPlease make sure the input is (MRF) format.\n{}'.format(output, str(e)), self._base.const_critical_text)
@@ -3928,7 +3936,7 @@ class compression(object):
                     RecursiveCall not in kwargs):
                 rasterProxyPath = os.path.join(self.m_user_config.getValue(CCLONE_PATH, False), os.path.basename(output_file))
                 ret = self.compress(output_file, rasterProxyPath, args_Callback_for_meta,
-                                    post_processing_callback=post_processing_callback, updateOrjobStatus=False, createOverviews=False, recursiveCall=True, **kwargs)
+                                    post_processing_callback=None, updateOrjobStatus=False, createOverviews=False, recursiveCall=True, **kwargs)
                 errorEntries = RasterAssociates.removeRasterProxyAncillaryFiles(rasterProxyPath)
                 if (errorEntries):
                     for err in errorEntries:
@@ -4341,8 +4349,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.1m'
-    __program_date__ = '20180620'
+    __program_ver__ = 'v2.0.2'
+    __program_date__ = '20180705'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
