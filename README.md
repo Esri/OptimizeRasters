@@ -2,20 +2,20 @@
 OptimizeRasters
 ===============
 
-OptimizeRasters is a set of tools for accomplishing three tasks: converting raster data to optimized Tiled TIF or MRF files, moving data to cloud storage, and creating Raster Proxies. The result is more efficient, scalable, and elastic data access with a lower storage cost. 
+OptimizeRasters is a set of tools for accomplishing three tasks: converting raster data to optimized file formats, moving data to cloud storage, and creating raster proxies. The result is more efficient, scalable, and elastic data access with a lower storage cost. 
 
 **Converting raster data to optimized formats**
 
-OptimizeRasters converts a variety of non-optimized raster formats into optimized Tiled TIF or MRF formats. File conversion speeds up read performance in three ways. First, it improves the data structure, which makes data access and transfer (especially from cloud storage) more efficient. Second, it generates pyramids, which provides faster access to data at smaller scales. Third, it offers optional compression, which further reduces the amount of data stored and transmitted.  
+OptimizeRasters converts a variety of non-optimized raster formats into optimized tiled TIFF, Cloud-Optimized GeoTIFF, or MRF formats. File conversion speeds up read performance in three ways. First, it improves the data structure, which makes data access and transfer (especially from cloud storage) more efficient. Second, it generates pyramids, which provides faster access to data at smaller scales. Third, it offers optional compression, which further reduces the amount of data stored and transmitted.  
 
 **Moving data to cloud storage**
 
-As part of the data conversion process, OptimizeRasters can simultaneously transfer raster data to and from cloud (or enterprise) storage, speeding up the process of getting rasters into the cloud. OptimizeRasters supports both Amazon S3 and Microsoft Azure cloud storage services.
+As part of the data conversion process, OptimizeRasters can simultaneously transfer raster data to and from cloud (or enterprise) storage, speeding up the process of getting rasters into the cloud. OptimizeRasters supports Amazon S3, Microsoft Azure, and Google Cloud storage services.
 
-**Creating Raster Proxies**
+**Creating raster proxies**
 
-OptimizeRasters can also generate Raster Proxies to simplify access to raster data stored on cloud or network storage. 
-Raster Proxies are small files stored on local file systems that reference much larger raster data files stored remotely. A user can work efficiently with collections of small Raster Proxy files, which are accessed by ArcGIS like conventional raster files. At the same time, the application can access the large-volume, remotely stored raster data as needed. Raster Proxy files can also cache tiles read from the slower remote storage, speeding up access and reducing the need to access the same data multiple times.
+OptimizeRasters can also generate raster proxies to simplify access to raster data stored on cloud or network storage. 
+Raster proxies are small files stored on local file systems that reference much larger raster data files stored remotely. A user can work efficiently with collections of small raster proxy files, which are accessed by ArcGIS like conventional raster files. At the same time, the application can access the large-volume, remotely stored raster data as needed. Raster proxy files can also cache tiles read from the slower remote storage, speeding up access and reducing the need to access the same data multiple times.
 
 ## Features
 * Streamlined data management 
@@ -25,13 +25,12 @@ Raster Proxies are small files stored on local file systems that reference much 
 * Configurable using included editable XML files
 * Open source code, implemented in Python using GDAL to handle a variety of raster formats
 
-## What's New in OptimizeRasters 2.0.1
-* Boto3 support
-* Google Cloud Storage support
-* IAM Role support
-* Updated to use GDAL 2.1 without the Kakadu driver (equivalent to ArcGIS 10.5.1 GDAL DLLs)
-* New -mode added to generate an orjob file without processing it
-* Updated storage location for Azure credential file 
+## What's New in OptimizeRasters 2.0.2
+* Cloud-Optimized GeoTIFF (COG) support
+* google-cloud-storage support
+* AWS Lambda implementation
+* Embed raster proxies in mosaic datasets by generating them as a table
+* Expanded documentation
 * Additional minor fixes and performance enhancements
 
 ## Instructions
@@ -43,9 +42,9 @@ Raster Proxies are small files stored on local file systems that reference much 
 
 **Optional Packages for Cloud Storage**
 
-To upload to Amazon S3 and Microsoft Azure cloud storage, there are some third-party packages for Python that need to be installed. 
+To upload to Amazon S3, Microsoft Azure, or Google Cloud Storage, there are some third-party packages for Python that need to be installed. 
 
-If Azure or boto is already installed, it is important to ensure you are running the most up-to-date version to avoid errors.
+If azure, boto3, or google-cloud-storage is already installed, it is important to ensure you are running the most up-to-date version to avoid errors.
 
 More information about installing and updating third-party packages can be found in the [OptimizeRasters documentation](https://github.com/Esri/OptimizeRasters/tree/master/Documentation).
 
@@ -55,7 +54,7 @@ More information about installing and updating third-party packages can be found
 * The OptimizeRasters geoprocessing toolbox requires ArcGIS Map 10.4.1+ / Pro 1.3+.
 * OptimizeRasters can be run from the command line even if ArcGIS is not installed.
 * There are OptimizeRasters versions for both Windows and Linux. 
-* OptimizeRasters can be used with Amazon Web Services Lambda serverless compute service, with some restrictions on data sizes.
+* OptimizeRasters can be used with Amazon Web Services Lambda serverless compute service, with some restrictions on raster file size.
 
 ## Resources
 
