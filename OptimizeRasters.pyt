@@ -1,4 +1,4 @@
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Copyright 2018 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
 # Version: 20180621
@@ -21,7 +21,7 @@
 # Optional Arguments:intempFolder, outtempFolder, cloneMRFFolder, cacheMRFFolder
 # Usage: To load within ArcMap
 # Author: Esri Imagery Workflows team
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 import arcpy
 from arcpy import env
@@ -152,7 +152,7 @@ def setPaths(xFname, values):
 
 
 def returnPaths(xFname):
-    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters', 'UseToken']
+    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters']
     xfName2 = os.path.normpath(xFname)
     if (not os.path.exists(xfName2)):
         return None
@@ -212,7 +212,8 @@ def config_Init(parentfolder, filename):
         print (awsfile)
         try:
             config.read(awsfile)
-        except:
+            config.add_section("Using_EC2 Instance_with_IAM_Role")
+        except BaseException:
             pass
         return config
     else:
@@ -240,11 +241,11 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
     else:
         appConfig = ConfigParser.RawConfigParser()
         mode = 'a'
-    isIAMRole = section.lower().startswith('iamrole:')
+    isIAMRole = section.lower().startswith('Using_')
     # let's validate the credentials before writing out.
     if (not isIAMRole and
             (peAction_.startswith('overwrite') or     # update existing or add new but ignore for del.
-            mode == 'a')):
+             mode == 'a')):
         try:
             import OptimizeRasters
         except Exception as e:
@@ -289,9 +290,26 @@ def getAvailableBuckets(ctlProfileType, ctlProfileName):
             if (not ORUI):
                 raise Exception()
             return ORUI.getAvailableBuckets()
-    except:
+    except BaseException:
         pass
     return []
+
+
+def checkPrerequisites(parameters, cloudType, ctrlIndexPos):
+    cType = 'boto3'
+    try:
+        if (cloudType.startswith('Amazon')):
+            import boto3
+        elif (cloudType.startswith('Microsoft')):
+            cType = 'azure'
+            from azure.storage.blob import BlockBlobService
+        elif (cloudType.startswith('Google')):
+            cType = 'google-cloud'
+            from google.cloud import storage
+    except ImportError as e:
+        parameters[ctrlIndexPos].setErrorMessage('{}\nTo fix, please install the python module ({}).'.format(str(e), cType))
+        return False
+    return True
 
 
 class Toolbox(object):
@@ -434,11 +452,10 @@ class ProfileEditor(object):
         action.enabled = False
 
         iAmRolePara.value = False
-        parameters = [profileType, profileName, iAmRolePara, accessKey, secretAccessKey, imRoleURL, action]
+        parameters = [profileType, profileName, accessKey, secretAccessKey, imRoleURL, action]
         return parameters
 
     def updateParameters(self, parameters):
-        isIAMRole = parameters[2].value
         if parameters[0].altered == True:
             pType = parameters[0].valueAsText
             if pType == 'Amazon S3':
@@ -450,29 +467,22 @@ class ProfileEditor(object):
             config_Init(pFolder, pfileName)
             if parameters[1].altered == True:
                 pName = parameters[1].valueAsText
-                if (config.has_section('{}{}'.format('iamrole:' if isIAMRole else '', pName))):
-                    parameters[6].enabled = True
+                if (config.has_section(pName)):
+                    parameters[5].enabled = True
                 else:
-                    parameters[6].enabled = False
-        if parameters[6].enabled == True:
+                    parameters[5].enabled = False
+        if parameters[5].enabled == True:
             pass
+            if parameters[2].value is None:
+                parameters[2].value = 'None'
             if parameters[3].value is None:
                 parameters[3].value = 'None'
-            if parameters[4].value is None:
-                parameters[4].value = 'None'
         else:
             pass
+            if parameters[2].value == 'None':
+                parameters[2].value = ''
             if parameters[3].value == 'None':
                 parameters[3].value = ''
-            if parameters[4].value == 'None':
-                parameters[4].value = ''
-        parameters[3].enabled = not isIAMRole   # access_key
-        parameters[4].enabled = not isIAMRole   # secret_key
-        if isIAMRole == True:
-            if parameters[3].valueAsText == '' or parameters[3].value is None:
-                parameters[3].value = 'None'
-            if parameters[4].valueAsText == '' or parameters[4].value is None:
-                parameters[4].value = 'None'
 
     def updateMessages(self, parameters):
         if parameters[0].altered == True:
@@ -481,13 +491,12 @@ class ProfileEditor(object):
                 parameters[0].setErrorMessage('Invalid Value. Pick from List only.')
                 return
             else:
+                if (not checkPrerequisites(parameters, pType, 0)):
+                    return False
                 parameters[0].clearMessage()
             if parameters[1].altered == True:
                 pType = parameters[0].valueAsText
                 pName = parameters[1].valueAsText
-                if (parameters[1] == True):
-                    pName = 'iamrole:' + pName
-
                 if (config.has_section(pName)):
                     parameters[1].setWarningMessage('Profile name already exists. Select the appropriate action.')
                 else:
@@ -512,20 +521,13 @@ class ProfileEditor(object):
             option2 = 'azure_account_key'
             option3 = 'azure_endpoint_url'
         pName = parameters[1].valueAsText
-        if parameters[6].enabled == False:
+        if parameters[5].enabled == False:
             peAction = ''
         else:
-            peAction = parameters[6].valueAsText
-        if parameters[2].value == False:
-            accessKeyID = parameters[3].valueAsText
-            accessSeceretKey = parameters[4].valueAsText
-        else:
-            pName = 'iamrole:' + pName
-            option1 = None
-            accessKeyID = ''
-            option2 = None
-            accessSeceretKey = ''
-        endPointURL = parameters[5].valueAsText
+            peAction = parameters[5].valueAsText
+        accessKeyID = parameters[2].valueAsText
+        accessSeceretKey = parameters[3].valueAsText
+        endPointURL = parameters[4].valueAsText
         config_writeSections(awsfile, peAction, pName, option1, accessKeyID, option2, accessSeceretKey, option3, endPointURL)
 
 
@@ -541,7 +543,7 @@ class OptimizeRasters(object):
     def getParameterInfo(self):
         storageTypes = ['Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud']    # 'local' must be the first element.
         optTemplates = arcpy.Parameter(
-            displayName="Configuration Files",
+            displayName="Configuration File",
             name="optTemplates",
             datatype="GPString",
             parameterType="Required",
@@ -600,7 +602,7 @@ class OptimizeRasters(object):
         outType.value = storageTypes[0]
 
         outprofiles = arcpy.Parameter(
-            displayName="Output Profile to Use",
+            displayName="Output Profile",
             name="outprofiles",
             datatype="GPString",
             parameterType="Required",
@@ -660,18 +662,25 @@ class OptimizeRasters(object):
         configVals.enabled = False
         configVals.category = 'Advanced'
 
-        parameters = [optTemplates, inType, inprofiles, inBucket, inPath, intempFolder, outType, outprofiles, outBucket, outPath, outtempFolder, cloneMRFFolder, cacheMRFFolder, editValue, configVals]
+        issecured = arcpy.Parameter(
+            displayName='Secured Bucket',
+            name='issecured',
+            datatype='GPBoolean',
+            parameterType='Optional',
+            direction='Input')
+
+        parameters = [optTemplates, inType, inprofiles, issecured, inBucket, inPath, intempFolder, outType, outprofiles, outBucket, outPath, outtempFolder, cloneMRFFolder, cacheMRFFolder, editValue, configVals]
         return parameters
 
     def updateParameters(self, parameters):
         configParams = parameters[0]
         configParams.filter.list = returntemplatefiles()
-        if parameters[13].value == True:
-            parameters[14].enabled = True
+        if parameters[14].value == True:
+            parameters[15].enabled = True
         else:
-            parameters[14].enabled = False
+            parameters[15].enabled = False
         if parameters[0].altered == True:
-            if parameters[14].altered == False:
+            if parameters[15].altered == False:
                 optTemplates = parameters[0].valueAsText
                 global templateinUse
                 templateinUse = optTemplates
@@ -683,7 +692,7 @@ class OptimizeRasters(object):
                     configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                 allValues = returnPaths(configFN)
                 if (allValues):
-                    attchValues(parameters[14], allValues)
+                    attchValues(parameters[15], allValues)
             else:
                 optTemplates = parameters[0].valueAsText
                 if templateinUse != optTemplates:
@@ -695,34 +704,37 @@ class OptimizeRasters(object):
                         configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                     allValues = returnPaths(configFN)
                     if (allValues):
-                        attchValues(parameters[14], allValues)
+                        attchValues(parameters[15], allValues)
                     templateinUse = optTemplates
         if parameters[1].altered == True:
             if parameters[1].valueAsText == 'Local':
                 parameters[2].filter.list = []
-                parameters[3].filter.list = []
+                parameters[4].filter.list = []
                 parameters[2].value = 'Profile'
                 parameters[2].enabled = False
+                parameters[4].enabled = False
+                parameters[3].value = False
                 parameters[3].enabled = False
             else:
                 pFolder = pfileName = None
+                parameters[3].enabled = True
                 if parameters[1].valueAsText == 'Amazon S3':
                     pFolder = AwsRoot
                     pfileName = 'credentials'
                     parameters[2].enabled = True
-                    parameters[3].enabled = True
+                    parameters[4].enabled = True
                 elif parameters[1].valueAsText == 'Microsoft Azure':
                     pFolder = AzureRoot
                     pfileName = 'azure_credentials'
                     parameters[2].enabled = True
-                    parameters[3].enabled = True
+                    parameters[4].enabled = True
                 elif parameters[1].valueAsText == 'Google Cloud':
                     pFolder = GoogleRoot
                     pfileName = '*.json'
                     parameters[2].enabled = True
-                    parameters[3].enabled = True
-                if parameters[3].value == 'Local':
-                    parameters[3].value = ''
+                    parameters[4].enabled = True
+                if parameters[4].value == 'Local':
+                    parameters[4].value = ''
                 if parameters[2].value == 'Profile':
                     parameters[2].value = ''
                 if (pFolder):
@@ -730,94 +742,93 @@ class OptimizeRasters(object):
                     if (p2Config):
                         p2List = p2Config.sections()
                         parameters[2].filter.list = p2List
-
         if parameters[2].altered == True:
             # fetch the list of bucket names available for the selected input profile
             availableBuckets = getAvailableBuckets(parameters[1], parameters[2])
             if (availableBuckets):
-                parameters[3].filter.list = availableBuckets        # 3 == bucket names
+                parameters[4].filter.list = availableBuckets        # 3 == bucket names
             else:
                 if (parameters[1].value == 'Local'):
-                    parameters[3].filter.list = [' ']
-                    parameters[3].enabled = False
-                    parameters[3].value = ' '
+                    parameters[4].filter.list = [' ']
+                    parameters[4].enabled = False
+                    parameters[4].value = ' '
                 else:
-                    parameters[3].filter.list = []
+                    parameters[4].filter.list = []
                     if (parameters[2].value is not None and
-                        not parameters[2].value.lower().startswith('iamrole:') and
+                        not parameters[2].value.lower().startswith('Using_') and
                             not parameters[2].value.lower().startswith('aws_publicbucket')):
                         if (not parameters[2].value.lower().endswith('public-buckets.json')):
-                            parameters[3].value = ''
+                            parameters[4].value = ''
             # ends
-        if parameters[6].altered == True:
-            if parameters[6].valueAsText == 'Local':
-                parameters[7].filter.list = []
+        if parameters[7].altered == True:
+            if parameters[7].valueAsText == 'Local':
                 parameters[8].filter.list = []
-                parameters[7].value = 'Profile'
-                parameters[8].value = 'Local'
-                parameters[7].enabled = False
+                parameters[9].filter.list = []
+                parameters[8].value = 'Profile'
+                parameters[9].value = 'Local'
                 parameters[8].enabled = False
+                parameters[9].enabled = False
             else:
                 pFolder = pfileName = None
-                parameters[7].enabled = True
                 parameters[8].enabled = True
-                if parameters[6].valueAsText == 'Amazon S3':
+                parameters[9].enabled = True
+                if parameters[7].valueAsText == 'Amazon S3':
                     pFolder = AwsRoot
                     pfileName = 'credentials'
-                    parameters[7].enabled = True
                     parameters[8].enabled = True
-                elif parameters[6].valueAsText == 'Microsoft Azure':
+                    parameters[9].enabled = True
+                elif parameters[7].valueAsText == 'Microsoft Azure':
                     pFolder = AzureRoot
                     pfileName = 'azure_credentials'
-                    parameters[7].enabled = True
                     parameters[8].enabled = True
-                elif parameters[6].valueAsText == 'Google Cloud':
+                    parameters[9].enabled = True
+                elif parameters[7].valueAsText == 'Google Cloud':
                     pFolder = GoogleRoot
                     pfileName = '*.json'
-                    parameters[7].enabled = True
                     parameters[8].enabled = True
-                if parameters[8].value == 'Local':
+                    parameters[9].enabled = True
+                if parameters[9].value == 'Local':
+                    parameters[9].value = ''
+                if parameters[8].value == 'Profile':
                     parameters[8].value = ''
-                if parameters[7].value == 'Profile':
-                    parameters[7].value = ''
                 if (pFolder):
                     p6Config = config_Init(pFolder, pfileName)
                     if (p6Config):
                         p6List = p6Config.sections()
-                        parameters[7].filter.list = p6List
+                        parameters[8].filter.list = p6List
 
-        if parameters[7].altered == True:
+        if parameters[9].altered == True:
             # fetch the list of bucket names available for the selected output profile
-            availableBuckets = getAvailableBuckets(parameters[6], parameters[7])
+            availableBuckets = getAvailableBuckets(parameters[7], parameters[8])
             if (availableBuckets):
-                parameters[8].filter.list = availableBuckets        # 8 == bucket names
+                parameters[9].filter.list = availableBuckets        # 8 == bucket names
             else:
-                if (parameters[6].value == 'Local'):
-                    parameters[8].filter.list = [' ']
-                    parameters[8].value = ' '
-                    parameters[8].enabled = False
+                if (parameters[7].value == 'Local'):
+                    parameters[9].filter.list = [' ']
+                    parameters[9].value = ' '
+                    parameters[9].enabled = False
                 else:
-                    parameters[8].filter.list = []
-                    if (parameters[7].value is not None and
-                            not parameters[7].value.lower().startswith('iamrole:')):
-                        if (not parameters[7].value.lower().endswith('public-buckets.json')):
-                            parameters[8].value = ''
+                    parameters[9].filter.list = []
+                    if (parameters[8].value is not None and
+                            not parameters[8].value.lower().startswith('Using_')):
+                        if (not parameters[8].value.lower().endswith('public-buckets.json')):
+                            parameters[9].value = ''
             # ends
-        if parameters[14].altered == True:
-            configValList = parameters[14].value
+        if parameters[15].altered == True:
+            configValList = parameters[15].value
             aVal = configValList[0][1].strip().lower()
             op = configValList[len(configValList) - 1][1].strip().lower()
             if (aVal == 'clonemrf' or aVal == 'cachingmrf' or aVal == 'rasterproxy'):
-                parameters[10].enabled = False
                 parameters[11].enabled = False
-                parameters[12].enabled = True
+                parameters[12].enabled = False
+                parameters[13].enabled = True
             else:
-                parameters[10].enabled = True
                 parameters[11].enabled = True
                 parameters[12].enabled = True
+                parameters[13].enabled = True
                 if (op == 'copyonly'):
-                    parameters[11].enabled = False
                     parameters[12].enabled = False
+                    parameters[13].enabled = False
 
     def updateMessages(self, parameters):
         storageTypes = ('Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud')    # 'local' must be the first element.
@@ -827,20 +838,24 @@ class OptimizeRasters(object):
             if (pType not in storageTypes):
                 parameters[1].setErrorMessage(errMessageListOnly)
             else:
+                if (not checkPrerequisites(parameters, pType, 1)):
+                    return False
                 parameters[1].clearMessage()
-        if parameters[6].altered == True:
-            pType = parameters[6].valueAsText
+        if parameters[7].altered == True:
+            pType = parameters[7].valueAsText
             if (pType not in storageTypes):
-                parameters[6].setErrorMessage(errMessageListOnly)
+                parameters[7].setErrorMessage(errMessageListOnly)
             else:
-                parameters[6].clearMessage()
+                if (not checkPrerequisites(parameters, pType, 7)):
+                    return False
+                parameters[7].clearMessage()
                 if (pType in storageTypes[1:]):  # skip the first element/local.
-                    if parameters[10].altered == False:
-                        if parameters[10].enabled == True:
-                            parameters[10].SetWarningMessage('For cloud storage output, a temporary output location is required.')
+                    if parameters[11].altered == False:
+                        if parameters[11].enabled == True:
+                            parameters[11].SetWarningMessage('For cloud storage output, a temporary output location is required.')
                     else:
-                        if parameters[10].valueAsText != '':
-                            parameters[10].clearMessage()
+                        if parameters[11].valueAsText != '':
+                            parameters[11].clearMessage()
 
     def isLicensed(parameters):
         """Set whether tool is licensed to execute."""
@@ -858,20 +873,20 @@ class OptimizeRasters(object):
 
         inType = parameters[1].valueAsText
         inprofiles = parameters[2].valueAsText
-        inBucket = parameters[3].valueAsText
-        inPath = parameters[4].valueAsText
-        intempFolder = parameters[5].valueAsText
-        outType = parameters[6].valueAsText
-        outprofiles = parameters[7].valueAsText
-        outBucket = parameters[8].valueAsText
-        outPath = parameters[9].valueAsText
-        outtempFolder = parameters[10].valueAsText
-        cloneMRFFolder = parameters[11].valueAsText
-        cacheOutputFolder = parameters[12].valueAsText
+        inBucket = parameters[4].valueAsText
+        inPath = parameters[5].valueAsText
+        intempFolder = parameters[6].valueAsText
+        outType = parameters[7].valueAsText
+        outprofiles = parameters[8].valueAsText
+        outBucket = parameters[9].valueAsText
+        outPath = parameters[10].valueAsText
+        outtempFolder = parameters[11].valueAsText
+        cloneMRFFolder = parameters[12].valueAsText
+        cacheOutputFolder = parameters[13].valueAsText
 
-        if parameters[13].enabled == True:
-            if parameters[13].value == True:
-                editedValues = parameters[14].value
+        if parameters[14].enabled == True:
+            if parameters[14].value == True:
+                editedValues = parameters[15].value
                 configFN = setPaths(configFN, editedValues)
         args['config'] = configFN
         args['output'] = outPath
@@ -883,6 +898,7 @@ class OptimizeRasters(object):
             pass
         else:
             args['clouddownload'] = 'true'
+            args['UseToken'] = parameters[3].valueAsText
             args['inputbucket'] = inBucket      # case-sensitive
             if (not inprofiles.lower().startswith('aws_publicbucket')):
                 args['inputprofile'] = inprofiles
@@ -908,6 +924,7 @@ class OptimizeRasters(object):
             args['cache'] = cacheOutputFolder
         if cloneMRFFolder is not None:
             args['rasterproxypath'] = cloneMRFFolder
+
         # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)

@@ -6,8 +6,8 @@
 		<ArcGISFormat>1.0</ArcGISFormat>
 		<ArcGISstyle>ISO 19139 Metadata Implementation Specification</ArcGISstyle>
 		<SyncOnce>TRUE</SyncOnce>
-		<ModDate>20170925</ModDate>
-		<ModTime>152344</ModTime>
+		<ModDate>20180711</ModDate>
+		<ModTime>151322</ModTime>
 		<scaleRange>
 			<minScale>150000000</minScale>
 			<maxScale>5000</maxScale>

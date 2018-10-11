@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2016 Esri
+# Copyright 2018 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20180705
+# Version: 20180927
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -186,7 +186,8 @@ CIN_S3_PREFIX = 'In_S3_Prefix'
 CIN_CLOUD_TYPE = 'In_Cloud_Type'
 COUT_VSICURL_PREFIX = 'Out_VSICURL_Prefix'
 CINOUT_S3_DEFAULT_DOMAIN = 's3.amazonaws.com'
-COUT_DELETE_AFTER_UPLOAD = 'Out_S3_DeleteAfterUpload'
+COUT_DELETE_AFTER_UPLOAD_OBSOLETE = 'Out_S3_DeleteAfterUpload'
+COUT_DELETE_AFTER_UPLOAD = 'DeleteAfterUpload'
 # ends
 
 # const
@@ -324,12 +325,19 @@ class ProfileEditorUI(UI):
             else:
                 raise Exception('Invalid storage type')
         except Exception as e:
-            from botocore.exceptions import ClientError
-            if (isinstance(e, ClientError)):
-                exCode = e.response['Error']['Code'].lower()
-                if (exCode not in ['invalidaccesskeyid', 'signaturedoesnotmatch']):
-                    return True  # the user may not have the access rights to list buckets but the bucket keys/contents could be accessed if the bucket name is known.
-            self._errorText.append('Invalid Credentials>')
+            MsgInvalidCredentials = 'Invalid Credentials>'
+            if (self._storageType == self.TypeAmazon or
+                    self._storageType == self.TypeAlibaba):
+                try:
+                    from botocore.exceptions import ClientError
+                except ImportError as e:
+                    self._errorText.append(str(e))
+                    return False
+                if (isinstance(e, ClientError)):
+                    exCode = e.response['Error']['Code'].lower()
+                    if (exCode not in ['invalidaccesskeyid', 'signaturedoesnotmatch']):
+                        return True  # the user may not have the access rights to list buckets but the bucket keys/contents could be accessed if the bucket name is known.
+            self._errorText.append(MsgInvalidCredentials)
             self._errorText.append(str(e))
             return False
         return True
@@ -516,7 +524,7 @@ class Lambda:
             _orjob._header['config'] = '/tmp/{}'.format(configName)
         configContent = ''
         try:
-            with open(configPath) as f:
+            with open(configPath, 'rb') as f:
                 configContent = f.read()
         except Exception as e:
             self._base.message('{}'.format(str(e)), self._base.const_critical_text)
@@ -528,7 +536,7 @@ class Lambda:
                     return False
             if (not self._updateCredentials(doc, 'Out')):
                 return False
-            configContent = doc.toprettyxml(indent="\t", encoding="utf-8")
+            configContent = doc.toprettyxml()
         except Exception as e:
             self._base.message(str(e), self._base.const_critical_text)
             return False
@@ -615,6 +623,8 @@ class Lambda:
             pool.run()
             self._base.getUserConfiguration.getValue(CPRT_HANDLER).write()    # update .orjob status
             self._base.message('duration> {}s'.format((datetime.now() - timeStart).total_seconds()))
+            if (pool.isErrorDetected):
+                return False
         except Exception as e:
             self._base.message('{}'.format(str(e)), self._base.const_critical_text)
             return False
@@ -669,11 +679,14 @@ class LambdaFunction(threading.Thread):
             if (not respJSON):
                 return None
             respStatus = respJSON['status'] if 'status' in respJSON else None
-            report = self.base.getUserConfiguration.getValue(CPRT_HANDLER)
-            report.syncRemoteToLocal(respJSON)
+            if (self.base is not None):
+                report = self.base.getUserConfiguration.getValue(CPRT_HANDLER)
+                report.syncRemoteToLocal(respJSON)
             self.message('Completed/{}/Status [{}]'.format(self.jobID, str(respStatus)))
         except Exception as e:
             self.message('{}'.format(e), self.base.const_critical_text if self.base else 2)    # 2 for critical
+            if (self.base is not None):
+                self.base.getUserConfiguration.setValue(CCFG_LAMBDA_INVOCATION_ERR, True)
             return False
         return True
 
@@ -693,6 +706,7 @@ class ThreadPool(object):
                 isinstance(kwargs[self.Base], Base)):
             self.base = kwargs[self.Base]
         self.work = []
+        self._isErrorDetected = False
 
     def init(self, maxWorkers=DefMaxWorkers):
         try:
@@ -710,6 +724,10 @@ class ThreadPool(object):
             if (hasattr(self.base, 'message')):
                 return self.base.message(message, messageType)
         print (message)
+
+    @property
+    def isErrorDetected(self):
+        return self._isErrorDetected
 
     def run(self):
         lenBuffer = self.maxWorkers
@@ -748,6 +766,10 @@ class ThreadPool(object):
                 except Exception as e:
                     self.message(str(e))
                     continue
+        if (self.base is not None):
+            if (self.base.getUserConfiguration.getValue(CCFG_LAMBDA_INVOCATION_ERR)):
+                self._isErrorDetected = True
+                return False
         return True
 
 
@@ -1437,7 +1459,7 @@ class UpdateMRF:
                 _mrfBody = _mrfBody.replace('\n', '') + '\n'
                 self._base._modifiedProxies.append(_mrfBody)
                 if (self._or_mode == 'rasterproxy' or
-                    self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
+                        self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
                     try:
                         os.remove(self._input)
                         os.remove('{}.aux.xml'.format(self._input))
@@ -2688,8 +2710,8 @@ class S3Storage:
                     awsSessionToken = None
                     sessionProfile = _profile_name
                     if (_profile_name and
-                            _profile_name.lower().startswith('iamrole:')):
-                        roleInfo = self.getIamRoleInfo(_profile_name.split(':')[1])
+                            _profile_name.lower().startswith('using_')):
+                        roleInfo = self.getIamRoleInfo()
                         if (roleInfo is None):
                             return False
                         sessionProfile = None
@@ -2703,7 +2725,7 @@ class S3Storage:
                         # ends
                     self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
                     session = boto3.Session(self.CAWS_ACCESS_KEY_ID if not sessionProfile else None, self.CAWS_ACCESS_KEY_SECRET if not sessionProfile else None,
-                                            profile_name=_profile_name if sessionProfile else None, aws_session_token=awsSessionToken if awsSessionToken else None)
+                                            profile_name=_profile_name if not awsSessionToken else None, aws_session_token=awsSessionToken if awsSessionToken else None)
                     endpointURL = None
                     AWSEndpointURL = 'aws_endpoint_url'
                     SessionProfile = 'profiles'
@@ -2761,14 +2783,23 @@ class S3Storage:
             self.remote_path = ''   # defaults to bucket root.
         return True
 
-    def getIamRoleInfo(self, roleName):
-        roleMetaUrl = 'http://169.254.169.254/latest/meta-data/iam/security-credentials/{}'.format(roleName)
+    def getIamRoleInfo(self):
+        roleMetaUrl = 'http://169.254.169.254/latest/meta-data/iam/security-credentials'
+        urlResponse = None
         try:
             urlResponse = urlopen(roleMetaUrl)
+            IamRole = urlResponse.read()
+            if (IamRole.find('404') != -1):
+                return None
+            urlResponse.close()
+            urlResponse = urlopen('{}/{}'.format(roleMetaUrl, IamRole))
             roleInfo = json.loads(urlResponse.read())
         except Exception as e:
-            self._base.message('IAM Role not found ({})'.format(roleName), self._base.const_critical_text)
+            self._base.message('IAM Role not found.', self._base.const_critical_text)
             return None
+        finally:
+            if (urlResponse):
+                urlResponse.close()
         if (self.RoleAccessKeyId in roleInfo and
             self.RoleSecretAccessKey in roleInfo and
                 self.RoleToken in roleInfo):
@@ -3086,6 +3117,7 @@ CCFG_RASTERS_NODE = 'RasterFormatFilter'
 CCFG_EXCLUDE_NODE = 'ExcludeFilter'
 CCFG_PRIVATE_INC_BOTO = '__inc_boto__'
 CCFG_PRIVATE_OUTPUT = '__output__'
+CCFG_LAMBDA_INVOCATION_ERR = '__LAMBDA_INV_ERR__'
 CCFG_INTERLEAVE = 'Interleave'
 CCFG_PREDICTOR = 'Predictor'
 
@@ -3830,7 +3862,7 @@ class compression(object):
                     output_file += CloudOGTIFFExt
                 useVsimem = self._base.getBooleanValue(self.m_user_config.getValue('vsimem'))
                 args.append('"{}{}"'.format('/vsimem/' if useVsimem else '', output_file))
-                self.message('Applying compression (%s)' % (input_file))
+                self.message('Applying compression (%s)' % (useTokenPath if useTokenPath else input_file))
                 ret = self._call_external(args, name=timeIt, method=TimeIt.Conversion, store=self._base)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
                 if (not ret):
@@ -4349,8 +4381,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.2'
-    __program_date__ = '20180705'
+    __program_ver__ = 'v2.0.3'
+    __program_date__ = '20180927'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4814,11 +4846,13 @@ class Application(object):
                 if (isinput_s3):
                     self._args.op = COP_NOCONVERT
                     cfg.setValue(COUT_DELETE_AFTER_UPLOAD, True)    # Delete temporary files in (local) transit for (op={COP_COPYONLY}) if the input source is from (cloud).
-                    # However, If the input (source) path is form the local machine the config value in (COUT_DELETE_AFTER_UPLOAD) is used.
+                    # However, If the input (source) path is from the local machine, the config value in (COUT_DELETE_AFTER_UPLOAD) is used.
         # ends
         if (self._args.op):
-            self._args.op = self._args.op.lower()
-            if (self._args.op not in _utility):
+            splt = self._args.op.split(':')
+            splt[0] = splt[0].lower()
+            self._args.op = ':'.join(splt)
+            if (splt[0] not in _utility):   # -op arg can have multiple init values separated by ':', e.g. -op lambda:function:xyz
                 self._base.message('Invalid utility operation mode ({})'.format(self._args.op), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
             if(self._args.op == COP_RPT or
@@ -5119,10 +5153,13 @@ class Application(object):
             else:
                 self._base.message('Invalid value for ({})'.format(COUT_CLOUD_TYPE), self._base.const_critical_text)
                 return(terminate(self._base, eFAIL))
-
+        isDeleteAfterUpload = cfg.getValue(COUT_DELETE_AFTER_UPLOAD)
+        if (isDeleteAfterUpload is None):
+            isDeleteAfterUpload = cfg.getValue(COUT_DELETE_AFTER_UPLOAD_OBSOLETE)
+        isDeleteAfterUpload = self._base.getBooleanValue(isDeleteAfterUpload)
         user_args_Callback = {
             USR_ARG_UPLOAD: self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)),
-            USR_ARG_DEL: self._base.getBooleanValue(cfg.getValue(COUT_DELETE_AFTER_UPLOAD))
+            USR_ARG_DEL: isDeleteAfterUpload
         }
         # ends
         cpy = Copy(self._base)
@@ -5341,7 +5378,17 @@ class Application(object):
                     return self.__initOperationCreateJob()
                 # process @ lambda?
                 if (self._isLambdaJob()):
-                    return(terminate(self._base, eOK if self._runLambdaJob(g_rpt._report_file) else eFAIL))
+                    _rpt = Report(self._base)
+                    if (not _rpt.init(_project_path) or
+                            not _rpt.read()):
+                        self._base.message('Unable to read the -input report file ({})'.format(self._args.input), self._base.const_critical_text)
+                        return(terminate(self._base, eFAIL))
+                    self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
+                    ret = eOK if self._runLambdaJob(g_rpt._report_file) else eFAIL
+                    if (ret == eOK):
+                        if (self._args.op != COP_LAMBDA):   # synchronous call.
+                            self._moveJobFileToLogPath()
+                    return(terminate(self._base, ret))
                 # ends
                 self._args.op = None
                 self._args.input = _project_path
@@ -5670,10 +5717,7 @@ class Application(object):
                 _status = eFAIL
             if (_status == eOK):
                 if (not CRUN_IN_AWSLAMBDA):
-                    if (self._base.getMessageHandler and
-                            (not self._base.getBooleanValue(cfg.getValue('KeepLogFile')) and
-                             not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder))):
-                        _status = eFAIL
+                    _status = self._moveJobFileToLogPath()
             timeReport = self._args.timeit
             if (timeReport):
                 _rpt.writeTimeItReport(timeReport)  # write the execution time details report
@@ -5688,6 +5732,20 @@ class Application(object):
         # ends
         self._base.message('Done..\n')
         return(terminate(self._base, _status))
+
+    def _moveJobFileToLogPath(self):
+        global _rpt
+        global cfg
+        if (self._base is None or
+                _rpt is None):
+            return eFAIL
+        status = eOK
+        if (self._base.getMessageHandler and
+                (not self._base.getBooleanValue(cfg.getValue('KeepLogFile')) and
+                 not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder))):
+            self._base.message('Unable to move the .orjob file to the log path.', self._base.const_warning_text)
+            status = eFAIL
+        return status
 
 
 def threadProxyRaster(req, base, comp, args):
@@ -5804,6 +5862,7 @@ def main():
     duration = (datetime.now() - jobStart).total_seconds()
     print ('Time taken> {}s'.format(duration))
     return status
+
 
 if __name__ == '__main__':
     ret = main()
