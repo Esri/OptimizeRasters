@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ------------------------------------------------------------------------------
-# Name: access_from_client.py.py
+# Name: processUsingAnInputFolder.py
 # Description: Sample code snippet to show how to consume OR from custom code.
 # Version: 20170416
 # Requirements: Python
