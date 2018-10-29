@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20180621
+# Version: 20181029
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -41,6 +41,8 @@ templateinUse = None
 AzureRoot = '.OptimizeRasters/Microsoft'
 GoogleRoot = '.OptimizeRasters/Google'
 AwsRoot = '.aws'
+PublicBucket = 'Public Bucket'
+EC2WIAMRole = 'Using_EC2 Instance_with_IAM_Role'
 
 
 def returnDate():
@@ -209,10 +211,12 @@ def config_Init(parentfolder, filename):
         return config
     awsfile = os.path.join(awsfolder, filename)
     if os.path.exists(awsfile) == True:
-        print (awsfile)
         try:
             config.read(awsfile)
-            config.add_section("Using_EC2 Instance_with_IAM_Role")
+            if (not config.has_section(PublicBucket)):
+                config.add_section(PublicBucket)
+            if (not config.has_section(EC2WIAMRole)):
+                config.add_section(EC2WIAMRole)
         except BaseException:
             pass
         return config
@@ -241,7 +245,7 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
     else:
         appConfig = ConfigParser.RawConfigParser()
         mode = 'a'
-    isIAMRole = section.lower().startswith('Using_')
+    isIAMRole = section.lower().startswith(EC2WIAMRole.lower())
     # let's validate the credentials before writing out.
     if (not isIAMRole and
             (peAction_.startswith('overwrite') or     # update existing or add new but ignore for del.
@@ -275,13 +279,14 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
 
 
 def getAvailableBuckets(ctlProfileType, ctlProfileName):
+    response = {'response': {'results': False, 'buckets': []}}
     try:
         import OptimizeRasters
         if (ctlProfileType.valueAsText):
             inputSourceType = ctlProfileType.valueAsText.lower()
             storageType = OptimizeRasters.Store.TypeAmazon
             if (inputSourceType.startswith('local')):
-                return []
+                return response
             elif (inputSourceType.find('azure') != -1):
                 storageType = OptimizeRasters.Store.TypeAzure
             elif (inputSourceType.find('google') != -1):
@@ -292,7 +297,7 @@ def getAvailableBuckets(ctlProfileType, ctlProfileName):
             return ORUI.getAvailableBuckets()
     except BaseException:
         pass
-    return []
+    return response
 
 
 def checkPrerequisites(parameters, cloudType, ctrlIndexPos):
@@ -673,6 +678,10 @@ class OptimizeRasters(object):
         return parameters
 
     def updateParameters(self, parameters):
+        if (parameters[4].value):
+            parameters[4].value = parameters[4].value.strip()
+        if (parameters[9].value):
+            parameters[9].value = parameters[9].value.strip()
         configParams = parameters[0]
         configParams.filter.list = returntemplatefiles()
         if parameters[14].value == True:
@@ -744,9 +753,11 @@ class OptimizeRasters(object):
                         parameters[2].filter.list = p2List
         if parameters[2].altered == True:
             # fetch the list of bucket names available for the selected input profile
-            availableBuckets = getAvailableBuckets(parameters[1], parameters[2])
-            if (availableBuckets):
-                parameters[4].filter.list = availableBuckets        # 3 == bucket names
+            response = getAvailableBuckets(parameters[1], parameters[2])
+            results = response['response']['results']
+            if (results and
+                    response['response']['buckets']):
+                parameters[4].filter.list = response['response']['buckets']        # 3 == bucket names
             else:
                 if (parameters[1].value == 'Local'):
                     parameters[4].filter.list = [' ']
@@ -755,10 +766,11 @@ class OptimizeRasters(object):
                 else:
                     parameters[4].filter.list = []
                     if (parameters[2].value is not None and
-                        not parameters[2].value.lower().startswith('Using_') and
-                            not parameters[2].value.lower().startswith('aws_publicbucket')):
+                        not parameters[2].value.lower().startswith(EC2WIAMRole.lower()) and
+                            not parameters[2].value.lower().startswith(PublicBucket.lower())):
                         if (not parameters[2].value.lower().endswith('public-buckets.json')):
-                            parameters[4].value = ''
+                            if (not results):
+                                parameters[4].value = ''
             # ends
         if parameters[7].altered == True:
             if parameters[7].valueAsText == 'Local':
@@ -799,9 +811,11 @@ class OptimizeRasters(object):
 
         if parameters[9].altered == True:
             # fetch the list of bucket names available for the selected output profile
-            availableBuckets = getAvailableBuckets(parameters[7], parameters[8])
-            if (availableBuckets):
-                parameters[9].filter.list = availableBuckets        # 8 == bucket names
+            response = getAvailableBuckets(parameters[7], parameters[8])
+            results = response['response']['results']
+            if (results and
+                    response['response']['buckets']):
+                parameters[9].filter.list = response['response']['buckets']        # 8 == bucket names
             else:
                 if (parameters[7].value == 'Local'):
                     parameters[9].filter.list = [' ']
@@ -810,9 +824,10 @@ class OptimizeRasters(object):
                 else:
                     parameters[9].filter.list = []
                     if (parameters[8].value is not None and
-                            not parameters[8].value.lower().startswith('Using_')):
+                            not parameters[8].value.lower().startswith(EC2WIAMRole.lower())):
                         if (not parameters[8].value.lower().endswith('public-buckets.json')):
-                            parameters[9].value = ''
+                            if (not results):
+                                parameters[9].value = ''
             # ends
         if parameters[15].altered == True:
             configValList = parameters[15].value
@@ -900,7 +915,7 @@ class OptimizeRasters(object):
             args['clouddownload'] = 'true'
             args['UseToken'] = parameters[3].valueAsText
             args['inputbucket'] = inBucket      # case-sensitive
-            if (not inprofiles.lower().startswith('aws_publicbucket')):
+            if (not inprofiles.lower().startswith(PublicBucket.lower())):
                 args['inputprofile'] = inprofiles
             if inType == 'Amazon S3':
                 args['clouddownloadtype'] = 'amazon'

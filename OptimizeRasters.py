@@ -337,6 +337,8 @@ class ProfileEditorUI(UI):
                     exCode = e.response['Error']['Code'].lower()
                     if (exCode not in ['invalidaccesskeyid', 'signaturedoesnotmatch']):
                         return True  # the user may not have the access rights to list buckets but the bucket keys/contents could be accessed if the bucket name is known.
+                    elif(exCode in ['accessdenied']):
+                        return True  # the user has valid credentials but without the bucketlist permission.
             self._errorText.append(MsgInvalidCredentials)
             self._errorText.append(str(e))
             return False
@@ -350,9 +352,11 @@ class OptimizeRastersUI(ProfileEditorUI):
 
     def getAvailableBuckets(self):
         ret = self.validateCredentials()
+        response = {'response': {'results': ret, 'buckets': []}}
         if (not ret):
-            return None
-        return self._availableBuckets
+            return response
+        response['response']['buckets'] = self._availableBuckets
+        return response
 
 
 class MEMORYSTATUSEX(ctypes.Structure):
@@ -5727,8 +5731,12 @@ class Application(object):
             pfname = cfg.getValue('rpfname', False)
             if (pfname):
                 with open(pfname, 'a') as rpWriter:
+                    rpWriter.write('ObjectID;Raster\n')
                     for i in range(0, len(self._base._modifiedProxies)):
-                        rpWriter.write(self._base._modifiedProxies[i])
+                        proxyStr = self._base._modifiedProxies[i]
+                        proxyStr = ' '.join(proxyStr.split()).replace('"', '\'')
+                        proxyStr = '><'.join(proxyStr.split('> <'))
+                        rpWriter.write('{};{}\n'.format(i + 1, proxyStr))
         # ends
         self._base.message('Done..\n')
         return(terminate(self._base, _status))
