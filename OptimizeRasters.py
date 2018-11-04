@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20180927
+# Version: 20181104
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2799,7 +2799,7 @@ class S3Storage:
             urlResponse = urlopen('{}/{}'.format(roleMetaUrl, IamRole))
             roleInfo = json.loads(urlResponse.read())
         except Exception as e:
-            self._base.message('IAM Role not found.', self._base.const_critical_text)
+            self._base.message('IAM Role not found.\n{}'.format(str(e)), self._base.const_critical_text)
             return None
         finally:
             if (urlResponse):
@@ -2839,12 +2839,13 @@ class S3Storage:
         if (Contents in result):
             for k in result[Contents]:
                 keys.append(k['Key'])
-            if (NextMarker in result):
-                self.list(connection, bucket, prefix, includeSubFolders, keys, result[NextMarker])
-        if (not includeSubFolders):
-            return keys
         for item in result.get('CommonPrefixes', []):
+            if (not includeSubFolders):
+                if (item['Prefix'].endswith('/')):
+                    continue
             self.list(connection, bucket, item.get('Prefix'), includeSubFolders, keys, marker)
+        if (NextMarker in result):
+            self.list(connection, bucket, prefix, includeSubFolders, keys, result[NextMarker])
         return keys
 
     def getS3Content(self, prefix, cb=None, precb=None):
@@ -4385,8 +4386,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.3'
-    __program_date__ = '20180927'
+    __program_ver__ = 'v2.0.4'
+    __program_date__ = '20181104'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
