@@ -2792,7 +2792,7 @@ class S3Storage:
         urlResponse = None
         try:
             urlResponse = urlopen(roleMetaUrl)
-            IamRole = urlResponse.read()
+            IamRole = urlResponse.read().decode('utf-8')
             if (IamRole.find('404') != -1):
                 return None
             urlResponse.close()
