@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20181029
+# Version: 20181104
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -913,7 +913,7 @@ class OptimizeRasters(object):
             pass
         else:
             args['clouddownload'] = 'true'
-            args['UseToken'] = parameters[3].valueAsText
+            args['usetoken'] = parameters[3].valueAsText
             args['inputbucket'] = inBucket      # case-sensitive
             if (not inprofiles.lower().startswith(PublicBucket.lower())):
                 args['inputprofile'] = inprofiles
