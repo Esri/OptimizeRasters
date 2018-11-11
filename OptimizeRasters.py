@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20181104
+# Version: 20181111
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -881,9 +881,9 @@ class Base(object):
         tokenPath = None
         if (self.getBooleanValue(self.getUserConfiguration.getValue(UseToken)) and
                 self.getBooleanValue(self.getUserConfiguration.getValue('iss3'))):
-            cloudHandler = 'vsis3'
-            if (self.getUserConfiguration.getValue(CIN_CLOUD_TYPE, True) == CCLOUD_AZURE):
-                cloudHandler = 'vsiaz'
+            cloudHandler = self.getSecuredCloudHandlerPrefix(CS3STORAGE_IN)
+            if (not cloudHandler):
+                return None
             tokenPath = inputPath.replace(self.getUserConfiguration.getValue(CIN_S3_PREFIX, False),
                                           '/{}/{}/'.format(cloudHandler, self.getUserConfiguration.getValue('In_S3_Bucket', False)))
         return tokenPath
@@ -1145,6 +1145,18 @@ class Base(object):
             setUploadRecordStatus(user_args[Input] if user_args and Input in user_args else input_file, CRPT_YES)
         return (len(ret_buff) > 0)
 
+    def getSecuredCloudHandlerPrefix(self, direction):
+        if (not self.getBooleanValue(self.getUserConfiguration.getValue(UseToken))):
+            self.message('getSecuredCloudHandlerPrefix/-usetoken is false', self.const_warning_text)
+            return None
+        storageType = self.getUserConfiguration.getValue(COUT_CLOUD_TYPE if direction == CS3STORAGE_OUT else CIN_CLOUD_TYPE, True)
+        prefix = 'vsis3'
+        if (storageType == CCLOUD_AZURE):
+            prefix = 'vsiaz'
+        elif (storageType == CCLOUD_GOOGLE):
+            prefix = 'vsigs'
+        return prefix
+
 
 class GDALInfo(object):
     CGDAL_INFO_EXE = 'gdalinfo'
@@ -1373,6 +1385,12 @@ class UpdateMRF:
                     (usrPath, usrPathPos) = usrPath.split(CHASH_DEF_SPLIT_CHAR)
                 _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
                 if (_rasterSource.startswith('/vsicurl/')):
+                    if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken)) and
+                            not self._base.getBooleanValue(self._base.getUserConfiguration.getValue('iss3'))):
+                        cloudHandler = self._base.getSecuredCloudHandlerPrefix(CS3STORAGE_OUT)
+                        if (cloudHandler):
+                            _rasterSource = '/{}/{}/{}{}'.format(cloudHandler, self._base.getUserConfiguration.getValue('Out_S3_Bucket', False),
+                                                               self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False), output.split('/')[-1])
                     _rasterSource = self._base.urlEncode(_rasterSource)
                 if (usrPath):
                     _idx = _rasterSource.find(self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False))
@@ -4386,8 +4404,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4'
-    __program_date__ = '20181104'
+    __program_ver__ = 'v2.0.4a'
+    __program_date__ = '20181111'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
