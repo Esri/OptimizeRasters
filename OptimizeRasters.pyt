@@ -403,7 +403,7 @@ class ProfileEditor(object):
             name="profileType",
             datatype="GPString",
             parameterType="Required",
-            direction="Output")
+            direction="Input")
         profileType.filter.type = "ValueList"
         profileType.filter.list = ['Amazon S3', 'Microsoft Azure']
         profileType.value = 'Amazon S3'
