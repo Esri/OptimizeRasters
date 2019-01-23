@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20181111
+# Version: 20190120
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1390,7 +1390,7 @@ class UpdateMRF:
                         cloudHandler = self._base.getSecuredCloudHandlerPrefix(CS3STORAGE_OUT)
                         if (cloudHandler):
                             _rasterSource = '/{}/{}/{}{}'.format(cloudHandler, self._base.getUserConfiguration.getValue('Out_S3_Bucket', False),
-                                                               self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False), output.split('/')[-1])
+                                                                 self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False), output.split('/')[-1])
                     _rasterSource = self._base.urlEncode(_rasterSource)
                 if (usrPath):
                     _idx = _rasterSource.find(self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False))
@@ -2712,6 +2712,7 @@ class S3Storage:
         self._base = base
         self._isBucketPublic = False
         self._isRequesterPay = False
+        self._isNoAccessToListBuckets = False
 
     def init(self, remote_path, s3_key, s3_secret, direction):
         if (not isinstance(self._base, Base)):
@@ -2777,16 +2778,19 @@ class S3Storage:
                         except Exception as e:
                             if (int(e.response['Error']['Code']) == 404):
                                 self._isRequesterPay = True
-                                os.environ['AWS_ACCESS_KEY_ID'] = session.get_credentials().access_key
-                                os.environ['AWS_SECRET_ACCESS_KEY'] = session.get_credentials().secret_key
                                 os.environ['AWS_REQUEST_PAYER'] = 'requester'
                                 self._base.getUserConfiguration.setValue(UseToken, True)    # overrides, the cmd-line -usetoken plus the <UseToken> node value in the parameter file.
-                    if (not self._isRequesterPay):
+                            elif(int(e.response['Error']['Code']) == 403):
+                                self._isNoAccessToListBuckets = True
+                    if (not self._isRequesterPay and
+                            not self._isNoAccessToListBuckets):
                         self._base.message('Invalid {} S3 bucket ({})/credentials.'.format(
                             CRESUME_HDR_OUTPUT if direction == CS3STORAGE_OUT else CRESUME_HDR_INPUT,
                             self.m_bucketname),
                             self._base.const_critical_text)
                         return False
+                    os.environ['AWS_ACCESS_KEY_ID'] = session.get_credentials().access_key
+                    os.environ['AWS_SECRET_ACCESS_KEY'] = session.get_credentials().secret_key
                 except Exception as e:
                     self._base.message(str(e), self._base.const_critical_text)
                     return False
@@ -4404,8 +4408,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4a'
-    __program_date__ = '20181111'
+    __program_ver__ = 'v2.0.4b'
+    __program_date__ = '20190120'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5638,8 +5642,17 @@ class Application(object):
                 if (not buffer and
                         not threads):
                     break
+                preSignedURL = None
+                setPreAssignedURL = False
+                if (cloudDownloadType == Store.TypeAmazon):  # enabled only for 'amazon' for now.
+                    if (isinput_s3 and
+                            o_S3_storage is not None):
+                        setPreAssignedURL = True
                 for f in buffer:
                     try:
+                        if (setPreAssignedURL):
+                            preAkey = '{}{}'.format(f['src'], f['f'])
+                            self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
                         t = threading.Thread(target=threadProxyRaster, args=(f, self._base, comp, self._args))
                         t.daemon = True
                         t.start()
@@ -5796,7 +5809,7 @@ def threadProxyRaster(req, base, comp, args):
                 _dn_vsicurl_ = input_file.split(CVSICURL_PREFIX)[1]
                 file_url = None
                 try:
-                    file_url = urlopen(_dn_vsicurl_)
+                    file_url = urlopen(args.preAssignedURL)
                     bytesAtHeader = file_url.read(sigMRFLength)
                 except Exception as e:
                     base.message(str(e), base.const_critical_text)
