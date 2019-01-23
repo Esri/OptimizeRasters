@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190120
+# Version: 20190123
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -873,7 +873,7 @@ class Base(object):
             self._m_msg_callback(msg, status)
 
     def isLinux(self):
-        return True if sys.platform.lower().startswith('linux') else False
+        return sys.platform.lower().startswith(('linux', 'darwin'))
 
     def convertToTokenPath(self, inputPath):
         if (not inputPath):
@@ -4409,7 +4409,7 @@ class Args:
 
 class Application(object):
     __program_ver__ = 'v2.0.4b'
-    __program_date__ = '20190120'
+    __program_date__ = '20190123'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
