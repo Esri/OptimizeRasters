@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190123
+# Version: 20190213
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -58,7 +58,7 @@ else:
 import json
 import hashlib
 import binascii
-from datetime import datetime
+from datetime import datetime, timedelta
 # ends
 
 # enum error codes
@@ -149,6 +149,7 @@ CHASH_DEF_INSERT_POS = 2
 CHASH_DEF_CHAR = '#'
 CHASH_DEF_SPLIT_CHAR = '@'
 UseToken = 'usetoken'
+UseTokenOnOuput = 'usetokenonoutput'
 CTimeIt = 'timeit'
 
 # const node-names in the config file
@@ -165,6 +166,7 @@ COUT_AZURE_CONTAINER = 'Out_Azure_Container'
 COUT_AZURE_ACCESS = 'Out_Azure_Access'
 COUT_AZURE_PROFILENAME = 'Out_Azure_ProfileName'
 CIN_AZURE_PARENTFOLDER = 'In_Azure_ParentFolder'
+CIN_AZURE_CONTAINER = 'In_Azure_Container'
 COP = 'Op'
 # ends
 
@@ -1146,8 +1148,14 @@ class Base(object):
         return (len(ret_buff) > 0)
 
     def getSecuredCloudHandlerPrefix(self, direction):
-        if (not self.getBooleanValue(self.getUserConfiguration.getValue(UseToken))):
-            self.message('getSecuredCloudHandlerPrefix/-usetoken is false', self.const_warning_text)
+        warningMsg = 'getSecuredCloudHandlerPrefix/{} is false'.format('-usetoken' if direction == CS3STORAGE_IN else 'internal/usetokenonoutput')
+        if (direction == CS3STORAGE_IN and
+                not self.getBooleanValue(self.getUserConfiguration.getValue(UseToken))):
+            self.message(warningMsg, self.const_warning_text)
+            return None
+        if (direction == CS3STORAGE_OUT and
+                not self.getBooleanValue(self.getUserConfiguration.getValue(UseTokenOnOuput))):
+            self.message(warningMsg, self.const_warning_text)
             return None
         storageType = self.getUserConfiguration.getValue(COUT_CLOUD_TYPE if direction == CS3STORAGE_OUT else CIN_CLOUD_TYPE, True)
         prefix = 'vsis3'
@@ -1385,7 +1393,7 @@ class UpdateMRF:
                     (usrPath, usrPathPos) = usrPath.split(CHASH_DEF_SPLIT_CHAR)
                 _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
                 if (_rasterSource.startswith('/vsicurl/')):
-                    if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken)) and
+                    if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseTokenOnOuput)) and
                             not self._base.getBooleanValue(self._base.getUserConfiguration.getValue('iss3'))):
                         cloudHandler = self._base.getSecuredCloudHandlerPrefix(CS3STORAGE_OUT)
                         if (cloudHandler):
@@ -2017,7 +2025,7 @@ class ProgressPercentage(object):
         with self._lock:
             self._seen_so_far += bytes_amount
             percentage = (self._seen_so_far / self._size) * 100
-            message = "%s / %s  (%.2f%%)" % (
+            message = "%s / %d  (%.2f%%)" % (
                 self._seen_so_far, self._size,
                 percentage)
             if (self._base is not None):
@@ -2097,7 +2105,7 @@ class SlnTMStringIO:
             n = n - (nRead - buff_len)
         self.m_buff.seek(self.m_spos, 0)
         self.m_spos += n
-        return str(self.m_buff.read(n))
+        return self.m_buff.read(n)
 
     def readline(self, length=None):
         pass
@@ -2396,7 +2404,7 @@ class Azure(Store):
         super(Azure, self).__init__(account_name, account_key, profile_name, base)
         self._browsecontent = []
 
-    def init(self):
+    def init(self, direction=CS3STORAGE_IN):
         try:
             sasToken = None
             if (self._profile_name):
@@ -2408,8 +2416,19 @@ class Azure(Store):
                     if (not self._account_name or
                             not self._account_key):
                         return False
-            from azure.storage.blob import BlockBlobService
+            from azure.storage.blob import BlockBlobService, BlobPermissions
             self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key, sas_token=sasToken)
+            ACL = self._blob_service.get_container_acl(self._base.getUserConfiguration.getValue(CIN_AZURE_CONTAINER if direction == CS3STORAGE_IN else COUT_AZURE_CONTAINER))
+            if (ACL.public_access is None):  # internally access rights get checked on the input/output containers.
+                if (direction == CS3STORAGE_IN):
+                    self._base.getUserConfiguration.setValue(UseToken, True if self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken)) else False)
+                else:
+                    self._base.getUserConfiguration.setValue(UseTokenOnOuput, True)
+            if (self._base):
+                if (ACL.public_access is None or
+                        self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken if direction == CS3STORAGE_IN else UseTokenOnOuput))):
+                    os.environ['AZURE_STORAGE_ACCOUNT'] = self._account_name
+                    os.environ['AZURE_STORAGE_ACCESS_KEY'] = self._account_key
         except Exception as e:
             self.message(str(e), self.const_critical_text)
             return False
@@ -2645,7 +2664,7 @@ class Azure(Store):
         block_ids = []
         pos_buffer = upl_blocks = 0
         len_buffer = CCLOUD_UPLOAD_THREADS     # set this to no of parallel (chunk) uploads at once.
-        tot_blocks = (f_size / Azure.CHUNK_MIN_SIZE) + 1
+        tot_blocks = int((f_size / Azure.CHUNK_MIN_SIZE) + 1)
         idx = 1
         self.message('Uploading ({})'.format(blob_path))
         self.message('Total blocks to upload ({})'.format(tot_blocks))
@@ -2672,7 +2691,7 @@ class Azure(Store):
                 break
             for e in buffer:
                 try:
-                    block_id = base64.b64encode('%06d' % idx)
+                    block_id = base64.b64encode(b'%06d' % idx).decode('utf-8')
                     self.message('Adding block-id ({}/{})'.format(idx, tot_blocks))
                     t = threading.Thread(target=self._runBlock,
                                          args=(self._blob_service, e, self._upl_container_name, blob_name, block_id))
@@ -4408,8 +4427,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4b'
-    __program_date__ = '20190123'
+    __program_ver__ = 'v2.0.4c'
+    __program_date__ = '20190213'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5143,7 +5162,9 @@ class Application(object):
                 _out_profile = cfg.getValue(COUT_AZURE_PROFILENAME, False)
                 if (self._args.outputbucket):
                     _container = self._args.outputbucket
-                    cfg.setValue(COUT_AZURE_CONTAINER, self._args.outputbucket.lower())     # lowercased
+                    outBucket = self._args.outputbucket.lower()
+                    cfg.setValue(COUT_AZURE_CONTAINER, outBucket)     # lowercased
+                    cfg.setValue('Out_S3_Bucket', outBucket)    # UpdateMRF/update uses 'Out_S3_Bucket'/Generic key name to read in the output bucket name.
                 if (self._args.outputprofile):
                     _out_profile = self._args.outputprofile
                     cfg.setValue(COUT_AZURE_PROFILENAME, _out_profile)
@@ -5154,7 +5175,7 @@ class Application(object):
                     self._base.message('Empty/Invalid values detected for keys ({}/{}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME, COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER, COUT_AZURE_PROFILENAME), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 azure_storage = Azure(_account_name, _account_key, _out_profile, self._base)
-                if (not azure_storage.init()):
+                if (not azure_storage.init(CS3STORAGE_OUT)):
                     self._base.message(err_init_msg.format(CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format('http://{}.{}/{}/'.format(azure_storage.getAccountName, Azure.DefaultDomain, _container),
@@ -5235,7 +5256,10 @@ class Application(object):
             self._base.message('%s(%s)' % (msg_threads, CCFG_THREADS), self._base.const_warning_text)
         # ends
         # let's deal with copying when -input is on s3
-        isUseToken = self._args.usetoken if self._args.usetoken else cfg.getValue('UseToken')
+        storeUseToken = cfg.getValue('UseToken')
+        isUseToken = self._args.usetoken if self._args.usetoken else storeUseToken
+        if (not isUseToken):
+            isUseToken = self._base.getUserConfiguration.getValue(UseToken)
         cfg.setValue(UseToken, self._base.getBooleanValue(isUseToken))
         if (isinput_s3):
             cfg.setValue('iss3', True)
@@ -5299,6 +5323,7 @@ class Application(object):
                     return(terminate(self._base, eFAIL))
             elif (cloudDownloadType == Store.TypeAzure):
                 # let's do (Azure) init
+                self._base.getUserConfiguration.setValue(CIN_AZURE_CONTAINER, in_s3_bucket)
                 in_azure_storage = Azure(in_s3_id, in_s3_secret, in_s3_profile_name, self._base)
                 if (not in_azure_storage.init() or
                         not in_azure_storage.getAccountName):
@@ -5648,11 +5673,20 @@ class Application(object):
                     if (isinput_s3 and
                             o_S3_storage is not None):
                         setPreAssignedURL = True
+                elif(cloudDownloadType == Store.TypeAzure):
+                    if (isinput_s3 and
+                            in_azure_storage is not None):
+                        setPreAssignedURL = True
                 for f in buffer:
                     try:
                         if (setPreAssignedURL):
                             preAkey = '{}{}'.format(f['src'], f['f'])
-                            self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
+                            if (cloudDownloadType == Store.TypeAmazon):
+                                self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
+                            else:
+                                from azure.storage.blob import BlobPermissions
+                                SAS = in_azure_storage._blob_service.generate_blob_shared_access_signature(in_s3_bucket, preAkey, BlobPermissions.READ, datetime.utcnow() + timedelta(hours=1))
+                                self._args.preAssignedURL = in_azure_storage._blob_service.make_blob_url(in_s3_bucket, preAkey, sas_token=SAS)
                         t = threading.Thread(target=threadProxyRaster, args=(f, self._base, comp, self._args))
                         t.daemon = True
                         t.start()
@@ -5809,7 +5843,7 @@ def threadProxyRaster(req, base, comp, args):
                 _dn_vsicurl_ = input_file.split(CVSICURL_PREFIX)[1]
                 file_url = None
                 try:
-                    file_url = urlopen(args.preAssignedURL)
+                    file_url = urlopen(args.preAssignedURL if (hasattr(args, 'preAssignedURL') and args.preAssignedURL is not None) else _dn_vsicurl_)
                     bytesAtHeader = file_url.read(sigMRFLength)
                 except Exception as e:
                     base.message(str(e), base.const_critical_text)
