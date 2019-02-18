@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2018 Esri
+# Copyright 2019 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190213
+# Version: 20190218
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1159,7 +1159,10 @@ class Base(object):
             return None
         storageType = self.getUserConfiguration.getValue(COUT_CLOUD_TYPE if direction == CS3STORAGE_OUT else CIN_CLOUD_TYPE, True)
         prefix = 'vsis3'
-        if (storageType == CCLOUD_AZURE):
+        usingOSSDomain = self.getUserConfiguration.getValue('{}oss'.format('in' if direction == CS3STORAGE_IN else 'out'))  # alibaba?
+        if (usingOSSDomain):
+            prefix = 'vsioss'
+        elif (storageType == CCLOUD_AZURE):
             prefix = 'vsiaz'
         elif (storageType == CCLOUD_GOOGLE):
             prefix = 'vsigs'
@@ -2781,6 +2784,10 @@ class S3Storage:
                         self.CAWS_ACCESS_KEY_SECRET = session.get_credentials().secret_key
                     import botocore
                     useAlibaba = endpointURL and endpointURL.lower().find(SigAlibaba) != -1
+                    if (self._base.getUserConfiguration.getValue(UseToken)):
+                        os.environ['OSS_ACCESS_KEY_ID'] = session.get_credentials().access_key
+                        os.environ['OSS_SECRET_ACCESS_KEY'] = session.get_credentials().secret_key
+                    self.m_user_config.setValue('{}oss'.format('in' if direction == CS3STORAGE_IN else 'out'), useAlibaba)
                     self.con = session.resource('s3', endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(s3={'addressing_style': 'virtual'}) if useAlibaba else None)
                     if (self._isBucketPublic):
                         self.con.meta.client.meta.events.register('choose-signer.s3.*', botocore.handlers.disable_signing)
@@ -4427,8 +4434,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4c'
-    __program_date__ = '20190213'
+    __program_ver__ = 'v2.0.4d'
+    __program_date__ = '20190218'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5416,7 +5423,7 @@ class Application(object):
             if (g_is_generate_report and
                     g_rpt):
                 for req in files:
-                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') and req['src'] else '', req['f'])
                     if (self._base.getBooleanValue(cfg.getValue(CISTEMPINPUT))):
                         _tempinput = cfg.getValue(CTEMPINPUT, False)
                         _tempinput = _tempinput[:-1] if _tempinput.endswith('/') and not self._args.input.endswith('/') else _tempinput
@@ -5630,7 +5637,7 @@ class Application(object):
                     g_rpt):
                 for req in raster_buff:
                     (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], isinput_s3)
-                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') else '', req['f'])
+                    _src = '{}{}{}'.format(req['src'], '/' if not req['src'].replace('\\', '/').endswith('/') and req['src'] != '' else '', req['f'])
                     g_rpt.addFile(_src)
                 self._base.message('{}'.format(CRESUME_CREATE_JOB_TEXT).format(_project_path))
                 self._args.cloudupload = 'false'    # Uploading is disabled for modes related to caching.
