@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2018 Esri
+# Copyright 2019 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20181104
+# Version: 20190224
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -469,6 +469,13 @@ class ProfileEditor(object):
             elif pType == 'Microsoft Azure':
                 pFolder = AzureRoot
                 pfileName = 'azure_credentials'
+                isSAS = False
+                if (parameters[2].value):   # access key
+                    isSAS = parameters[2].value.lower().startswith('http')
+                valSecretKey = parameters[3].value
+                parameters[3].value = ' ' if isSAS else parameters[3].value if valSecretKey != ' ' else ''
+                parameters[3].enabled = not isSAS   # secret access key
+                parameters[4].enabled = not isSAS   # endpoint isn't used for SAS
             config_Init(pFolder, pfileName)
             if parameters[1].altered == True:
                 pName = parameters[1].valueAsText
@@ -477,35 +484,35 @@ class ProfileEditor(object):
                 else:
                     parameters[5].enabled = False
         if parameters[5].enabled == True:
-            pass
             if parameters[2].value is None:
                 parameters[2].value = 'None'
             if parameters[3].value is None:
                 parameters[3].value = 'None'
         else:
-            pass
             if parameters[2].value == 'None':
                 parameters[2].value = ''
             if parameters[3].value == 'None':
                 parameters[3].value = ''
 
     def updateMessages(self, parameters):
-        if parameters[0].altered == True:
+        if parameters[0].altered == False:
+            return
+        typeAZ = 'Microsoft Azure'
+        pType = parameters[0].valueAsText
+        if (pType != 'Amazon S3') and (pType != typeAZ):
+            parameters[0].setErrorMessage('Invalid Value. Pick from List only.')
+            return
+        else:
+            if (not checkPrerequisites(parameters, pType, 0)):
+                return False
+            parameters[0].clearMessage()
+        if parameters[1].altered == True:
             pType = parameters[0].valueAsText
-            if (pType != 'Amazon S3') and (pType != 'Microsoft Azure'):
-                parameters[0].setErrorMessage('Invalid Value. Pick from List only.')
-                return
+            pName = parameters[1].valueAsText
+            if (config.has_section(pName)):
+                parameters[1].setWarningMessage('Profile name already exists. Select the appropriate action.')
             else:
-                if (not checkPrerequisites(parameters, pType, 0)):
-                    return False
-                parameters[0].clearMessage()
-            if parameters[1].altered == True:
-                pType = parameters[0].valueAsText
-                pName = parameters[1].valueAsText
-                if (config.has_section(pName)):
-                    parameters[1].setWarningMessage('Profile name already exists. Select the appropriate action.')
-                else:
-                    parameters[1].clearMessage()
+                parameters[1].clearMessage()
 
     def isLicensed(parameters):
         """Set whether tool is licensed to execute."""
@@ -532,6 +539,8 @@ class ProfileEditor(object):
             peAction = parameters[5].valueAsText
         accessKeyID = parameters[2].valueAsText
         accessSeceretKey = parameters[3].valueAsText
+        if (accessSeceretKey == ' '):
+            accessSeceretKey = ''
         endPointURL = parameters[4].valueAsText
         config_writeSections(awsfile, peAction, pName, option1, accessKeyID, option2, accessSeceretKey, option3, endPointURL)
 

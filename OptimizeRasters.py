@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190218
+# Version: 20190224
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -282,6 +282,7 @@ class ProfileEditorUI(UI):
 
     def validateCredentials(self):
         try:
+            azure_storage = None
             if (self._storageType == self.TypeAmazon or
                     self._storageType == self.TypeAlibaba):
                 import boto3
@@ -341,6 +342,11 @@ class ProfileEditorUI(UI):
                         return True  # the user may not have the access rights to list buckets but the bucket keys/contents could be accessed if the bucket name is known.
                     elif(exCode in ['accessdenied']):
                         return True  # the user has valid credentials but without the bucketlist permission.
+            elif(self._storageType == self.TypeAzure):
+                if (azure_storage):
+                    if (azure_storage._SASToken):   # It's assumed, SAS string credentials aren't allowed to list buckets and the bucket name is picked from the SAS string.
+                        self._availableBuckets.append(azure_storage._SASBucket)
+                        return True
             self._errorText.append(MsgInvalidCredentials)
             self._errorText.append(str(e))
             return False
@@ -1212,7 +1218,7 @@ class GDALInfo(object):
         if (not input):             # invalid input
             return False
         args = [self._GDALPath]
-        args.append(input)
+        args.append('"{}"'.format(input))
         self.message('Using GDALInfo ({})..'.format(input), self._base.const_general_text)
         return self._call_external(args)
 
@@ -1402,6 +1408,7 @@ class UpdateMRF:
                         if (cloudHandler):
                             _rasterSource = '/{}/{}/{}{}'.format(cloudHandler, self._base.getUserConfiguration.getValue('Out_S3_Bucket', False),
                                                                  self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False), output.split('/')[-1])
+
                     _rasterSource = self._base.urlEncode(_rasterSource)
                 if (usrPath):
                     _idx = _rasterSource.find(self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False))
@@ -1423,7 +1430,8 @@ class UpdateMRF:
             if (not cachedNode):
                 cachedNode.append(doc.createElement('CachedSource'))
                 nodeSource = doc.createElement('Source')
-                nodeSource.appendChild(doc.createTextNode(_rasterSource))
+                azSAS = self._base.getUserConfiguration.getValue(CFGAZSASW, False)
+                nodeSource.appendChild(doc.createTextNode('{}{}'.format(_rasterSource, '?' + azSAS if azSAS else '')))
                 cachedNode[0].appendChild(nodeSource)
                 nodeMeta[0].insertBefore(cachedNode[0], nodeRaster[0])
             if (self._mode):
@@ -1443,7 +1451,8 @@ class UpdateMRF:
             if (autoCreateRasterProxy):
                 node = doc.getElementsByTagName('Source')
                 if (node):
-                    node[0].firstChild.nodeValue = os.path.join(_rasterSource, os.path.basename(self._input).split(CloudOGTIFFExt)[0])
+                    sourceVal = os.path.join(_rasterSource, os.path.basename(self._input).split(CloudOGTIFFExt)[0])
+                    node[0].firstChild.nodeValue = sourceVal
             # ends
             if (self._cachePath):
                 cache_output = self._cachePath
@@ -1598,7 +1607,7 @@ class Report:
                 value is None):
             return False
         self._createSnapshot()
-        _input = input.strip()
+        _input = input.strip().split('?')[0]
         if (_input.lower().endswith(self._m_skipExtentions)):
             return True     # not flagged as an err
         if (CTEMPINPUT in self._header):
@@ -2409,25 +2418,37 @@ class Azure(Store):
 
     def init(self, direction=CS3STORAGE_IN):
         try:
-            sasToken = None
-            if (self._profile_name):
-                if (self._profile_name.lower().startswith('http')):
-                    sasToken = self._profile_name.replace('?', '&')
-                    self._account_name = self._profile_name.split('.')[0].split('//')[1]
-                if (sasToken is None):
-                    (self._account_name, self._account_key) = self.readProfile(self.COUT_AZURE_ACCOUNTNAME_INFILE, self.COUT_AZURE_ACCOUNTKEY_INFILE)
-                    if (not self._account_name or
-                            not self._account_key):
-                        return False
+            if (not self._account_name):
+                (self._account_name, self._account_key) = self.readProfile(self.COUT_AZURE_ACCOUNTNAME_INFILE, self.COUT_AZURE_ACCOUNTKEY_INFILE)
+            self._SASToken = self._SASBucket = None
+            if (self._account_name and
+                    self._account_name.lower().startswith('http')):
+                breakSAS = self._account_name.split('?')
+                if (len(breakSAS) == 2):
+                    self._SASToken = breakSAS[-1]
+                    self._SASBucket = breakSAS[0].split('/')[-1]  # get bucket name from the SAS string.
+                if (self._base):
+                    self._base.getUserConfiguration.setValue(CFGAZSAS if direction == CS3STORAGE_IN else CFGAZSASW, self._SASToken)
+                self._account_name = self._account_name.split('.')[0].split('//')[1]
+            if (not self._account_name and
+                    not self._SASToken):
+                return False
             from azure.storage.blob import BlockBlobService, BlobPermissions
-            self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key, sas_token=sasToken)
-            ACL = self._blob_service.get_container_acl(self._base.getUserConfiguration.getValue(CIN_AZURE_CONTAINER if direction == CS3STORAGE_IN else COUT_AZURE_CONTAINER))
-            if (ACL.public_access is None):  # internally access rights get checked on the input/output containers.
-                if (direction == CS3STORAGE_IN):
-                    self._base.getUserConfiguration.setValue(UseToken, True if self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken)) else False)
-                else:
-                    self._base.getUserConfiguration.setValue(UseTokenOnOuput, True)
-            if (self._base):
+            self._blob_service = BlockBlobService(account_name=self._account_name, account_key=self._account_key, sas_token=self._SASToken)
+            ACL = None
+            try:
+                ACL = self._blob_service.get_container_acl(self._base.getUserConfiguration.getValue(CIN_AZURE_CONTAINER if direction == CS3STORAGE_IN else COUT_AZURE_CONTAINER))
+            except Exception as e:
+                pass
+            if (not ACL or
+                    ACL.public_access is None):  # internally access rights get checked on the input/output containers.
+                if (self._base):
+                    if (direction == CS3STORAGE_IN):
+                        self._base.getUserConfiguration.setValue(UseToken, True if self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken)) else False)
+                    else:
+                        self._base.getUserConfiguration.setValue(UseTokenOnOuput, True)
+            if (ACL and
+                    self._base):
                 if (ACL.public_access is None or
                         self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken if direction == CS3STORAGE_IN else UseTokenOnOuput))):
                     os.environ['AZURE_STORAGE_ACCOUNT'] = self._account_name
@@ -3170,6 +3191,8 @@ CCFG_RASTERS_NODE = 'RasterFormatFilter'
 CCFG_EXCLUDE_NODE = 'ExcludeFilter'
 CCFG_PRIVATE_INC_BOTO = '__inc_boto__'
 CCFG_PRIVATE_OUTPUT = '__output__'
+CFGAZSAS = '__szsas__'
+CFGAZSASW = '__szsasw__'
 CCFG_LAMBDA_INVOCATION_ERR = '__LAMBDA_INV_ERR__'
 CCFG_INTERLEAVE = 'Interleave'
 CCFG_PREDICTOR = 'Predictor'
@@ -3357,7 +3380,9 @@ def args_Callback_for_meta(args, user_data=None):
     args.append('-co')
     # let's fix the cache extension
     cache_source = user_data[0]
-    args.append('CACHEDSOURCE=%s' % (cache_source))
+    isQuotes = cache_source[0] == '"' and cache_source[-1] == '"'
+    quoteChar = '' if isQuotes else '"'
+    args.append('CACHEDSOURCE={}{}{}'.format(quoteChar, cache_source, quoteChar))
     # ends
     return args
 
@@ -3877,7 +3902,8 @@ class compression(object):
                     # ends
             do_pyramids = self.m_user_config.getValue('Pyramids')
             timeIt = kwargs['name'] if 'name' in kwargs else None
-            inputRaster = self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 and not isTempInput else '"{}"'.format(input_file)
+            azSAS = self.m_user_config.getValue(CFGAZSAS, False)
+            inputRaster = self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(CPLANET_IDENTIFY) == -1 and not azSAS and not isTempInput else '"{}"'.format(input_file)
             useTokenPath = self._base.convertToTokenPath(inputRaster)
             if (useTokenPath is not None):
                 inputRaster = useTokenPath
@@ -4294,7 +4320,8 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
         input_file = input_file.replace('\\', '/')
         isinput_s3 = True
     if (isinput_s3):
-        input_file = cfg.getValue(CIN_S3_PREFIX, False) + input_file
+        azSAS = cfg.getValue(CFGAZSAS, False)
+        input_file = '{}{}{}'.format(cfg.getValue(CIN_S3_PREFIX, False), input_file, '?' + azSAS if azSAS else '')
         output_file = outputfldr
         if (getBooleanValue(cfg.getValue(CISTEMPINPUT)) or
                 getBooleanValue(cfg.getValue(CISTEMPOUTPUT))):
@@ -4435,7 +4462,7 @@ class Args:
 
 class Application(object):
     __program_ver__ = 'v2.0.4d'
-    __program_date__ = '20190218'
+    __program_date__ = '20190222'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5691,9 +5718,10 @@ class Application(object):
                             if (cloudDownloadType == Store.TypeAmazon):
                                 self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url('get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
                             else:
-                                from azure.storage.blob import BlobPermissions
-                                SAS = in_azure_storage._blob_service.generate_blob_shared_access_signature(in_s3_bucket, preAkey, BlobPermissions.READ, datetime.utcnow() + timedelta(hours=1))
-                                self._args.preAssignedURL = in_azure_storage._blob_service.make_blob_url(in_s3_bucket, preAkey, sas_token=SAS)
+                                if (not cfg.getValue(CFGAZSAS)):
+                                    from azure.storage.blob import BlobPermissions
+                                    SAS = in_azure_storage._blob_service.generate_blob_shared_access_signature(in_s3_bucket, preAkey, BlobPermissions.READ, datetime.utcnow() + timedelta(hours=1))
+                                    self._args.preAssignedURL = in_azure_storage._blob_service.make_blob_url(in_s3_bucket, preAkey, sas_token=SAS)
                         t = threading.Thread(target=threadProxyRaster, args=(f, self._base, comp, self._args))
                         t.daemon = True
                         t.start()
