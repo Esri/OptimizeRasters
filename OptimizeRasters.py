@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190224
+# Version: 20190303
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4461,8 +4461,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4d'
-    __program_date__ = '20190222'
+    __program_ver__ = 'v2.0.4e'
+    __program_date__ = '20190303'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5295,6 +5295,9 @@ class Application(object):
         if (not isUseToken):
             isUseToken = self._base.getUserConfiguration.getValue(UseToken)
         cfg.setValue(UseToken, self._base.getBooleanValue(isUseToken))
+        if (self._args.rasterproxypath and
+                cfg.getValue(UseToken)):
+            cfg.setValue(UseTokenOnOuput, True)
         if (isinput_s3):
             cfg.setValue('iss3', True)
             in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
