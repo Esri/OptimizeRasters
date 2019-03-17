@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190303
+# Version: 20190317
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1402,14 +1402,21 @@ class UpdateMRF:
                     (usrPath, usrPathPos) = usrPath.split(CHASH_DEF_SPLIT_CHAR)
                 _rasterSource = '{}{}'.format(self._outputURLPrefix, _rasterSource.replace(self._homePath, ''))
                 if (_rasterSource.startswith('/vsicurl/')):
+                    isOutContainerSAS = False
                     if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseTokenOnOuput)) and
                             not self._base.getBooleanValue(self._base.getUserConfiguration.getValue('iss3'))):
                         cloudHandler = self._base.getSecuredCloudHandlerPrefix(CS3STORAGE_OUT)
                         if (cloudHandler):
-                            _rasterSource = '/{}/{}/{}{}'.format(cloudHandler, self._base.getUserConfiguration.getValue('Out_S3_Bucket', False),
-                                                                 self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False), output.split('/')[-1])
-
-                    _rasterSource = self._base.urlEncode(_rasterSource)
+                            outContainer = self._base.getUserConfiguration.getValue('Out_S3_Bucket', False)
+                            proxyURL = self._base.getUserConfiguration.getValue(CCLONE_PATH, False)
+                            proxySubfolders = output.replace(proxyURL, '')
+                            proxyFileURL = os.path.join(self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False), proxySubfolders)
+                            isOutContainerSAS = (self._base.getUserConfiguration.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE and
+                                                 azure_storage is not None and
+                                                 azure_storage._SASToken is not None)
+                            _rasterSource = '/vsicurl/{}'.format(azure_storage._blob_service.make_blob_url(outContainer, proxyFileURL)) if isOutContainerSAS else '/{}/{}/{}'.format(cloudHandler, outContainer, proxyFileURL)
+                    if (not isOutContainerSAS):
+                        _rasterSource = self._base.urlEncode(_rasterSource)
                 if (usrPath):
                     _idx = _rasterSource.find(self._base.getUserConfiguration.getValue(CCFG_PRIVATE_OUTPUT, False))
                     if (_idx != -1):
@@ -2902,7 +2909,11 @@ class S3Storage:
         return self.__m_failed_upl_lst
 
     def list(self, connection, bucket, prefix, includeSubFolders=False, keys=[], marker=''):
-        result = connection.meta.client.list_objects(Bucket=bucket, Prefix=prefix, Delimiter='/', Marker=marker, RequestPayer='requester' if self._isRequesterPay else '')
+        try:   # requires/ListObjects access.
+            result = connection.meta.client.list_objects(Bucket=bucket, Prefix=prefix, Delimiter='/', Marker=marker, RequestPayer='requester' if self._isRequesterPay else '')
+        except Exception as e:
+            self._base.message(e.message, self._base.const_critical_text)
+            return False
         Contents = 'Contents'
         NextMarker = 'NextMarker'
         if (Contents in result):
@@ -4461,8 +4472,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4e'
-    __program_date__ = '20190303'
+    __program_ver__ = 'v2.0.4f'
+    __program_date__ = '20190317'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5376,7 +5387,7 @@ class Application(object):
                 if (not _azParent.endswith('/')):
                     _azParent += '/'
                 cfg.setValue(CIN_AZURE_PARENTFOLDER, _azParent)
-                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format('http://{}.{}/{}/'.format(in_azure_storage.getAccountName, Azure.DefaultDomain, cfg.getValue('In_S3_Bucket'))))
+                cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format('http{}://{}.{}/{}/'.format('s' if in_azure_storage._SASToken else '', in_azure_storage.getAccountName, Azure.DefaultDomain, cfg.getValue('In_S3_Bucket'))))
                 if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal, exclude_callback)):
                     return(terminate(self._base, eFAIL))
                 if (not _restored):
