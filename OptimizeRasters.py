@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190317
+# Version: 20190320
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1541,6 +1541,7 @@ class Report:
     def __init__(self, base):
         self._input_list = []
         self._input_list_info = {}
+        self._input_list_info_ex = {}
         self._header = {
             'version': '{}/{}'.format(Application.__program_ver__, Application.__program_date__)
         }
@@ -1884,6 +1885,40 @@ class Report:
                     continue
                 self.updateRecordStatus(entry, _type, status[_type])
         return True
+
+    def addMetadata(self, file, key, value):
+        if (file is None or
+            key is None or
+                value is None):
+            self._base.message('addMetadata/null', self._base.const_critical_text)
+            return False
+        _file = file.replace('\\', '/')
+        srchIndex = -1
+        try:
+            srchIndex = list(self._input_list_info.keys()).index(_file)
+        except Exception as e:
+            return False
+        if (srchIndex not in self._input_list_info_ex):
+            self._input_list_info_ex[srchIndex] = {}
+        self._input_list_info_ex[srchIndex][key] = value
+        return True
+
+    def getMetadata(self, file, key):
+        if (file is None or
+                key is None):
+            self._base.message('getMetadata/null', self._base.const_critical_text)
+            return None
+        _file = file.replace('\\', '/')
+        srchIndex = -1
+        try:
+            srchIndex = list(self._input_list_info.keys()).index(_file)
+        except Exception as e:
+            return None
+        if (key not in self._input_list_info_ex[srchIndex]):
+            return None
+        return self._input_list_info_ex[srchIndex][key]
+
+
 # class to read/gather info on til files.
 
 
@@ -3197,6 +3232,7 @@ CIDX_USER_CLSBASE = 3
 CCFG_BLOCK_SIZE = 512
 CCMD_PYRAMIDS_ONLY = 'only'
 CCMD_PYRAMIDS_EXTERNAL = 'external'
+CCMD_PYRAMIDS_SOURCE = 'source'  # Used by CreateRasterProxy
 CCFG_THREADS = 10
 CCFG_RASTERS_NODE = 'RasterFormatFilter'
 CCFG_EXCLUDE_NODE = 'ExcludeFilter'
@@ -3350,8 +3386,15 @@ def args_Callback_for_meta(args, user_data=None):
             if (bsize_):
                 m_bsize = bsize_
             ovrpyramid = user_data[CIDX_USER_CONFIG].getValue('isuniformscale')
-            if (ovrpyramid):
+            if (ovrpyramid is not None):
                 m_pyramid = ovrpyramid
+                if (m_pyramid == 'source'):
+                    rpt = user_data[CIDX_USER_CLSBASE].getUserConfiguration.getValue(CPRT_HANDLER)
+                    if (rpt):
+                        cldInput = user_data[CIDX_USER_CONFIG].getValue(CIN_S3_PREFIX, False)
+                        rptName = user_data[0].replace(cldInput, '') if cldInput is not None else user_data[0]
+                        ovrpyramid = rpt.getMetadata(rptName, 'isuniformscale')
+                        m_pyramid = None if ovrpyramid is None else ovrpyramid
             py_comp = user_data[CIDX_USER_CONFIG].getValue('Compression')
             if (py_comp):
                 m_comp = py_comp
@@ -4472,8 +4515,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4f'
-    __program_date__ = '20190317'
+    __program_ver__ = 'v2.0.4g'
+    __program_date__ = '20190320'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5152,10 +5195,11 @@ class Application(object):
                             return(terminate(self._base, eFAIL))
         if (not getBooleanValue(do_pyramids) and
             do_pyramids != CCMD_PYRAMIDS_ONLY and
-                do_pyramids != CCMD_PYRAMIDS_EXTERNAL):
+                do_pyramids != CCMD_PYRAMIDS_EXTERNAL and
+                do_pyramids != CCMD_PYRAMIDS_SOURCE):
             do_pyramids = 'false'
         cfg.setValue('Pyramids', do_pyramids)
-        cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids))
+        cfg.setValue('isuniformscale', True if do_pyramids == CCMD_PYRAMIDS_ONLY else getBooleanValue(do_pyramids) if do_pyramids != CCMD_PYRAMIDS_SOURCE else CCMD_PYRAMIDS_SOURCE)
         # ends
         # read in the gdal_path from config.
         gdal_path = cfg.getValue(CCFG_GDAL_PATH, False)      # note: validity is checked within (compression-mod)
@@ -5875,6 +5919,7 @@ def threadProxyRaster(req, base, comp, args):
     _user_config = base.getUserConfiguration
     (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], args.clouddownload)
     (f, ext) = os.path.splitext(req['f'])
+    rptName = os.path.join(req['src'], req['f'])
     if (not base.getBooleanValue(_user_config.getValue('KeepExtension'))):
         output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
     finalPath = output_file
@@ -5888,20 +5933,22 @@ def threadProxyRaster(req, base, comp, args):
             sigMRF = '<{}>'.format(CMRF_DOC_ROOT.lower())[:4]   # mrf XML root node
             sigMRFLength = len(sigMRF)  # reading as small as possble to determine the correct type to avoid large data transfers for bigger .orjob files.
             bytesAtHeader = None
+            remoteURL = None
             if (input_file.startswith(CVSICURL_PREFIX)):
                 _dn_vsicurl_ = input_file.split(CVSICURL_PREFIX)[1]
-                file_url = None
+                remoteReader = None
+                remoteURL = args.preAssignedURL if (hasattr(args, 'preAssignedURL') and args.preAssignedURL is not None) else _dn_vsicurl_
                 try:
-                    file_url = urlopen(args.preAssignedURL if (hasattr(args, 'preAssignedURL') and args.preAssignedURL is not None) else _dn_vsicurl_)
-                    bytesAtHeader = file_url.read(sigMRFLength)
+                    remoteReader = urlopen(remoteURL)
+                    bytesAtHeader = remoteReader.read(sigMRFLength)
                 except Exception as e:
                     base.message(str(e), base.const_critical_text)
                     if (_rpt):
-                        _rpt.updateRecordStatus(req['f'], CRPT_PROCESSED, CRPT_NO)
+                        _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
                     return False
                 finally:
-                    if (file_url):
-                        file_url.close()
+                    if (remoteReader):
+                        remoteReader.close()
             else:
                 try:
                     with open(input_file, 'rb') as fptrProxy:
@@ -5909,13 +5956,45 @@ def threadProxyRaster(req, base, comp, args):
                 except Exception as e:
                     base.message(str(e), base.const_critical_text)
                     if (_rpt):
-                        _rpt.updateRecordStatus(input_file, CRPT_PROCESSED, CRPT_NO)
+                        _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
                     return False
             if (bytesAtHeader):
-                cfg_mode = 'cachingmrf' if bytesAtHeader.lower() != sigMRF else 'clonemrf'
+                cfg_mode = 'cachingmrf'
+                if (bytesAtHeader.decode('utf-8').lower() == sigMRF):
+                    cfg_mode = 'clonemrf'
+                    if (_user_config.getValue('isuniformscale') == CCMD_PYRAMIDS_SOURCE):
+                        if (input_file.startswith(CVSICURL_PREFIX)):
+                            remoteReader = None
+                            try:
+                                remoteReader = urlopen(remoteURL)
+                                contents = remoteReader.read()
+                                srcPyramids = contents.find(b'<Rsets') != -1
+                                if (_rpt):
+                                    ret = _rpt.addMetadata(rptName, 'isuniformscale', srcPyramids)
+                            except Exception as e:
+                                base.message(str(e), base.const_critical_text)
+                                if (_rpt):
+                                    _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
+                                return False
+                            finally:
+                                if (remoteReader):
+                                    remoteReader.close()
+                        else:
+                            try:
+                                with open(input_file, 'rb') as proxyReader:
+                                    contents = proxyReader.read()
+                                    if (contents is not None):
+                                        srcPyramids = contents.find(b'<Rsets') != -1
+                                        if (_rpt):
+                                            ret = _rpt.addMetadata(input_file, 'isuniformscale', srcPyramids)
+                            except Exception as e:
+                                base.message(str(e), base.const_critical_text)
+                                if (_rpt):
+                                    _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
+                                return False
             # ends
         ret = comp.compress(input_file, output_file, args_Callback_for_meta,
-                            post_processing_callback=fn_copy_temp_dst if is_output_temp else None, name=os.path.join(req['src'], req['f']))
+                            post_processing_callback=fn_copy_temp_dst if is_output_temp else None, name=rptName)
     else:
         try:
             shutil.copyfile(input_file, finalPath)
