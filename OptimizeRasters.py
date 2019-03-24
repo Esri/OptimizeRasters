@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190320
+# Version: 20190324
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4515,8 +4515,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4g'
-    __program_date__ = '20190320'
+    __program_ver__ = 'v2.0.4h'
+    __program_date__ = '20190324'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5963,6 +5963,7 @@ def threadProxyRaster(req, base, comp, args):
                 if (bytesAtHeader.decode('utf-8').lower() == sigMRF):
                     cfg_mode = 'clonemrf'
                     if (_user_config.getValue('isuniformscale') == CCMD_PYRAMIDS_SOURCE):
+                        contents = None
                         if (input_file.startswith(CVSICURL_PREFIX)):
                             remoteReader = None
                             try:
@@ -5992,6 +5993,9 @@ def threadProxyRaster(req, base, comp, args):
                                 if (_rpt):
                                     _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
                                 return False
+                        if (contents is not None):
+                            if (contents.find(b'<Compression>LERC') == -1):
+                                cfg_mode = 'cachingmrf'
             # ends
         ret = comp.compress(input_file, output_file, args_Callback_for_meta,
                             post_processing_callback=fn_copy_temp_dst if is_output_temp else None, name=rptName)
