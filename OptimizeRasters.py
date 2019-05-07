@@ -59,6 +59,7 @@ import json
 import hashlib
 import binascii
 from datetime import datetime, timedelta
+import fnmatch
 # ends
 
 # enum error codes
@@ -1922,7 +1923,6 @@ class Report:
 
 # class to read/gather info on til files.
 
-
 class TIL:
     CRELATED_FILE_COUNT = 'related_file_count'
     CPROCESSED_FILE_COUNT = 'processed_file_count'
@@ -2354,10 +2354,10 @@ class Google(Store):
             if (_resumeReporter and
                     is_tmp_input):
                 primaryRaster = _resumeReporter._m_rasterAssociates.findPrimaryExtension(_googlePath)
-            if (True in [_googlePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
+            if (filterPaths(blob_source, _user_config.getValue(CCFG_EXCLUDE_NODE))):
                 return False
-            elif (primaryRaster or  # if the _googlePath is an associated raster file, consider it as a raster.
-                  True in [_googlePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
+            elif (primaryRaster or  # if the blob_source is an associated raster file, consider it as a raster.
+                  filterPaths(blob_source, _user_config.getValue(CCFG_RASTERS_NODE))):
                 isTIL = output_path.lower().endswith(CTIL_EXTENSION_)
                 if (is_tmp_input):
                     if (not isTIL):
@@ -2596,10 +2596,10 @@ class Azure(Store):
             if (_resumeReporter and
                     is_tmp_input):
                 primaryRaster = _resumeReporter._m_rasterAssociates.findPrimaryExtension(_azurePath)
-            if (True in [_azurePath.endswith(x) for x in _user_config.getValue('ExcludeFilter')]):
+            if (filterPaths(blob_source, _user_config.getValue(CCFG_EXCLUDE_NODE))):
                 return False
-            elif (primaryRaster or  # if the _azurePath is an associated raster file, consider it as a raster.
-                  True in [_azurePath.endswith(x) for x in _user_config.getValue(CCFG_RASTERS_NODE)]):
+            elif (primaryRaster or  # if the blob_source is an associated raster file, consider it as a raster.
+                  filterPaths(blob_source, _user_config.getValue(CCFG_RASTERS_NODE))):
                 isTIL = output_path.lower().endswith(CTIL_EXTENSION_)
                 if (is_tmp_input):
                     if (not isTIL):
@@ -3069,10 +3069,10 @@ class S3Storage:
         if (_rpt and
                 is_tmp_input):
             primaryRaster = _rpt._m_rasterAssociates.findPrimaryExtension(S3_path)
-        if (True in [S3_path.endswith(x) for x in self.m_user_config.getValue('ExcludeFilter')]):
+        if (filterPaths(S3_key, self.m_user_config.getValue(CCFG_EXCLUDE_NODE))):
             return False
-        elif (primaryRaster or  # if the S3_Path is an associated raster file, consider it as a raster.
-              True in [S3_path.endswith(x) for x in self.m_user_config.getValue(CCFG_RASTERS_NODE)]):
+        elif (primaryRaster or  # if the S3_key is an associated raster file, consider it as a raster.
+              filterPaths(S3_key, self.m_user_config.getValue(CCFG_RASTERS_NODE))):
             isTIL = output_path.lower().endswith(CTIL_EXTENSION_)
             if (is_tmp_input):
                 if (not isTIL):
@@ -3459,7 +3459,7 @@ def exclude_callback(file, src, dst):
     if (file is None):
         return False
     (f, e) = os.path.splitext(file)
-    if (e[1:] in cfg.getValue(CCFG_RASTERS_NODE) or
+    if (filterPaths(os.path.join(src, file), cfg.getValue(CCFG_RASTERS_NODE)) or
             src.lower().startswith('http')):
         if (file.lower().endswith(CTIL_EXTENSION_)):
             return True
@@ -3496,6 +3496,27 @@ def setUploadRecordStatus(input, rpt_status):
             _rpt.updateRecordStatus(_rpt_src, CRPT_UPLOADED, rpt_status)):
         return True
     return False
+
+
+def filterPaths(file, patterns):
+    global cfg
+    if (not file and
+            not cfg):
+        print ('Internal/Empty args/filterPaths()')
+        return False
+    filePatterns = patterns  # cfg.getValue(CCFG_RASTERS_NODE)
+    matched = False
+    if (filePatterns):
+        for pattern in filePatterns:
+            firstChar = pattern[0]
+            if (firstChar != '?' and
+                firstChar != '*' and
+                    firstChar != '['):
+                pattern = '*' + pattern      # force to match the ending.
+            if (fnmatch.fnmatchcase(file, pattern)):
+                matched = True
+                break
+    return matched
 
 
 class Copy:
@@ -3592,7 +3613,7 @@ class Copy:
                     if (not e):     # if no file extension at the end of URL, it's assumed we're talking to a web service endpoint which in turn returns a raster.
                         isInputWebAPI = True
                 isPlanet = self.src.find(CPLANET_IDENTIFY) != -1
-                if (True in [file.endswith('.{}'.format(x)) for x in self.format['exclude']] and
+                if (filterPaths(os.path.join(r, file), self.format['exclude']) and
                     not file.lower().endswith(CTIL_EXTENSION_) or       # skip 'exclude' list items and always copy (.til) files to destination.
                         isInputWebAPI or
                         isPlanet or
@@ -3771,7 +3792,7 @@ class Copy:
         return True
 
 
-class compression(object):
+class Compression(object):
 
     def __init__(self, gdal_path, base):
         self.m_gdal_path = gdal_path
@@ -3884,6 +3905,15 @@ class compression(object):
                     self.message('{} {}'.format(CRESUME_MSG_PREFIX, _input_file))
                 _do_process = False
         # ends
+        breakInputPath = input_file.split('/')
+        if (breakInputPath[-1].lower().endswith('.adf')):
+            breakOututPath = output_file.split('/')
+            fileTitle = breakOututPath[-1]
+            breakInputPath.pop()
+            breakOututPath.pop()
+            if (breakInputPath[-1] == breakOututPath[-1]):
+                breakOututPath.pop()
+            output_file = '/'.join(breakOututPath) + '/{}.{}'.format(breakInputPath[-1], self.m_user_config.getValue('Mode'))
         post_process_output = output_file
         if (_do_process):
             out_dir_path = os.path.dirname(output_file)
@@ -4277,7 +4307,7 @@ class compression(object):
         return True
 
 
-class BundleMaker(compression):
+class BundleMaker(Compression):
 
     CBUNDLEMAKER_BIN = 'BundleMaker'
     CPROJ4SO = 'libproj.so'
@@ -4524,7 +4554,7 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5'
+    __program_ver__ = 'v2.0.5a'
     __program_date__ = '20190418'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -5214,7 +5244,7 @@ class Application(object):
         # read in the gdal_path from config.
         gdal_path = cfg.getValue(CCFG_GDAL_PATH, False)      # note: validity is checked within (compression-mod)
         # ends
-        comp = compression(gdal_path, base=self._base)
+        comp = Compression(gdal_path, base=self._base)
         ret = comp.init(0)      # warning/error messages get printed within .init()
         if (not ret):
             self._base.message('Unable to initialize/compression module', self._base.const_critical_text)
