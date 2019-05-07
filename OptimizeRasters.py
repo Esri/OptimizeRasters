@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190324
+# Version: 20190418
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -188,6 +188,7 @@ CIN_S3_PREFIX = 'In_S3_Prefix'
 CIN_CLOUD_TYPE = 'In_Cloud_Type'
 COUT_VSICURL_PREFIX = 'Out_VSICURL_Prefix'
 CINOUT_S3_DEFAULT_DOMAIN = 's3.amazonaws.com'
+DefS3Region = 'us-east-1'
 COUT_DELETE_AFTER_UPLOAD_OBSOLETE = 'Out_S3_DeleteAfterUpload'
 COUT_DELETE_AFTER_UPLOAD = 'DeleteAfterUpload'
 # ends
@@ -2489,7 +2490,7 @@ class Azure(Store):
                         self._base.getUserConfiguration.setValue(UseToken, True if self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken)) else False)
                     else:
                         self._base.getUserConfiguration.setValue(UseTokenOnOuput, True)
-            if (ACL and
+            if (ACL is not None and
                     self._base):
                 if (ACL.public_access is None or
                         self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken if direction == CS3STORAGE_IN else UseTokenOnOuput))):
@@ -2851,7 +2852,15 @@ class S3Storage:
                         os.environ['OSS_ACCESS_KEY_ID'] = session.get_credentials().access_key
                         os.environ['OSS_SECRET_ACCESS_KEY'] = session.get_credentials().secret_key
                     self.m_user_config.setValue('{}oss'.format('in' if direction == CS3STORAGE_IN else 'out'), useAlibaba)
-                    self.con = session.resource('s3', endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(s3={'addressing_style': 'virtual'}) if useAlibaba else None)
+                    bucketCon = session.client('s3')
+                    region = DefS3Region
+                    try:
+                        loc = bucketCon.get_bucket_location(Bucket=self.m_bucketname)['LocationConstraint']
+                        if (loc):
+                            region = loc
+                    except Exception as e:
+                        self._base.message('get/bucket/region ({})'.format(str(e)), self._base.const_warning_text)
+                    self.con = session.resource('s3', region, endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(s3={'addressing_style': 'virtual' if useAlibaba else 'path'}))
                     if (self._isBucketPublic):
                         self.con.meta.client.meta.events.register('choose-signer.s3.*', botocore.handlers.disable_signing)
                 except Exception as e:
@@ -4147,14 +4156,14 @@ class compression(object):
         if (CreateOverviews in kwargs):
             if (not kwargs[CreateOverviews]):
                 return True  # skip if called by a create raster proxy operation.
-        m_py_factor = '2'
-        m_py_sampling = 'average'
-        get_mode = self.m_user_config.getValue('Mode')
-        if (get_mode):
-            if (get_mode == 'cachingmrf' or
-                get_mode == 'clonemrf' or
-                    get_mode == 'rasterproxy' or
-                    get_mode == 'splitmrf'):
+        pyFactor = '2'
+        pySampling = 'average'
+        mode = self.m_user_config.getValue('Mode')
+        if (mode):
+            if (mode == 'cachingmrf' or
+                mode == 'clonemrf' or
+                    mode == 'rasterproxy' or
+                    mode == 'splitmrf'):
                 return True
         # skip pyramid creation on (tiffs) related to (til) files.
         if (til):
@@ -4168,57 +4177,57 @@ class compression(object):
         # ends
         self.message('Creating pyramid ({})'.format(input_file))
         # let's input cfg values..
-        py_factor_ = self.m_user_config.getValue('PyramidFactor')
-        if (py_factor_ and
-                py_factor_.strip()):
-            m_py_factor = py_factor_.replace(',', ' ')  # can be commna sep vals in the cfg file.
+        pyFactor_ = self.m_user_config.getValue('PyramidFactor')
+        if (pyFactor_ and
+                pyFactor_.strip()):
+            pyFactor = pyFactor_.replace(',', ' ')  # can be commna sep vals in the cfg file.
         else:
             gdalInfo = GDALInfo(self._base, self.message)
             gdalInfo.init(self.m_gdal_path)
             if (gdalInfo.process(input_file)):
-                m_py_factor = gdalInfo.pyramidLevels
-                if (not m_py_factor):
+                pyFactor = gdalInfo.pyramidLevels
+                if (not pyFactor):
                     self.message('Pyramid creation skipped for file ({}). Image size too small.'.format(input_file), const_warning_text)
                     return True
-        py_sampling_ = self.m_user_config.getValue('PyramidSampling')
-        if (py_sampling_):
-            m_py_sampling = py_sampling_
-            if (m_py_sampling.lower() == 'avg' and
+        pySampling_ = self.m_user_config.getValue('PyramidSampling')
+        if (pySampling_):
+            pySampling = pySampling_
+            if (pySampling.lower() == 'avg' and
                     input_file.lower().endswith(CTIL_EXTENSION_)):
-                m_py_sampling = 'average'
-        m_py_compression = self.m_user_config.getValue('PyramidCompression')
+                pySampling = 'average'
+        pyCompression = self.m_user_config.getValue('PyramidCompression')
         args = [os.path.join(self.m_gdal_path, self.CGDAL_ADDO_EXE)]
         args.append('-r')
-        args.append('nearest' if isBQA else m_py_sampling)
-        m_py_quality = self.m_user_config.getValue('Quality')
-        m_py_interleave = self.m_user_config.getValue(CCFG_INTERLEAVE)
-        if (m_py_compression == 'jpeg' or
-                m_py_compression == 'png'):
-            if (not get_mode.startswith('mrf')):
-                m_py_external = False
-                py_external_ = self.m_user_config.getValue('Pyramids')
-                if (py_external_):
-                    m_py_external = py_external_ == CCMD_PYRAMIDS_EXTERNAL
-                if (m_py_external):
+        args.append('nearest' if isBQA else pySampling)
+        pyQuality = self.m_user_config.getValue('Quality')
+        pyInterleave = self.m_user_config.getValue(CCFG_INTERLEAVE)
+        if (pyCompression == 'jpeg' or
+                pyCompression == 'png'):
+            if (not mode.startswith('mrf')):
+                pyExternal = False
+                pyExternal_ = self.m_user_config.getValue('Pyramids')
+                if (pyExternal_):
+                    pyExternal = pyExternal_ == CCMD_PYRAMIDS_EXTERNAL
+                if (pyExternal):
                     args.append('-ro')
-                if (get_mode.startswith('tif') and
-                    m_py_compression == 'jpeg' and
-                        m_py_interleave == 'pixel'):
+                if (mode.startswith('tif') and
+                    pyCompression == 'jpeg' and
+                        pyInterleave == 'pixel'):
                     args.append('--config')
                     args.append('PHOTOMETRIC_OVERVIEW')
                     args.append('YCBCR')
             args.append('--config')
             args.append('COMPRESS_OVERVIEW')
-            args.append(m_py_compression)
+            args.append(pyCompression)
             args.append('--config')
             args.append('INTERLEAVE_OVERVIEW')
-            args.append(m_py_interleave)
+            args.append(pyInterleave)
             args.append('--config')
             args.append('JPEG_QUALITY_OVERVIEW')
-            args.append(m_py_quality)
+            args.append(pyQuality)
         args.append(input_file)
-        m_ary_factors = m_py_factor.split()
-        for f in m_ary_factors:
+        pyFactors = pyFactor.split()
+        for f in pyFactors:
             args.append(f)
         sourcePath = input_file
         if ('source' in kwargs):
@@ -4515,8 +4524,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.4h'
-    __program_date__ = '20190324'
+    __program_ver__ = 'v2.0.5'
+    __program_date__ = '20190418'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5035,7 +5044,8 @@ class Application(object):
                 cfg.setValue(COUT_CLOUD_TYPE, self._args.clouduploadtype)
         is_cloud_upload = self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) if cfg.getValue(CCLOUD_UPLOAD) else self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD_OLD_KEY))
         if (is_cloud_upload):
-            if (self._args.output.startswith('/')):  # remove any leading '/' for http -output
+            if (self._args.output and
+                    self._args.output.startswith('/')):  # remove any leading '/' for http -output
                 self._args.output = self._args.output[1:]
         # for backward compatibility (-s3output)
         if (not cfg.getValue(CCLOUD_UPLOAD)):
