@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190418
+# Version: 20190508
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2483,7 +2483,7 @@ class Azure(Store):
                 ACL = self._blob_service.get_container_acl(self._base.getUserConfiguration.getValue(CIN_AZURE_CONTAINER if direction == CS3STORAGE_IN else COUT_AZURE_CONTAINER))
             except Exception as e:
                 pass
-            if (not ACL or
+            if (ACL is None or
                     ACL.public_access is None):  # internally access rights get checked on the input/output containers.
                 if (self._base):
                     if (direction == CS3STORAGE_IN):
@@ -4554,8 +4554,8 @@ class Args:
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5a'
-    __program_date__ = '20190418'
+    __program_ver__ = 'v2.0.5b'
+    __program_date__ = '201900508'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
