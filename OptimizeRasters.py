@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190508
+# Version: 20190522
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -915,9 +915,11 @@ class Base(object):
         _input = input.replace('\\', '/').strip()
         if (_input[-4:].lower().endswith('.csv')):
             endSlash = False
+        f, e = os.path.splitext(_input)
         if (endSlash and
             not _input.endswith('/') and
-                not _input.lower().startswith('http')):
+                not _input.lower().startswith('http') and
+                len(e) == 0):
             _input += '/'
         return _input
 
@@ -1032,7 +1034,7 @@ class Base(object):
         _cloneDirs = os.path.dirname(_cloneDstFile)
         try:
             if (not os.path.exists(_cloneDirs)):
-                os.makedirs(_cloneDirs)
+                makedirs(_cloneDirs)
             if (sourcePath != _cloneDstFile):
                 shutil.copyfile(sourcePath, _cloneDstFile)
         except Exception as e:
@@ -1304,7 +1306,7 @@ class UpdateMRF:
             return False
         if (not os.path.exists(output)):
             try:
-                os.makedirs(output)
+                makedirs(output)
             except Exception as e:
                 self._base.message(str(e), self._base.const_critical_text)
             return False
@@ -1366,7 +1368,7 @@ class UpdateMRF:
                                 _output_path = os.path.join(self._output, os.path.dirname(self._input.replace(self._homePath if self._input.startswith(self._homePath) else userInput, '')))    #
                             if (not os.path.exists(_output_path)):
                                 if (not rpCSV):
-                                    os.makedirs(_output_path)
+                                    makedirs(_output_path)
                             _mk_copy_path = os.path.join(_output_path, _file).replace('\\', '/')
                             if (_file.lower() == os.path.basename(self._input).lower()):
                                 if (doUpdate):
@@ -1385,7 +1387,7 @@ class UpdateMRF:
                                 self._base.message('-rasterproxypath/{}'.format(str(e)), self._base.const_critical_text)
                             continue
 
-    def update(self, output):
+    def update(self, output, **kwargs):
         try:
             _CCACHE_EXT = '.mrf_cache'
             _CDOC_ROOT = 'MRF_META'
@@ -1440,7 +1442,10 @@ class UpdateMRF:
                 cachedNode.append(doc.createElement('CachedSource'))
                 nodeSource = doc.createElement('Source')
                 azSAS = self._base.getUserConfiguration.getValue(CFGAZSASW, False)
-                nodeSource.appendChild(doc.createTextNode('{}{}'.format(_rasterSource, '?' + azSAS if azSAS else '')))
+                trueInput = _rasterSource
+                if ('trueInput' in kwargs):
+                    trueInput = kwargs['trueInput']
+                nodeSource.appendChild(doc.createTextNode('{}{}'.format(trueInput, '?' + azSAS if azSAS else '')))
                 cachedNode[0].appendChild(nodeSource)
                 nodeMeta[0].insertBefore(cachedNode[0], nodeRaster[0])
             if (self._mode):
@@ -1512,8 +1517,9 @@ class UpdateMRF:
                 if (self._or_mode == 'rasterproxy' or
                         self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
                     try:
-                        os.remove(self._input)
-                        os.remove('{}.aux.xml'.format(self._input))
+                        if (not base._isRasterProxyFormat('csv')):
+                            os.remove(self._input)
+                            os.remove('{}.aux.xml'.format(self._input))
                     except BaseException:
                         pass    # not an error
             else:
@@ -1565,11 +1571,13 @@ class Report:
             return False
         self._report_file = report_file
         if (root):
+            f, e = os.path.splitext(root)
             _root = root.replace('\\', '/')
             if ((self._base.getUserConfiguration and
                  self._base.getUserConfiguration.getValue('Mode') == BundleMaker.CMODE) or
                 root.lower().startswith('http://') or
-                    root.lower().startswith('https://')):
+                    root.lower().startswith('https://') or
+                    len(e) != 0):
                 self._input_list.append(_root)
                 return True
             if (_root[-1:] != '/'):
@@ -1808,7 +1816,7 @@ class Report:
             get_tile = os.path.basename(self._report_file)
             mk_path = os.path.join(path, get_tile)
             if (not os.path.exists(path)):
-                os.makedirs(path)
+                makedirs(path)
             self._base.message('[MV] {}'.format(mk_path))
             shutil.move(self._report_file, mk_path)
         except Exception as e:
@@ -1920,8 +1928,14 @@ class Report:
             return None
         return self._input_list_info_ex[srchIndex][key]
 
+    def __len__(self):
+        return len(self._input_list)
+
+    def __getitem__(self, index):
+        return self._input_list[index]
 
 # class to read/gather info on til files.
+
 
 class TIL:
     CRELATED_FILE_COUNT = 'related_file_count'
@@ -2368,7 +2382,7 @@ class Google(Store):
             flr = os.path.dirname(output_path)
             if (not os.path.exists(flr)):
                 try:
-                    os.makedirs(flr)
+                    makedirs(flr)
                 except Exception as e:
                     raise
             if (is_raster):
@@ -2615,7 +2629,7 @@ class Azure(Store):
             flr = os.path.dirname(output_path)
             if (not os.path.exists(flr)):
                 try:
-                    os.makedirs(flr)
+                    makedirs(flr)
                 except Exception as e:
                     raise
             if (is_raster):
@@ -2973,13 +2987,13 @@ class S3Storage:
         return keys
 
     def getS3Content(self, prefix, cb=None, precb=None):
-        is_link = self._input_flist is not None
+        isLink = self._input_flist is not None
         subs = True
         if (self.m_user_config):
             root_only_ = self.m_user_config.getValue('IncludeSubdirectories')
             if (subs is not None):    # if there's a value, take it else defaults to (True)
                 subs = self._base.getBooleanValue(root_only_)
-        keys = self.list(self.con, self.m_bucketname, prefix, subs) if not is_link else _rpt
+        keys = self.list(self.con, self.m_bucketname, prefix, subs) if not isLink else _rpt
         if (not keys):
             return False
         isRoot = self.remote_path == '/'
@@ -3009,24 +3023,56 @@ class S3Storage:
                     return False
         # ends
         try:
-            for key in keys:
-                remotePath = key.replace(self.remote_path if not isRoot else '', '')    # remote path following the input folder/.
-                if (not key or
-                        key.endswith('/')):
-                    continue
-                if (cb):
-                    if (precb):
-                        if (precb(remotePath, self.remote_path, self.inputPath)):     # is raster/exclude list?
-                            copyRemoteRaster = False
-                            if (til and
-                                til.defaultTILProcessing and
-                                    til.fileTILRelated(os.path.basename(key))):
-                                copyRemoteRaster = True  # copy ancillary TIL files if the default TIL processing is set to (true)
-                            if (not copyRemoteRaster and
-                                    not key.lower().endswith(CTIL_EXTENSION_)):  # TIL is a raster but we need to copy it locally.
-                                if (not self._base.getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
-                                    continue
-                    cb(key, remotePath)       # callback on the client-side. Note. return value not checked.
+            threads = []
+            keysIndx = 0
+            nBuffer = CCFG_THREADS
+            while(1):
+                nThreads = len(threads)
+                while(nThreads > 0):
+                    alive = [t.isAlive() for t in threads]
+                    nDead = sum(not x for x in alive)
+                    if (nDead):
+                        nBuffer = nDead
+                        threads = [t for t in threads if t.isAlive()]
+                        break
+                buffer = []
+                if (keysIndx == 0):
+                    if (keys[keysIndx].endswith('/')):
+                        keysIndx += 1
+                for i in range(keysIndx, keysIndx + nBuffer):
+                    if (i >= len(keys)):
+                        break
+                    buffer.append(keys[i])
+                keysIndx += nBuffer
+                if (len(buffer) == 0 and
+                        len(threads) == 0):
+                    break
+                for key in buffer:
+                    try:
+                        remotePath = key.replace(self.remote_path if not isRoot else '', '')    # remote path following the input folder/.
+                        if (not key or
+                                key.endswith('/')):
+                            continue
+                        if (cb):
+                            if (precb):
+                                if (precb(remotePath, self.remote_path, self.inputPath)):     # is raster/exclude list?
+                                    copyRemoteRaster = False
+                                    if (til and
+                                        til.defaultTILProcessing and
+                                            til.fileTILRelated(os.path.basename(key))):
+                                        copyRemoteRaster = True  # copy ancillary TIL files if the default TIL processing is set to (true)
+                                    if (not copyRemoteRaster and
+                                            not key.lower().endswith(CTIL_EXTENSION_)):  # TIL is a raster but we need to copy it locally.
+                                        if (not self._base.getBooleanValue(self.m_user_config.getValue(CISTEMPINPUT))):
+                                            continue
+                        t = threading.Thread(target=cb,
+                                             args=(key, remotePath))
+                        t.daemon = True
+                        t.start()
+                        threads.append(t)
+                    except Exception as e:
+                        self.message(str(e), self.const_critical_text)
+                        return False
         except Exception as e:
             self._base.message(e.message, self._base.const_critical_text)
             return False
@@ -3096,7 +3142,7 @@ class S3Storage:
         flr = os.path.dirname(mk_path)
         if (not os.path.exists(flr)):
             try:
-                os.makedirs(flr)
+                makedirs(flr)
             except Exception as e:
                 self._base.message('(%s)' % (str(e)), self._base.const_critical_text)
                 if (_rpt):
@@ -3666,7 +3712,7 @@ class Copy:
                                     if (localPath):    # we've to download the file first and save to the name requested.
                                         r = r.replace(self.src, localPath)
                                         if (not os.path.exists(r)):
-                                            os.makedirs(r)
+                                            makedirs(r)
                                         file = _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] if isFileNameInHeader else file
                                         self._base.message('{}'.format(file_url.geturl()))
                                         with open(os.path.join(r, file), 'wb') as fp:
@@ -3693,7 +3739,7 @@ class Copy:
                     if (not g_is_generate_report):              # do not create folders for op==reporting only.
                         if (not os.path.exists(dst_path)):
                             if (not self._base._isRasterProxyFormat('csv')):
-                                os.makedirs(dst_path)
+                                makedirs(dst_path)
                     dst_file = os.path.join(dst_path, file)
                     src_file = os.path.join(r, file)
                     do_post_processing_cb = do_copy = True
@@ -3769,7 +3815,7 @@ class Copy:
                 (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], False)
                 dst_path = os.path.dirname(output_file)
                 if (not os.path.exists(dst_path)):
-                    os.makedirs(dst_path)
+                    makedirs(dst_path)
                 CCOPY = 0
                 CMOVE = 1
                 mode_ = CCOPY        # 0 = copy, 1 = move
@@ -3919,7 +3965,7 @@ class Compression(object):
             out_dir_path = os.path.dirname(output_file)
             if (not os.path.exists(out_dir_path)):
                 try:
-                    os.makedirs(os.path.dirname(output_file))   # let's try to make the output dir-tree else GDAL would fail
+                    makedirs(os.path.dirname(output_file))   # let's try to make the output dir-tree else GDAL would fail
                 except Exception as exp:
                     time.sleep(2)    # let's try to sleep for few seconds and see if any other thread has created it.
                     if (not os.path.exists(out_dir_path)):
@@ -4025,7 +4071,7 @@ class Compression(object):
                             try:
                                 createPath = os.path.dirname(output_file)
                                 if (not os.path.exists(createPath)):
-                                    os.makedirs(createPath)
+                                    makedirs(createPath)
                             except Exception as e:
                                 self.message(str(e), self._base.const_critical_text)
                 args.append(inputRaster)
@@ -4553,9 +4599,18 @@ class Args:
         return _return_str
 
 
+def makedirs(filepath):
+    try:
+        os.makedirs(filepath)
+    except Exception as e:
+        if (e.errno == os.errno.EEXIST):     # filepath already exists
+            return
+        raise
+
+
 class Application(object):
-    __program_ver__ = 'v2.0.5b'
-    __program_date__ = '201900508'
+    __program_ver__ = 'v2.0.5c'
+    __program_date__ = '20190522'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5092,7 +5147,7 @@ class Application(object):
             self._args.tempinput = self._base.convertToForwardSlash(self._args.tempinput)
             if (not os.path.isdir(self._args.tempinput)):
                 try:
-                    os.makedirs(self._args.tempinput)
+                    makedirs(self._args.tempinput)
                 except Exception as exp:
                     self._base.message('Unable to create the -tempinput path (%s) [%s]' % (self._args.tempinput, str(exp)), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
@@ -5117,7 +5172,7 @@ class Application(object):
                          self._args.op != COP_UPL) and
                         self._args.op and
                             not self._args.op.startswith(COP_LAMBDA)):
-                        os.makedirs(self._args.tempoutput)
+                        makedirs(self._args.tempoutput)
                 except Exception as exp:
                     self._base.message('Unable to create the -tempoutput path (%s)\n[%s]' % (self._args.tempoutput, str(exp)), self._base.const_critical_text)
                     return(terminate(self._base, eFAIL))
@@ -5507,8 +5562,10 @@ class Application(object):
         # ends
         # control flow if conversions required.
         if (not is_caching):
+            isDirectInput = filterPaths(self._args.input, cfg.getValue(CCFG_RASTERS_NODE))
             if (not isinput_s3 and
-                    not cfg_mode == BundleMaker.CMODE):
+                    not cfg_mode == BundleMaker.CMODE and
+                    not isDirectInput):
                 ret = cpy.init(self._args.input, self._args.tempoutput if is_output_temp and self._base.getBooleanValue(cfg.getValue(CCLOUD_UPLOAD)) else self._args.output, list, callbacks, cfg)
                 if (not ret):
                     self._base.message(CONST_CPY_ERR_0, self._base.const_critical_text)
@@ -5556,7 +5613,12 @@ class Application(object):
                     g_rpt.addFile(_src)     # prior to this point, rasters get added to g_rpt during the (pull/copy) process if -clouddownload=true && -tempinput is defined.
                 self._base.message('{}'.format(CRESUME_CREATE_JOB_TEXT).format(_project_path))
                 for arg in vars(self._args):
-                    g_rpt.addHeader(arg, getattr(self._args, arg))
+                    val = getattr(self._args, arg)
+                    if (arg == CRESUME_HDR_INPUT):
+                        f, e = os.path.splitext(val)
+                        if (len(e) != 0):
+                            val = val[:val.rindex('/') + 1]
+                    g_rpt.addHeader(arg, val)
                 g_rpt.write()
                 if (self.isOperationCreateJob):
                     return self.__initOperationCreateJob()
@@ -5838,7 +5900,7 @@ class Application(object):
                     if (self._log_path):
                         try:
                             if (not os.path.isdir(self._log_path)):
-                                os.makedirs(self._log_path)
+                                makedirs(self._log_path)
                             ousr_date = datetime.now()
                             err_upl_file = os.path.join(self._log_path, '%s_UPL_ERRORS_%04d%02d%02dT%02d%02d%02d.txt' % (cfg.getValue(CPRJ_NAME, False), ousr_date.year, ousr_date.month, ousr_date.day,
                                                                                                                          ousr_date.hour, ousr_date.minute, ousr_date.second))
@@ -5947,37 +6009,46 @@ class Application(object):
                 _rpt is None):
             return eFAIL
         status = eOK
-        if (self._base.getMessageHandler and
-                (not self._base.getBooleanValue(cfg.getValue('KeepLogFile')) and
-                 not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder))):
+        txtInConfig = 'KeepLogFile'
+        txtInRPT = txtInConfig.lower()
+        if (self._base.getMessageHandler is None):
+            return status
+        if (self._base.getBooleanValue(cfg.getValue(txtInConfig))):
+            return status
+        if (txtInRPT in _rpt._header):
+            if (self._base.getBooleanValue(_rpt._header[txtInRPT])):
+                return status
+        if (not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
             self._base.message('Unable to move the .orjob file to the log path.', self._base.const_warning_text)
             status = eFAIL
         return status
 
 
 def threadProxyRaster(req, base, comp, args):
-    _user_config = base.getUserConfiguration
-    (input_file, output_file) = getInputOutput(req['src'], req['dst'], req['f'], args.clouddownload)
+    usrConfig = base.getUserConfiguration
+    (inputFile, outputFile) = getInputOutput(req['src'], req['dst'], req['f'], args.clouddownload)
     (f, ext) = os.path.splitext(req['f'])
     rptName = os.path.join(req['src'], req['f'])
-    if (not base.getBooleanValue(_user_config.getValue('KeepExtension'))):
-        output_file = output_file.replace(ext, CONST_OUTPUT_EXT)
-    finalPath = output_file
-    is_output_temp = base.getBooleanValue(_user_config.getValue(CISTEMPOUTPUT))
-    if (is_output_temp):
-        finalPath = output_file.replace(args.tempoutput, args.output)
-    cfg_mode = _user_config.getValue('Mode')
-    if (cfg_mode != 'splitmrf'):
-        if (cfg_mode == 'rasterproxy'):
+    if (not base.getBooleanValue(usrConfig.getValue('KeepExtension'))):
+        outputFile = outputFile.replace(ext, CONST_OUTPUT_EXT)
+    finalPath = outputFile
+    isTempOut = base.getBooleanValue(usrConfig.getValue(CISTEMPOUTPUT))
+    if (isTempOut):
+        finalPath = outputFile.replace(args.tempoutput, args.output)
+    mode = usrConfig.getValue('Mode')
+    bytesAtHeader = None
+    isInputMRF = False
+    if (mode != 'splitmrf'):
+        if (mode == 'rasterproxy'):
             # Determine file type by reading few bytes off its header.
             sigMRF = '<{}>'.format(CMRF_DOC_ROOT.lower())[:4]   # mrf XML root node
             sigMRFLength = len(sigMRF)  # reading as small as possble to determine the correct type to avoid large data transfers for bigger .orjob files.
             bytesAtHeader = None
             remoteURL = None
-            if (input_file.startswith(CVSICURL_PREFIX)):
-                _dn_vsicurl_ = input_file.split(CVSICURL_PREFIX)[1]
+            if (inputFile.startswith(CVSICURL_PREFIX)):
+                dnVSICURL = inputFile.split(CVSICURL_PREFIX)[1]
                 remoteReader = None
-                remoteURL = args.preAssignedURL if (hasattr(args, 'preAssignedURL') and args.preAssignedURL is not None) else _dn_vsicurl_
+                remoteURL = args.preAssignedURL if (hasattr(args, 'preAssignedURL') and args.preAssignedURL is not None) else dnVSICURL
                 try:
                     remoteReader = urlopen(remoteURL)
                     bytesAtHeader = remoteReader.read(sigMRFLength)
@@ -5991,7 +6062,7 @@ def threadProxyRaster(req, base, comp, args):
                         remoteReader.close()
             else:
                 try:
-                    with open(input_file, 'rb') as fptrProxy:
+                    with open(inputFile, 'rb') as fptrProxy:
                         bytesAtHeader = fptrProxy.read(sigMRFLength)
                 except Exception as e:
                     base.message(str(e), base.const_critical_text)
@@ -5999,60 +6070,74 @@ def threadProxyRaster(req, base, comp, args):
                         _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
                     return False
             if (bytesAtHeader):
-                cfg_mode = 'cachingmrf'
+                mode = 'cachingmrf'
                 if (bytesAtHeader.decode('utf-8').lower() == sigMRF):
-                    cfg_mode = 'clonemrf'
-                    if (_user_config.getValue('isuniformscale') == CCMD_PYRAMIDS_SOURCE):
-                        contents = None
-                        if (input_file.startswith(CVSICURL_PREFIX)):
-                            remoteReader = None
-                            try:
-                                remoteReader = urlopen(remoteURL)
-                                contents = remoteReader.read()
-                                srcPyramids = contents.find(b'<Rsets') != -1
-                                if (_rpt):
-                                    ret = _rpt.addMetadata(rptName, 'isuniformscale', srcPyramids)
-                            except Exception as e:
-                                base.message(str(e), base.const_critical_text)
-                                if (_rpt):
-                                    _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
-                                return False
-                            finally:
-                                if (remoteReader):
-                                    remoteReader.close()
-                        else:
-                            try:
-                                with open(input_file, 'rb') as proxyReader:
-                                    contents = proxyReader.read()
-                                    if (contents is not None):
-                                        srcPyramids = contents.find(b'<Rsets') != -1
-                                        if (_rpt):
-                                            ret = _rpt.addMetadata(input_file, 'isuniformscale', srcPyramids)
-                            except Exception as e:
-                                base.message(str(e), base.const_critical_text)
-                                if (_rpt):
-                                    _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
-                                return False
-                        if (contents is not None):
-                            if (contents.find(b'<Compression>LERC') == -1):
-                                cfg_mode = 'cachingmrf'
+                    isInputMRF = True
+                    mode = 'clonemrf'
+                    contents = None
+                    if (inputFile.startswith(CVSICURL_PREFIX)):
+                        remoteReader = None
+                        try:
+                            remoteReader = urlopen(remoteURL)
+                            contents = remoteReader.read()
+                            if (not base._isRasterProxyFormat('csv')):
+                                with open(outputFile, 'wb') as writer:
+                                    writer.write(contents)
+                            srcPyramids = contents.find(b'<Rsets') != -1
+                            if (_rpt):
+                                ret = _rpt.addMetadata(rptName, 'isuniformscale', srcPyramids)
+                        except Exception as e:
+                            base.message(str(e), base.const_critical_text)
+                            if (_rpt):
+                                _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
+                            return False
+                        finally:
+                            if (remoteReader):
+                                remoteReader.close()
+                    else:
+                        try:
+                            with open(inputFile, 'rb') as proxyReader:
+                                contents = proxyReader.read()
+                                if (contents is not None):
+                                    if (isInputMRF):
+                                        if (not base._isRasterProxyFormat('csv')):
+                                            with open(outputFile, 'wb') as writer:
+                                                writer.write(contents)
+                                    srcPyramids = contents.find(b'<Rsets') != -1
+                                    if (_rpt):
+                                        ret = _rpt.addMetadata(inputFile, 'isuniformscale', srcPyramids)
+                        except Exception as e:
+                            base.message(str(e), base.const_critical_text)
+                            if (_rpt):
+                                _rpt.updateRecordStatus(rptName, CRPT_PROCESSED, CRPT_NO)
+                            return False
+                    if (contents is not None):
+                        if (contents.find(b'<Compression>LERC') == -1):
+                            mode = 'cachingmrf'
             # ends
-        ret = comp.compress(input_file, output_file, args_Callback_for_meta,
-                            post_processing_callback=fn_copy_temp_dst if is_output_temp else None, name=rptName)
+        if (not isInputMRF):
+            ret = comp.compress(inputFile, outputFile, args_Callback_for_meta,
+                                post_processing_callback=fn_copy_temp_dst if isTempOut else None, name=rptName)
     else:
         try:
-            shutil.copyfile(input_file, finalPath)
+            shutil.copyfile(inputFile, finalPath)
         except Exception as e:
-            base.message('[CPY] {} ({})'.format(input_file, str(e)), base.const_critical_text)
+            base.message('[CPY] {} ({})'.format(inputFile, str(e)), base.const_critical_text)
             return False
     if (not os.path.exists(finalPath)):
-        return False
+        if (not base._isRasterProxyFormat('csv')):
+            return False
     # update .mrf.
     updateMRF = UpdateMRF(base)
-    _output_home_path = args.output
-    if (updateMRF.init(finalPath, _output_home_path, cfg_mode,
-                       args.cache, _output_home_path, _user_config.getValue(COUT_VSICURL_PREFIX, False))):
-        if (not updateMRF.update(finalPath)):
+    homePath = args.output
+    inputMRF = finalPath
+    if (isInputMRF):
+        homePath = req['src']
+        if (not inputFile.startswith(CVSICURL_PREFIX)):
+            inputMRF = inputFile
+    if (updateMRF.init(inputMRF, args.output, mode,
+                       args.cache, homePath, usrConfig.getValue(COUT_VSICURL_PREFIX, False))):
+        if (not updateMRF.update(finalPath, trueInput=inputFile)):
             base.message('Updating ({}) was not successful!'.format(finalPath), base.const_critical_text)
             return False
     # ends
