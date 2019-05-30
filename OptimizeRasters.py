@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190522
+# Version: 20190530
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4609,8 +4609,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5c'
-    __program_date__ = '20190522'
+    __program_ver__ = 'v2.0.5d'
+    __program_date__ = '20190530'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -6071,7 +6071,12 @@ def threadProxyRaster(req, base, comp, args):
                     return False
             if (bytesAtHeader):
                 mode = 'cachingmrf'
-                if (bytesAtHeader.decode('utf-8').lower() == sigMRF):
+                if (isinstance(bytesAtHeader, bytes)):
+                    try:
+                        bytesAtHeader = bytesAtHeader.decode('utf-8')
+                    except BaseException:
+                        pass  # ignore any invalid start byte issues.
+                if (bytesAtHeader.lower() == sigMRF):
                     isInputMRF = True
                     mode = 'clonemrf'
                     contents = None
