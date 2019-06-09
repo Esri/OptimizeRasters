@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190530
+# Version: 20190610
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1042,7 +1042,7 @@ class Base(object):
             return False
         return True
 
-    def S3Upl(self, input_file, user_args, *args):
+    def S3Upl(self, input_file, user_args, **kwargs):
         global _rpt
         internal_err_msg = 'Internal error at [S3Upl]'
         if (not self._m_user_config or
@@ -1154,7 +1154,7 @@ class Base(object):
                             self.message('[Del] Err. (%s)' % (str(e)), self.const_critical_text)
         if (ret_buff):
             Input = 'input'
-            setUploadRecordStatus(user_args[Input] if user_args and Input in user_args else input_file, CRPT_YES)
+            setUploadRecordStatus(kwargs[Input] if kwargs and Input in kwargs else input_file, CRPT_YES)
         return (len(ret_buff) > 0)
 
     def getSecuredCloudHandlerPrefix(self, direction):
@@ -4208,9 +4208,7 @@ class Compression(object):
         if (post_processing_callback):
             if (self._base.getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 self.message('[{}-Push]..'.format(self.m_user_config.getValue(COUT_CLOUD_TYPE).capitalize()))
-            if (isinstance(post_processing_callback_args, dict)):
-                post_processing_callback_args['input'] = os.path.basename(input_file)
-            ret = post_processing_callback(post_process_output, post_processing_callback_args, {'f': post_process_output, 'cfg': self.m_user_config})
+            ret = post_processing_callback(post_process_output, post_processing_callback_args, input = os.path.basename(input_file), f = post_process_output, cfg = self.m_user_config)
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
         # ends
         if (_rpt and
@@ -4609,8 +4607,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5d'
-    __program_date__ = '20190530'
+    __program_ver__ = 'v2.0.5e'
+    __program_date__ = '20190610'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
