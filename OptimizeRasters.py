@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190610
+# Version: 20190613
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -3829,7 +3829,10 @@ class Copy:
                     shutil.copyfile(input_file, output_file)
                 elif (mode_ == CMOVE):
                     self.message('[MV] %s' % (output_file))
-                    shutil.move(input_file, output_file)
+                    try:
+                        shutil.move(input_file, output_file)
+                    except Exception as e:
+                        self.message(str(e))
             s = m
             if s == files_len or s == 0:
                 break
@@ -4208,7 +4211,7 @@ class Compression(object):
         if (post_processing_callback):
             if (self._base.getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 self.message('[{}-Push]..'.format(self.m_user_config.getValue(COUT_CLOUD_TYPE).capitalize()))
-            ret = post_processing_callback(post_process_output, post_processing_callback_args, input = os.path.basename(input_file), f = post_process_output, cfg = self.m_user_config)
+            ret = post_processing_callback(post_process_output, post_processing_callback_args, input=os.path.basename(input_file), f=post_process_output, cfg=self.m_user_config)
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
         # ends
         if (_rpt and
@@ -4547,7 +4550,7 @@ def fn_pre_process_copy_default(src, dst, arg):
     return True
 
 
-def fn_copy_temp_dst(input_source, cb_args, *args):
+def fn_copy_temp_dst(input_source, cb_args, **kwargs):
     fn_cpy_ = Copy()
     file_lst = fn_cpy_.get_group_filelist(input_source)
     if (len(file_lst) == 0):
@@ -4555,16 +4558,16 @@ def fn_copy_temp_dst(input_source, cb_args, *args):
     files = []
     for file in file_lst:
         (p, f) = os.path.split(file.replace('\\', '/'))
-        if (args is not None):
-            if (isinstance(args[0], dict)):
-                if (('cfg' in args[0])):
-                    if (not getBooleanValue(args[0]['cfg'].getValue(CISTEMPOUTPUT))):
+        if (kwargs is not None):
+            if (isinstance(kwargs, dict)):
+                if (('cfg' in kwargs)):
+                    if (not getBooleanValue(kwargs['cfg'].getValue(CISTEMPOUTPUT))):
                         return False    # no copying..
                     p += '/'
-                    t = args[0]['cfg'].getValue(CTEMPOUTPUT, False).replace('\\', '/')    # safety check
+                    t = kwargs['cfg'].getValue(CTEMPOUTPUT, False).replace('\\', '/')    # safety check
                     if (not t.endswith('/')):  # making sure, replace will work fine.
                         t += '/'
-                    o = args[0]['cfg'].getValue(CCFG_PRIVATE_OUTPUT, False).replace('\\', '/')  # safety check
+                    o = kwargs['cfg'].getValue(CCFG_PRIVATE_OUTPUT, False).replace('\\', '/')  # safety check
                     if (not o.endswith('/')):
                         o += '/'
                     dst = (p.replace(t, o))
@@ -4607,8 +4610,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5e'
-    __program_date__ = '20190610'
+    __program_ver__ = 'v2.0.5f'
+    __program_date__ = '20190613'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
