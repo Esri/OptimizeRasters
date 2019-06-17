@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190613
+# Version: 20190617
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -885,17 +885,25 @@ class Base(object):
     def isLinux(self):
         return sys.platform.lower().startswith(('linux', 'darwin'))
 
-    def convertToTokenPath(self, inputPath):
+    def convertToTokenPath(self, inputPath, direction=CS3STORAGE_IN):
         if (not inputPath):
             return None
         tokenPath = None
-        if (self.getBooleanValue(self.getUserConfiguration.getValue(UseToken)) and
-                self.getBooleanValue(self.getUserConfiguration.getValue('iss3'))):
-            cloudHandler = self.getSecuredCloudHandlerPrefix(CS3STORAGE_IN)
+        if (direction == CS3STORAGE_IN):
+            if (not self.getBooleanValue(self.getUserConfiguration.getValue(UseToken))):
+                return tokenPath
+        else:
+            if (not self.getBooleanValue(self.getUserConfiguration.getValue(UseTokenOnOuput))):
+                return tokenPath
+        if (self.getBooleanValue(self.getUserConfiguration.getValue('iss3' if direction == CS3STORAGE_IN else CCLOUD_UPLOAD))):
+            cloudHandler = self.getSecuredCloudHandlerPrefix(direction)
             if (not cloudHandler):
                 return None
-            tokenPath = inputPath.replace(self.getUserConfiguration.getValue(CIN_S3_PREFIX, False),
-                                          '/{}/{}/'.format(cloudHandler, self.getUserConfiguration.getValue('In_S3_Bucket', False)))
+            currPrefix = self.getUserConfiguration.getValue(CIN_S3_PREFIX if direction == CS3STORAGE_IN else COUT_VSICURL_PREFIX, False)
+            if (direction == CS3STORAGE_OUT):
+                currPrefix = currPrefix[:currPrefix.find(_rpt._header['output'])]
+            tokenPath = inputPath.replace(currPrefix,
+                                          '/{}/{}/'.format(cloudHandler, self.getUserConfiguration.getValue('In_S3_Bucket' if direction == CS3STORAGE_IN else 'Out_S3_Bucket', False)))
         return tokenPath
 
     def copyBinaryToTmp(self, binarySrc, binaryDst):
@@ -1482,7 +1490,8 @@ class UpdateMRF:
                 extensions_lup = {
                     'lerc': {'data': '.lrc', 'index': '.idx'}
                 }
-            useTokenPath = self._base.convertToTokenPath(doc.getElementsByTagName('Source')[0].firstChild.nodeValue)
+            useTokenPath = self._base.convertToTokenPath(doc.getElementsByTagName('Source')[0].firstChild.nodeValue,
+                                                         CS3STORAGE_OUT if self._base.getBooleanValue(self._base.getUserConfiguration.getValue(CCLOUD_UPLOAD)) else CS3STORAGE_IN)
             if (useTokenPath is not None):
                 doc.getElementsByTagName('Source')[0].firstChild.nodeValue = useTokenPath
             nodeData = nodeRaster[0].getElementsByTagName('DataFile')
@@ -2128,7 +2137,7 @@ class S3Upload:
     @TimeIt.timeOperation
     def upload(self, **kwargs):
         # if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
-        # return True                                 # "
+        #  return True
         self._base.message('[S3-Push] {}'.format(self.m_local_file))
         try:
             self.mp.upload_file(self.m_local_file, self.m_s3_bucket.name, self.m_s3_path, extra_args={'ACL': self.m_acl_policy}, callback=ProgressPercentage(self._base, self.m_local_file))
@@ -2699,8 +2708,8 @@ class Azure(Store):
         super(Azure, self).upload(input_path, container_name, _parent_folder, properties)
         blob_path = self._input_file_path
         blob_name = os.path.join(self._upl_parent_folder, os.path.basename(blob_path))
-        # if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
-        #   return True                          #  "
+# if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
+# return True                          #  "
         # return True     # debug. Must be removed before release.
         isContainerCreated = False
         t0 = datetime.now()
@@ -2882,6 +2891,20 @@ class S3Storage:
                     return False
                 try:
                     self.bucketupload = self.con.Bucket(self.m_bucketname)
+                    if (direction == CS3STORAGE_OUT):
+                        ACL = self.bucketupload.Acl()
+                        if (ACL is not None):
+                            grants = ACL.grants
+                            isOutBktPrivate = True
+                            for grant in grants:
+                                grantInfo = grant['Grantee']
+                                if (grantInfo['Type'] == 'Group' and
+                                    grantInfo['URI'] == 'http://acs.amazonaws.com/groups/global/AllUsers' and
+                                        grant['Permission'] == 'READ'):
+                                    isOutBktPrivate = False
+                                    break
+                            if (isOutBktPrivate):
+                                self._base.getUserConfiguration.setValue(UseTokenOnOuput, True)
                     self.con.meta.client.head_bucket(Bucket=self.m_bucketname)
                 except botocore.exceptions.ClientError as e:
                     if (int(e.response['Error']['Code']) == 403):
@@ -4610,8 +4633,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5f'
-    __program_date__ = '20190613'
+    __program_ver__ = 'v2.0.5g'
+    __program_date__ = '20190617'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -5446,9 +5469,6 @@ class Application(object):
         if (not isUseToken):
             isUseToken = self._base.getUserConfiguration.getValue(UseToken)
         cfg.setValue(UseToken, self._base.getBooleanValue(isUseToken))
-        if (self._args.rasterproxypath and
-                cfg.getValue(UseToken)):
-            cfg.setValue(UseTokenOnOuput, True)
         if (isinput_s3):
             cfg.setValue('iss3', True)
             in_s3_parent = cfg.getValue(CIN_S3_PARENTFOLDER, False)
