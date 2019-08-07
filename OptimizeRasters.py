@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190617
+# Version: 20190730
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1776,7 +1776,9 @@ class Report:
                         if (_fname):
                             hdr_skipped = True
                             if (CRESUME_HDR_INPUT in self._header):
-                                _input = self._header[CRESUME_HDR_INPUT].lower()
+                                _input = self._header[CRESUME_HDR_INPUT]
+                                self._header[CRESUME_HDR_INPUT] = self._base.convertToForwardSlash(_input, True)  # force suffix with '/' for input folders
+                                _input = _input.lower()
                                 if (_input.startswith('http://') or
                                         _input.startswith('https://')):
                                     self._isInputHTTP = True
@@ -4634,7 +4636,7 @@ def makedirs(filepath):
 
 class Application(object):
     __program_ver__ = 'v2.0.5g'
-    __program_date__ = '20190617'
+    __program_date__ = '20190730'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
