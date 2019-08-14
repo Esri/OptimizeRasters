@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190730
+# Version: 20190814
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -921,13 +921,16 @@ class Base(object):
         if (not input):
             return None
         _input = input.replace('\\', '/').strip()
-        if (_input[-4:].lower().endswith('.csv')):
-            endSlash = False
+        if (not endSlash):
+            return _input
         f, e = os.path.splitext(_input)
-        if (endSlash and
-            not _input.endswith('/') and
-                not _input.lower().startswith('http') and
-                len(e) == 0):
+        if (len(e) > 0):
+            if (filterPaths(_input, self.getUserConfiguration.getValue(CCFG_RASTERS_NODE) + ['csv', 'CSV'])):
+                return _input
+        if (_input.lower().startswith('http://') or
+                _input.lower().startswith('https://')):
+            return _input
+        if (not _input.endswith('/')):
             _input += '/'
         return _input
 
@@ -1583,14 +1586,10 @@ class Report:
             f, e = os.path.splitext(root)
             _root = root.replace('\\', '/')
             if ((self._base.getUserConfiguration and
-                 self._base.getUserConfiguration.getValue('Mode') == BundleMaker.CMODE) or
-                root.lower().startswith('http://') or
-                    root.lower().startswith('https://') or
-                    len(e) != 0):
+                 self._base.getUserConfiguration.getValue('Mode') == BundleMaker.CMODE)):
                 self._input_list.append(_root)
                 return True
-            if (_root[-1:] != '/'):
-                _root += '/'
+            _root = self._base.convertToForwardSlash(_root, True)
             self._input_list.append(_root)          # first element in the report is the -input path to source
         return True
 
@@ -4635,8 +4634,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5g'
-    __program_date__ = '20190730'
+    __program_ver__ = 'v2.0.5h'
+    __program_date__ = '20190814'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4676,7 +4675,7 @@ class Application(object):
             if (Report.CHDR_OP in _r._header):
                 self._args.op = _r._header[Report.CHDR_OP]
             _r = None
-        self._args.config = os.path.abspath(config_)         # replace/force the original path to abspath.
+        self._args.config = os.path.abspath(config_).replace('\\', '/')         # replace/force the original path to abspath.
         cfg = Config()
         ret = cfg.init(config_, 'Defaults')
         if (not ret):
