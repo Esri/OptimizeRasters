@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190814
+# Version: 20190826
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4164,8 +4164,14 @@ class Compression(object):
                         args.pop()  # prev / output
                         args.pop()  # prev / input
                         if (compression == 'jpeg'):
-                            args.append('-co')
-                            args.append('PHOTOMETRIC=YCBCR')
+                            gdalInfo = GDALInfo(self._base)
+                            gdalInfo.init(self.m_gdal_path)
+                            if (gdalInfo.process(inputRaster)):
+                                ret = gdalInfo.bandInfo
+                                if (ret and
+                                        len(ret) != 1):
+                                    args.append('-co')
+                                    args.append('PHOTOMETRIC=YCBCR')
                             QualityPrefix = 'JPEG_QUALITY='
                             x = [x.startswith(QualityPrefix) for x in args]
                             posQuality = -1
@@ -4634,8 +4640,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5h'
-    __program_date__ = '20190814'
+    __program_ver__ = 'v2.0.5i'
+    __program_date__ = '20190826'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
