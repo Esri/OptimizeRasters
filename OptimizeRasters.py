@@ -4745,7 +4745,18 @@ class Application(object):
         cfg.setValue('Mode', cfg_mode)
         # ends
         return True
-
+    
+    def __setup_version_check(self):
+        from ProgramCheckAndUpdate import ProgramCheckAndUpdate
+        self._base._m_log.CreateCategory('VersionCheck')
+        versionCheck = ProgramCheckAndUpdate()
+        Message('Checking for updates..')
+        verMessage = versionCheck.run(os.path.dirname(os.path.realpath(__file__)))
+        if(verMessage is not None):
+            Message(verMessage)
+        self._base._m_log.CloseCategory()
+    
+    
     def __setup_log_support(self):
         log = None
         try:
@@ -4859,7 +4870,8 @@ class Application(object):
                 self._args.__setattr__(CRESUME_ARG, True)
         if (not self.__load_config__(self._args)):
             return False
-        self._base = self.__setup_log_support()          # initialize log support.
+        self._base = self.__setup_log_support()         # initialize log support.
+        self.__setup_version_check()
         if (not self._base.init()):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
             return CRET_ERROR
