@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190826
+# Version: 20190908
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4640,8 +4640,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5i'
-    __program_date__ = '20190826'
+    __program_ver__ = 'v2.0.5j'
+    __program_date__ = '20190908'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4746,7 +4746,24 @@ class Application(object):
         # ends
         return True
 
-    def __setup_log_support(self):
+    def __setupVersionCheck(self):
+        self._base._m_log.CreateCategory('VersionCheck')
+        try:
+            from ProgramCheckAndUpdate import ProgramCheckAndUpdate
+        except ImportError as e:
+            msg = 'ProgramCheckAndUpdate module is not found, unable to check version updates.'
+            self._base.message(msg, self._base.const_warning_text)
+            self._base._m_log.CloseCategory()
+            return False
+        versionCheck = ProgramCheckAndUpdate()
+        self._base.message('Checking for updates..')
+        verMessage = versionCheck.run(os.path.dirname(os.path.realpath(__file__)))
+        if(verMessage is not None):
+            self._base.message(verMessage)
+        self._base._m_log.CloseCategory()
+        return True
+
+    def __setupLogSupport(self):
         log = None
         try:
             solutionLib_path = os.path.realpath(__file__)
@@ -4859,7 +4876,8 @@ class Application(object):
                 self._args.__setattr__(CRESUME_ARG, True)
         if (not self.__load_config__(self._args)):
             return False
-        self._base = self.__setup_log_support()          # initialize log support.
+        self._base = self.__setupLogSupport()         # initialize log support.
+        self.__setupVersionCheck()
         if (not self._base.init()):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
             return CRET_ERROR

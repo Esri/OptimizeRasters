@@ -1,0 +1,8 @@
+{
+	"UpdateLocation": "",
+	"OnNewVersion": "Warn",
+	"CheckFile": "https://imageryworkflowsversion.geocloud.com/imv/OptimizeRasters.json",
+	"VersionMessage": "",
+	"CheckForUpdate": "Daily",
+	"CurrentVersion": "20190905"
+}
