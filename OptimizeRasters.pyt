@@ -322,8 +322,8 @@ class Toolbox(object):
     def __init__(self):
         """Define the toolbox (the name of the toolbox is the name of the
         .pyt file)."""
-        self.label = "Toolbox"
-        self.alias = ""
+        self.label = "OptimizeRasters"
+        self.alias = "OptimizeRasters"
         # List of tool classes associated with this toolbox
         self.tools = [OptimizeRasters, ProfileEditor, ResumeJobs]
 
