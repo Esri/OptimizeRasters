@@ -135,7 +135,7 @@ class ProgramCheckAndUpdate(object):
                     else:
                         return("Incorrect Parameter. Please check OnNewVersion Parameter in " + str(checkUpdateFilePath))
                 else:
-                    return("Installed Version is Latest Version")
+                    return("Installed version is the latest version.")
             else:
                 try:
                     current_date = datetime.today().strftime('%Y-%m-%d')
