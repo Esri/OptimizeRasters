@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20190908
+# Version: 20191103
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -192,6 +192,7 @@ CINOUT_S3_DEFAULT_DOMAIN = 's3.amazonaws.com'
 DefS3Region = 'us-east-1'
 COUT_DELETE_AFTER_UPLOAD_OBSOLETE = 'Out_S3_DeleteAfterUpload'
 COUT_DELETE_AFTER_UPLOAD = 'DeleteAfterUpload'
+CFGLogPath = 'LogPath'
 # ends
 
 # const
@@ -1006,6 +1007,9 @@ class Base(object):
     def close(self):
         if (self._m_log):
             if (not CRUN_IN_AWSLAMBDA):
+                usrLogFolder = self.getUserConfiguration.getValue(CFGLogPath)
+                if (usrLogFolder is not None):
+                    self._m_log.SetLogFolder(usrLogFolder)
                 self._m_log.WriteLog('#all')   # persist information/errors collected.
 
     def renameMetaFileToMatchRasterExtension(self, metaFile):
@@ -1246,6 +1250,8 @@ class GDALInfo(object):
             return None
         retInfo = []
         for v in self._GDALInfo:
+            if (isinstance(v, bytes)):
+                v = bytes.decode(v)
             if (v.startswith('Band ')):
                 retInfo.append(v)
         return retInfo
@@ -4640,8 +4646,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5j'
-    __program_date__ = '20190908'
+    __program_ver__ = 'v2.0.5k'
+    __program_date__ = '20191103'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4777,7 +4783,7 @@ class Application(object):
             log.Project('OptimizeRasters')
             log.LogNamePrefix('OR')
             log.StartLog()
-            cfg_log_path = cfg.getValue('LogPath')
+            cfg_log_path = cfg.getValue(CFGLogPath)
             if (cfg_log_path):
                 if (not os.path.isdir(cfg_log_path)):
                     Message('Invalid log-path (%s). Resetting to (%s)' % (cfg_log_path, self._log_path))
@@ -6064,7 +6070,9 @@ class Application(object):
         if (txtInRPT in _rpt._header):
             if (self._base.getBooleanValue(_rpt._header[txtInRPT])):
                 return status
-        if (not _rpt.moveJobFileToPath(self._base.getMessageHandler.logFolder)):
+        defLogFolder = self._base.getMessageHandler.logFolder
+        usrLogFolder = self._base.getUserConfiguration.getValue(CFGLogPath)     # client apps can override the LogPath in the template.
+        if (not _rpt.moveJobFileToPath(defLogFolder if usrLogFolder is None else usrLogFolder)):
             self._base.message('Unable to move the .orjob file to the log path.', self._base.const_warning_text)
             status = eFAIL
         return status
