@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20191103
+# Version: 20191105
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4646,8 +4646,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5k'
-    __program_date__ = '20191103'
+    __program_ver__ = 'v2.0.5l'
+    __program_date__ = '20191105'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4883,7 +4883,8 @@ class Application(object):
         if (not self.__load_config__(self._args)):
             return False
         self._base = self.__setupLogSupport()         # initialize log support.
-        self.__setupVersionCheck()
+        self._base._m_log.isGPRun = self.postMessagesToArcGIS
+        self.__setupVersionCheck()  # chs
         if (not self._base.init()):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
             return CRET_ERROR
@@ -4946,12 +4947,7 @@ class Application(object):
 
     @postMessagesToArcGIS.setter
     def postMessagesToArcGIS(self, value):
-        if (not self._base or
-            not self._base._m_log or
-                not hasattr(self._base._m_log, 'isGPRun')):
-            return
-        self._postMessagesToArcGIS = self._base.getBooleanValue(value)
-        self._base._m_log.isGPRun = self.postMessagesToArcGIS
+        self._postMessagesToArcGIS = getBooleanValue(value)
 
     def __jobContentCallback(self, line):
         if (cfg):

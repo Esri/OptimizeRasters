@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20190908
+# Version: 20191105
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -380,10 +380,10 @@ class ResumeJobs(object):
        # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)
+        app.postMessagesToArcGIS = True
         if (not app.init()):
             arcpy.AddError('Err. Unable to initialize (OptimizeRasters module)')
             return False
-        app.postMessagesToArcGIS = True
         return app.run()
         # ends
 
@@ -948,13 +948,12 @@ class OptimizeRasters(object):
             args['cache'] = cacheOutputFolder
         if cloneMRFFolder is not None:
             args['rasterproxypath'] = cloneMRFFolder
-
         # let's run (OptimizeRasters)
         import OptimizeRasters
         app = OptimizeRasters.Application(args)
+        app.postMessagesToArcGIS = True
         if (not app.init()):
             arcpy.AddError('Err. Unable to initialize (OptimizeRasters module)')
             return False
-        app.postMessagesToArcGIS = True
         return app.run()
         # ends
