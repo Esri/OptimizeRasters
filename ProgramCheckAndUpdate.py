@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: ProgramCheckandUpdate.py
 # Description: Checks and Updates workflow from Github if required.
-# Version: 20190106
+# Version: 20191117
 # Requirements:
 # Author: Esri Imagery Workflows team
 # ------------------------------------------------------------------------------
