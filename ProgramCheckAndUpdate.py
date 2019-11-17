@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: ProgramCheckandUpdate.py
 # Description: Checks and Updates workflow from Github if required.
-# Version: 20190106
+# Version: 20191117
 # Requirements:
 # Author: Esri Imagery Workflows team
 # ------------------------------------------------------------------------------
@@ -138,6 +138,8 @@ class ProgramCheckAndUpdate(object):
                     return("Installed version is the latest version.")
             else:
                 try:
+                    if(chkupdate['NewVersion'] is not (None or '')):
+                        return("Update Available. Please read "+ str(checkUpdateFilePath))
                     current_date = datetime.today().strftime('%Y-%m-%d')
                     chkupdate['LastChecked'] = current_date
                     self.WriteNewCheckForUpdate(chkupdate, checkUpdateFilePath)
