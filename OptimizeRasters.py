@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20191105
+# Version: 20200330
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1409,7 +1409,12 @@ class UpdateMRF:
             _CCACHE_EXT = '.mrf_cache'
             _CDOC_ROOT = 'MRF_META'
             comp_val = None         # for (splitmrf)
-            doc = minidom.parse(self._input)
+            isURLInput = self._input.lower().startswith('http://') or self._input.lower().startswith('https://')
+            baseURL = self._input
+            if (isURLInput):
+                baseURL = self._input.split('?')[0]
+            baseURL = os.path.basename(baseURL)
+            doc = minidom.parse(self._input if not isURLInput else urlopen(self._input))
             _rasterSource = self._input
             isCOGTIFF = self._base.getUserConfiguration.getValue('cog')
             autoCreateRasterProxy = False
@@ -1482,7 +1487,7 @@ class UpdateMRF:
             if (autoCreateRasterProxy):
                 node = doc.getElementsByTagName('Source')
                 if (node):
-                    sourceVal = os.path.join(_rasterSource, os.path.basename(self._input).split(CloudOGTIFFExt)[0])
+                    sourceVal = os.path.join(_rasterSource, baseURL.split(CloudOGTIFFExt)[0])
                     node[0].firstChild.nodeValue = sourceVal
             # ends
             if (self._cachePath):
@@ -1492,8 +1497,12 @@ class UpdateMRF:
             cacheSubFolders = ''
             if (self._cachePath):
                 cacheSubFolders = self._base.convertToForwardSlash(os.path.dirname(output)).replace(self._output if self._cachePath else self._homePath, '')
-            (f, ext) = os.path.splitext(os.path.basename(self._input))
-            rep_data_file = rep_indx_file = os.path.abspath('{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)).replace('\\', '/')  # Get abs path in case the -output was relative for cache to function properly.
+            (f, ext) = os.path.splitext(baseURL)
+            mkCachePath = '{}{}{}{}'.format(cache_output, cacheSubFolders, f, _CCACHE_EXT)
+            if (mkCachePath.find(':') == -1):
+                mkCachePath = os.path.abspath(mkCachePath)  # Get abs path in case the -output was relative for cache to function properly.
+            mkCachePath = mkCachePath.replace('\\', '/')
+            rep_data_file = rep_indx_file = mkCachePath
             nodeData = nodeIndex = None
             if (comp_val):
                 extensions_lup = {
@@ -1535,10 +1544,10 @@ class UpdateMRF:
                 if (self._or_mode == 'rasterproxy' or
                         self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
                     try:
-                        if (not base._isRasterProxyFormat('csv')):
+                        if (not self._base._isRasterProxyFormat('csv')):
                             os.remove(self._input)
                             os.remove('{}.aux.xml'.format(self._input))
-                    except BaseException:
+                    except BaseException as e:
                         pass    # not an error
             else:
                 with open(output.split(CloudOGTIFFExt)[0] if isCOGTIFF else output, 'w') as c:
@@ -2556,9 +2565,10 @@ class Azure(Store):
         super(Azure, self).setSource(container_name, parent_folder)
         blobs = []
         marker = None
+        parentDepth = len(parent_folder.split('/'))
         while (True):
             try:
-                batch = self._blob_service.list_blobs(self._dn_container_name, marker=marker, prefix=parent_folder)
+                batch = self._blob_service.list_blobs(self._dn_container_name, marker=marker, prefix=parent_folder, delimiter='/' if not self._include_subFolders else None)
                 blobs.extend(batch)
                 if not batch.next_marker:
                     break
@@ -2571,7 +2581,7 @@ class Azure(Store):
         for blob in blobs:
             levels = blob.name.split('/')
             if (not self._include_subFolders):
-                if (len(levels) > 2):
+                if (len(levels) > parentDepth):
                     continue
             blob_name = blob.name
             self._addBrowseContent(blob_name)
@@ -3909,6 +3919,7 @@ class Compression(object):
         # set gdal_data enviornment path
         os.environ['GDAL_DATA'] = os.path.join(os.path.dirname(self.m_gdal_path), 'data')
         os.environ['GDAL_HTTP_UNSAFESSL'] = 'true'  # disable CURL SSL certificate problem
+        os.environ['LD_LIBRARY_PATH'] = self.m_gdal_path
         # ends
         msg_text = '(%s) is not found at (%s)'
         _gdal_translate = os.path.join(self.m_gdal_path, self.CGDAL_TRANSLATE_EXE)
@@ -4646,8 +4657,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5l'
-    __program_date__ = '20191105'
+    __program_ver__ = 'v2.0.5n'
+    __program_date__ = '20200330'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(__program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
         '\nPlease Note:\nOptimizeRasters.py is entirely case-sensitive, extensions/paths in the config ' + \
@@ -4884,7 +4895,7 @@ class Application(object):
             return False
         self._base = self.__setupLogSupport()         # initialize log support.
         self._base._m_log.isGPRun = self.postMessagesToArcGIS
-        self.__setupVersionCheck()  # chs
+        self.__setupVersionCheck()
         if (not self._base.init()):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
             return CRET_ERROR
@@ -6188,8 +6199,10 @@ def threadProxyRaster(req, base, comp, args):
     inputMRF = finalPath
     if (isInputMRF):
         homePath = req['src']
-        if (not inputFile.startswith(CVSICURL_PREFIX)):
-            inputMRF = inputFile
+        inputMRF = inputFile
+        if (args.clouddownload and
+                inputFile.startswith(CVSICURL_PREFIX)):
+            inputMRF = remoteURL
     if (updateMRF.init(inputMRF, args.output, mode,
                        args.cache, homePath, usrConfig.getValue(COUT_VSICURL_PREFIX, False))):
         if (not updateMRF.update(finalPath, trueInput=inputFile)):
