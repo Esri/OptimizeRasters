@@ -4894,7 +4894,8 @@ class Application(object):
         if (not self.__load_config__(self._args)):
             return False
         self._base = self.__setupLogSupport()         # initialize log support.
-        self._base._m_log.isGPRun = self.postMessagesToArcGIS
+        if (self._base is not None):
+            self._base._m_log.isGPRun = self.postMessagesToArcGIS
         self.__setupVersionCheck()
         if (not self._base.init()):
             self._base.message('Unable to initialize the (Base) module', self._base.const_critical_text)
