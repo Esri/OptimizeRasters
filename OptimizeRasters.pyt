@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20191105
+# Version: 20200701
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -307,7 +307,7 @@ def checkPrerequisites(parameters, cloudType, ctrlIndexPos):
             import boto3
         elif (cloudType.startswith('Microsoft')):
             cType = 'azure'
-            from azure.storage.blob import BlockBlobService
+            from azure.storage.blob import BlobServiceClient
         elif (cloudType.startswith('Google')):
             cType = 'google-cloud'
             from google.cloud import storage
