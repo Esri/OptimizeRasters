@@ -33,7 +33,7 @@
 				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter the Secret Access key for the entered profile name. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;Refer to your cloud storage solution documentation for more information. &lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;&lt;/P&gt;&lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
 			</param>
 			<param name="imRoleURL" displayname="Endpoint URL" type="Optional" direction="Input" datatype="String" expression="imRoleURL">
-				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter any custom endpoint URL if it's different from the default for the access type selected.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;An endpoint is a URL that is the entry point for the data access storage.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;[Defaults]&lt;br/&gt;Amazon S3 = http://blob.core.windows.net&lt;br/&gt;Microsoft Azure = http://s3.amazonaws.com&lt;br/&gt;
+				<dialogReference>&lt;DIV STYLE="text-align:Left;"&gt;&lt;DIV&gt;&lt;DIV&gt;&lt;P&gt;&lt;SPAN&gt;Enter any custom endpoint URL if it's different from the default for the access type selected.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN&gt;An endpoint is a URL that is the entry point for the data access storage.&lt;/SPAN&gt;&lt;/P&gt;&lt;P&gt;&lt;SPAN /&gt;[Defaults]&lt;br/&gt;Amazon S3 = http://s3.amazonaws.com&lt;br/&gt;Microsoft Azure = http://blob.core.windows.net&lt;br/&gt;
 &lt;/P&gt;
 &lt;/DIV&gt;&lt;/DIV&gt;&lt;/DIV&gt;</dialogReference>
 			</param>
