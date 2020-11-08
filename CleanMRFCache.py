@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# Copyright 2015 Esri
+# Copyright 2020 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -15,7 +15,7 @@
 # Name: CleanMRFCache.py
 # Description: Cleans MRF Cache files by oldest access-time until free space
 # requested has been achieved.
-# Version: 20150302
+# Version: 20201109
 # Requirements: Python
 # Required Arguments: -input
 # Optional Arguments: -mode -ext -size
@@ -115,7 +115,7 @@ parser.add_argument('-mode', help='Processing mode. Valid modes [del]',
 parser.add_argument('-ext',
                     help='Extensions to filter-in. e.g. -ext=mrfcache,txt',
                     dest='ext')
-parser.add_argument('-size', type=long,
+parser.add_argument('-size', type=int,
                     help='Free size requested in bytes. e.g. -size=1000000',
                     dest='size', default=2000000000)
 
