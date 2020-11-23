@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2019 Esri
+# Copyright 2020 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20200921
+# Version: 20201123
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1676,7 +1676,7 @@ class UpdateMRF:
                 if (self._or_mode == 'rasterproxy' or
                         self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
                     try:
-                        if (self._base._isRasterProxyFormat('csv')):
+                        if (not self._base._isRasterProxyFormat('csv')):
                             os.remove(self._input)
                             os.remove('{}.aux.xml'.format(self._input))
                     except BaseException as e:
@@ -5165,8 +5165,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5o'
-    __program_date__ = '20200923'
+    __program_ver__ = 'v2.0.5p'
+    __program_date__ = '20201123'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
