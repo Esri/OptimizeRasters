@@ -25,7 +25,7 @@ Verify at the console if GDAL and curl is now on path by typing in the following
 curl 
 gdalinfo
 
-The credentils for the AWS must exist in the ~/.aws/credentials file as mentioned in the OR documentation.
+The credentials for the AWS must exist in the ~/.aws/credentials file as mentioned in the OR documentation.
 
 Usage>
 Usage is same as how it's shown in the OR documentation.
