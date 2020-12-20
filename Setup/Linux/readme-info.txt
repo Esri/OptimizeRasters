@@ -1,5 +1,8 @@
 Tested with ubuntu 18.04
 
+Setup>
+https://esriis-my.sharepoint.com/:f:/g/personal/cham4757_esri_com/EsvFNawbXjlGkKuL49Gi9zIByEpUeZRRmhAHK8t7DzxcpA?e=oHjod6
+
 Info>
 pre-cooked binary versions used,
 GDAL 3.1.2, released 2020/07/07
