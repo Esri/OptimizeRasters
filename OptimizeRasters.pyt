@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2019 Esri
+# Copyright 2020 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20200701
+# Version: 20201227
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -776,7 +776,7 @@ class OptimizeRasters(object):
                     parameters[4].filter.list = []
                     if (parameters[2].value is not None and
                         not parameters[2].value.lower().startswith(EC2WIAMRole.lower()) and
-                            not parameters[2].value.lower().startswith(PublicBucket.lower())):
+                            not parameters[2].value.lower().startswith(PublicBucket.split()[0].lower())):
                         if (not parameters[2].value.lower().endswith('public-buckets.json')):
                             if (not results):
                                 parameters[4].value = ''
@@ -924,8 +924,7 @@ class OptimizeRasters(object):
             args['clouddownload'] = 'true'
             args['usetoken'] = parameters[3].valueAsText
             args['inputbucket'] = inBucket      # case-sensitive
-            if (not inprofiles.lower().startswith(PublicBucket.lower())):
-                args['inputprofile'] = inprofiles
+            args['inputprofile'] = inprofiles
             if inType == 'Amazon S3':
                 args['clouddownloadtype'] = 'amazon'
             elif inType == 'Microsoft Azure':

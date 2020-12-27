@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20201123
+# Version: 20201227
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -3144,7 +3144,9 @@ class S3Storage:
                         # ends
                     import botocore
                     session = None
-                    self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and self.CAWS_ACCESS_KEY_SECRET is None and _profile_name is None
+                    self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and \
+                        self.CAWS_ACCESS_KEY_SECRET is None and \
+                        _profile_name is None
                     try:
                         session = boto3.Session(self.CAWS_ACCESS_KEY_ID if not sessionProfile else None, self.CAWS_ACCESS_KEY_SECRET if not sessionProfile else None,
                                                 profile_name=_profile_name if not awsSessionToken else None, aws_session_token=awsSessionToken if awsSessionToken else None)
@@ -3193,7 +3195,6 @@ class S3Storage:
                         self.m_user_config.setValue('{}oss'.format(
                             'in' if direction == CS3STORAGE_IN else 'out'), useAlibaba)
                     bucketCon = session.client('s3')
-                    region = DefS3Region
                     try:
                         loc = bucketCon.get_bucket_location(Bucket=self.m_bucketname)[
                             'LocationConstraint']
@@ -3201,7 +3202,7 @@ class S3Storage:
                             region = loc
                     except Exception as e:
                         self._base.message(
-                            'get/bucket/region ({})'.format(str(e)), self._base.const_warning_text)
+                            'get/bucket/location ({})'.format(str(e)), self._base.const_warning_text)
                     self.con = session.resource('s3', region, endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(
                         s3={'addressing_style': 'virtual' if useAlibaba else 'path'}))
                     if (self._isBucketPublic):
@@ -5165,8 +5166,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5p'
-    __program_date__ = '20201123'
+    __program_ver__ = 'v2.0.5q'
+    __program_date__ = '20201227'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \

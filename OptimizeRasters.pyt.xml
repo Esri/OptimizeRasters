@@ -6,15 +6,15 @@
 		<ArcGISFormat>1.0</ArcGISFormat>
 		<ArcGISstyle>ISO 19139 Metadata Implementation Specification</ArcGISstyle>
 		<SyncOnce>TRUE</SyncOnce>
-		<ModDate>20180711</ModDate>
-		<ModTime>151322</ModTime>
+		<ModDate>20201227</ModDate>
+		<ModTime>232225</ModTime>
 		<scaleRange>
 			<minScale>150000000</minScale>
 			<maxScale>5000</maxScale>
 		</scaleRange>
 		<ArcGISProfile>ISO19139</ArcGISProfile>
 	</Esri>
-	<toolbox name="OptimizeRasters" alias="">
+	<toolbox name="OptimizeRasters" alias="OptimizeRasters">
 		<arcToolboxHelpPath>c:\program files\arcgis\pro\Resources\Help\gp</arcToolboxHelpPath>
 		<toolsets/>
 	</toolbox>
