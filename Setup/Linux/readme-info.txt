@@ -21,6 +21,8 @@ export LD_LIBRARY_PATH=/app/GDAL/lib
 export GDAL_DATA=/app/GDAL/share/gdal
 export PATH=$PATH:/app/curl/lib/:/app/curl/bin/:/app/GDAL/bin
 
+cp -rd proj /usr/local/share/proj
+
 Verify at the console if GDAL and curl is now on path by typing in the following command(s)
 curl 
 gdalinfo
