@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2020 Esri
+# Copyright 2021 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20201227
+# Version: 20210310
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -2446,7 +2446,7 @@ class Store(object):
         userHome = '{}/{}/{}'.format(os.path.expanduser('~').replace(
             '\\', '/'), '.OptimizeRasters/Microsoft', 'azure_credentials')
         with open(userHome) as fptr:
-            config.readfp(fptr)
+            config.read_file(fptr)
         if (not config.has_section(self._profile_name)):
             return (None, None)
         azure_account_name = config.get(self._profile_name, account_name) if config.has_option(
@@ -3230,7 +3230,11 @@ class S3Storage:
                                     UseTokenOnOuput, True)
                     self.con.meta.client.head_bucket(Bucket=self.m_bucketname)
                 except botocore.exceptions.ClientError as e:
-                    if (int(e.response['Error']['Code']) == 403):
+                    try:
+                        errCode = int(e.response['Error']['Code'])
+                    except ValueError:
+                        errCode = 403
+                    if (errCode == 403):
                         try:
                             fetchMeta = self.con.meta.client.head_object(
                                 Bucket=self.m_bucketname, RequestPayer='requester', Key='_*CHS')
@@ -5166,8 +5170,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5q'
-    __program_date__ = '20201227'
+    __program_ver__ = 'v2.0.5s'
+    __program_date__ = '20210310'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -5667,6 +5671,10 @@ class Application(object):
                 _status = self.run()
                 return
         # ends
+        # set cloudupload value {
+        if (self._args.cloudupload is None):
+            self._args.cloudupload = cfg.getValue(CCLOUD_UPLOAD)
+        # }
         # detect input cloud type
         cloudDownloadType = self._args.clouddownloadtype
         if (not cloudDownloadType):
@@ -5702,7 +5710,7 @@ class Application(object):
         if (self._args.op == COP_RPT):
             opKey = cfg.getValue(COP)
             if (opKey == COP_COPYONLY):
-                if (self._args.cloudupload or
+                if (self._base.getBooleanValue(self._args.cloudupload) or
                         self._args.s3output):
                     # conditions will enable local->local copy if -cloudupload is (false)
                     self._args.op = COP_UPL
