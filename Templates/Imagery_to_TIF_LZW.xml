@@ -12,7 +12,7 @@
     <!--'true' will scan for (Rasters) in sub-directories. Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n]-->
     <IncludeSubdirectories>true</IncludeSubdirectories>
     <!--Compression to use on output (Rasters)-->
-    <Compression>Deflate</Compression>
+    <Compression>LZW</Compression>
     <!--how the data is stored as Pixel interleave or band interleave. For cloneMRF the value should be the same as input (Def: Pixel)-->
     <Interleave>Pixel</Interleave>
     <!--Compression quality to apply for JPEG compression (Def: 85)-->
@@ -27,7 +27,7 @@
     <!--The avg sampling method is only supported by mrf format, which is similar to average, but is a pure averaging of every 2x2 pixels from top left, which is slightly faster -->
     <PyramidSampling>average</PyramidSampling>
     <!--Pyramid compression [jpeg, lzw, deflate] (Def: jpeg)-->
-    <PyramidCompression>Deflate</PyramidCompression>
+    <PyramidCompression>LZW</PyramidCompression>
     <!--No data value. If undefined/empty value -a_nodata will not be applied (Def: undefined)-->
     <NoDataValue></NoDataValue>
     <!--Output tile size-->
