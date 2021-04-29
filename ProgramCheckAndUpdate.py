@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2013 Esri
+# Copyright 2021 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: ProgramCheckandUpdate.py
 # Description: Checks and Updates workflow from Github if required.
-# Version: 20191117
+# Version: 20210322
 # Requirements:
 # Author: Esri Imagery Workflows team
 # ------------------------------------------------------------------------------
@@ -44,7 +44,7 @@ class ProgramCheckAndUpdate(object):
 
     def readVersionJSON(self, checkFileURL):
         try:
-            f = requests.get(checkFileURL)
+            f = requests.get(checkFileURL, timeout=10)
             x = f.content
             versionJSON = json.loads(x)
             return versionJSON
@@ -68,13 +68,17 @@ class ProgramCheckAndUpdate(object):
             return [False, None]
 
     def UpdateLocalRepo(self, install_url, path):
-        if(install_url.endswith('/')):
-            download_url = install_url + 'archive/master.zip'
-        else:
-            download_url = install_url + '/archive/master.zip'
-        repo_download = requests.get(download_url)
-        zip_repo = zipfile.ZipFile(io.BytesIO(repo_download.content))
-        zip_repo.extractall(path)
+        try:
+            if(install_url.endswith('/')):
+                download_url = install_url + 'archive/master.zip'
+            else:
+                download_url = install_url + '/archive/master.zip'
+            repo_download = requests.get(download_url,timeout=10)
+            zip_repo = zipfile.ZipFile(io.BytesIO(repo_download.content))
+            zip_repo.extractall(path)
+        except Exception as exp:
+            print(str(exp))
+            
 
     def WriteNewCheckForUpdate(self, dict_check, filepath):
         try:
