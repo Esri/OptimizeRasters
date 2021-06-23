@@ -59,8 +59,7 @@ More information about installing and updating third-party packages can be found
 ## Resources
 
 * [OptimizeRasters documentation](https://github.com/Esri/OptimizeRasters/tree/master/Documentation)
-* [MRF white paper]( http://esriurl.com/MRF)
-
+* [MRF User Guide](https://github.com/nasa-gibs/mrf/blob/master/doc/MUG.md)
 
 ## Issues
 
