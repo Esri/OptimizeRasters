@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2020 Esri
+# Copyright 2021 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20201227
+# Version: 20210712
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -84,11 +84,14 @@ def setXMLXPathValue(doc, xPath, key, value):
 
 def returntemplatefiles():
     selfscriptpath = os.path.dirname(__file__)
-    templateloc = os.path.join(selfscriptpath, 'templates')
-    templatefilelist = os.listdir(templateloc)
+    templateloc = os.path.join(selfscriptpath, 'Templates')
     global allactualxmlFiles
     allactualxmlFiles = []
     allxmlFiles = []
+    try:
+        templatefilelist = os.listdir(templateloc)
+    except Exception as e:
+        return allxmlFiles
     for ft in templatefilelist:
         if ft.endswith('.xml'):
             allactualxmlFiles.append(ft)
@@ -199,10 +202,8 @@ def config_Init(parentfolder, filename):
     global config
     global awsfile
     config = ConfigParser.RawConfigParser()
-    homedrive = os.getenv('HOMEDRIVE')
-    homepath = os.getenv('HOMEPATH')
-    homefolder = os.path.join(homedrive, homepath)
-    awsfolder = os.path.join(homefolder, parentfolder)
+    awsfolder = '{}/{}/'.format(os.path.expanduser(
+                        '~').replace('\\', '/'), parentfolder)
     if (filename == '*.json'):  # google cs filter
         for r, d, f in os.walk(awsfolder):
             for service in f:
@@ -698,8 +699,12 @@ class OptimizeRasters(object):
         else:
             parameters[15].enabled = False
         if parameters[0].altered == True:
+            optTemplates = parameters[0].valueAsText
+            proxyNCacheEnabled = True
+            if (optTemplates.lower() == 'copyfilesonly'):   # GH 61
+                proxyNCacheEnabled = not proxyNCacheEnabled
+            parameters[12].enabled = parameters[13].enabled = proxyNCacheEnabled
             if parameters[15].altered == False:
-                optTemplates = parameters[0].valueAsText
                 global templateinUse
                 templateinUse = optTemplates
                 template_path = os.path.realpath(__file__)
@@ -848,15 +853,12 @@ class OptimizeRasters(object):
                 parameters[13].enabled = True
             else:
                 parameters[11].enabled = True
-                parameters[12].enabled = True
-                parameters[13].enabled = True
-                if (op == 'copyonly'):
-                    parameters[12].enabled = False
-                    parameters[13].enabled = False
 
     def updateMessages(self, parameters):
         storageTypes = ('Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud')    # 'local' must be the first element.
         errMessageListOnly = 'Invalid Value. Pick from List only.'
+        if (parameters[12].altered == True):    # GH 99 i.e. to disable all errors related to (datatype='DEFolder') to allow for
+            parameters[12].clearMessage()       # .csv filenames in ('UI/Raster Proxy Output Folder') together with the folder picker option/CHS.
         if parameters[1].altered == True:
             pType = parameters[1].valueAsText
             if (pType not in storageTypes):

@@ -166,11 +166,11 @@ table does not support alpha channel (even if PNG8 format would potentially allo
 color table with transparency). So when selecting PNG8, non fully opaque tiles
 will be stored as 32-bit PNG.</p>
 
-<h4>Tiled gridded elevation data</h4>
+<h4>Tiled gridded coverage data</h4>
 
-<p>Since GeoPackage v1.2 and GDAL 2.2,
-<a href="http://www.geopackage.org/spec/#extension_tiled_gridded_elevation_data">
-tiled gridded elevation data</a> can be stored using
+<p>Since GDAL 2.3,
+<a href="http://docs.opengeospatial.org/is/17-066r1/17-066r1.html#27">
+tiled gridded coverage data</a> can be stored using
 PNG unsigned 16bit tiles (with potential offset and scaling so as to be able
 to represent floating point data) or TIFF 32-bit floating-point LZW compressed
 tiles.</p>
@@ -179,6 +179,13 @@ tiles.</p>
 When converting a GDAL Float32 dataset, TIFF tiles will be used by default, unless
 PNG is explicitly selected, in which case scaling and offsetting will be
 automatically computed for each tile.</p>
+
+<p><b>WARNING</b>: the <a href="http://www.geopackage.org/spec/#extension_tiled_gridded_elevation_data">tiled gridded extension</a>
+initially implemented in GDAL 2.2 was not officially adopted and had been later
+reworked by OGC. The adopted <a href="http://docs.opengeospatial.org/is/17-066r1/17-066r1.html#27">
+tiled gridded coverage data</a> has a few differences that will make GDAL 2.2
+datasets not be compliant with the final extension. GDAL 2.3 can open those
+GDAL 2.2-generated files.</p>
 
 <h3><a id="tiling_schemes">Tiling schemes</a></h3>
 
@@ -197,15 +204,6 @@ match the pixel width and height of the raster.
 of GeoPackage with tile servicing software, it is possible to select a predefined
 tiling scheme that has world coverage. The available tiling schemes are :</p>
 <ul>
-<li><i>GoogleCRS84Quad</i>, as described in
-<a href="http://portal.opengeospatial.org/files/?artifact_id=35326">OGC 07-057r7
-WMTS 1.0</a> specification, Annex E.3. That tiling schemes consists of a single
-256x256 tile at its zoom level 0, in EPSG:4326 CRS, with extent in longitude and
-latitude in the range [-180,180]. Consequently, at zoom level 0, 64 lines are
-unused at the top and bottom of that tile. This may cause issues with some
-implementations of the specification, and there are some ambiguities about the
-exact definition of this tiling scheme. Using InspireCRS84Quad/PseudoTMS_GlobalGeodetic
-instead is therefore recommended.</li>
 <li><i>GoogleMapsCompatible</i>, as described in WMTS 1.0 specification, Annex E.4.
 That tiling schemes consists of a single 256x256 tile at its zoom level 0,
 in EPSG:3857 CRS, with extent in easting and northing in the range
@@ -231,6 +229,24 @@ That tiling schemes consists of four 256x256 tiles at its zoom level 0,
 in EPSG:3857 CRS, with extent extent in easting and northing in the range
 [-20037508.34,20037508.34]. The same remark as with PseudoTMS_GlobalGeodetic applies
 regarding interoperability with TMS.</li>
+<li><i>GoogleCRS84Quad</i>, as described in
+<a href="http://portal.opengeospatial.org/files/?artifact_id=35326">OGC 07-057r7
+WMTS 1.0</a> specification, Annex E.3. That tiling schemes consists of a single
+256x256 tile at its zoom level 0, in EPSG:4326 CRS, with extent in longitude and
+latitude in the range [-180,180]. Consequently, at zoom level 0, 64 lines are
+unused at the top and bottom of that tile. This may cause issues with some
+implementations of the specification, and there are some ambiguities about the
+exact definition of this tiling scheme. Using InspireCRS84Quad/PseudoTMS_GlobalGeodetic
+instead is therefore recommended.
+<br>
+NOTE: <a href="http://docs.opengeospatial.org/is/13-082r2/13-082r2.html#30">OGC WMTS Simple Profile 13-082r2</a>
+changed the definition of GoogleCRS84Quad (so not implemented by the driver).
+The new definition includes a -1 level (that cannot be modeled in GeoPackage given
+constraints on zoom_level being positive or 0), with a single tile at origin -180,90
+and whose bottom 128 lines are empty. Levels 0 or greater are identical to the
+InspireCRS84Quad tiling scheme. So for practical purposes, InspireCRS84Quad in
+GeoPackage is conformant to the new GoogleCRS84Quad definition.
+</li>
 </ul>
 
 <p>In all the above tiling schemes, consecutive zoom levels defer by a resolution
@@ -304,20 +320,32 @@ Defaults to NO.</li>
 <li><b>TILING_SCHEME</b>=CUSTOM/GoogleCRS84Quad/GoogleMapsCompatible/InspireCRS84Quad/PseudoTMS_GlobalGeodetic/PseudoTMS_GlobalMercator.
 See <a href="#tiling_schemes">Tiling schemes</a> section. Defaults to CUSTOM.</li>
 <li><b>ZOOM_LEVEL_STRATEGY</b>=AUTO/LOWER/UPPER. Strategy to determine zoom level.
-Only used for TILING_SCHEME is different from CUSTOM. LOWER will select the
+Only used by CreateCopy() for TILING_SCHEME different from CUSTOM. LOWER will select the
 zoom level immediately below the theoretical computed non-integral zoom level,
 leading to subsampling. On the contrary, UPPER will select the immediately above
 zoom level, leading to oversampling. Defaults to AUTO which selects the closest
 zoom level.</li>
 <li><b>RESAMPLING</b>=NEAREST/BILINEAR/CUBIC/CUBICSPLINE/LANCZOS/MODE/AVERAGE.
-Resampling algorithm. Only used for TILING_SCHEME is different from CUSTOM. Defaults
-to BILINEAR.</li>
+Resampling algorithm. Only used by CreateCopy() for TILING_SCHEME different from
+CUSTOM. Defaults to BILINEAR.</li>
 <li><b>PRECISION</b>=floating_point_value_in_vertical_units: Smallest significant value.
-Only used for tile gridded elevation data. Defaults to 1.</li>
-<li><b>VERSION</b>=AUTO/1.0/1.1/1.2: (GDAL &gt; 2.2) Set GeoPackage version
+Only used for tile gridded coverage datasets. Defaults to 1.</li>
+<li><b>UOM</b>=string: (GDAL &gt;= 2.3) Unit of Measurement. Only used for
+tiled gridded coverage datasets. Also set through SetUnitType()</li>
+<li><b>FIELD_NAME</b>=string: (GDAL &gt;= 2.3) Field name. Only used for tiled
+gridded coverage datasets. Defaults to Height.</li>
+<li><b>QUANTITY_DEFINITION</b>=string: (GDAL &gt;= 2.3) Description of the
+field. Only used for tiled gridded coverage datasets. Defaults to Height.</li>
+<li><b>GRID_CELL_ENCODING</b>=grid-value-is-center/grid-value-is-area/
+grid-value-is-corner: (GDAL &gt;= 2.3) Grid cell encoding. Only used for
+tiled gridded coverage datasets. Defaults to grid-value-is-center, when
+AREA_OR_POINT metadata item is not set.</li>
+<li><b>VERSION</b>=AUTO/1.0/1.1/1.2: (GDAL &gt;= 2.2) Set GeoPackage version
 (for application_id and user_version fields). In AUTO mode, this will be equivalent
-to 1.0, unless a tile gridded elevation dataset is created, in which case 1.2 will
-be used.</li>
+to 1.2 starting with GDAL 2.3.</li>
+<li><b>ADD_GPKG_OGR_CONTENTS</b>=YES/NO: (GDAL &gt;= 2.2) Defines whether to add
+a gpkg_ogr_contents table to keep feature count for vector layers, and
+associated triggers. Defaults to YES.</li>
 </ul>
 
 <h2>Overviews</h2>
@@ -363,6 +391,19 @@ the gpkg_contents table.</p>
 <p>You can set the CREATE_METADATA_TABLES configuration option to NO to avoid
 creating and filling the metadata tables.</p>
 
+<h2>Level of support of GeoPackage Extensions</h2>
+
+(Restricted to those have a raster scope)
+
+<table border="1">
+<th>Extension name</th><th>OGC adopted extension ?</th><th>Supported by GDAL?</th>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/zoom_other_intervals.html">Zoom Other intervals</a></td><td>Yes</td><td>Yes, since GDAL 2.0</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/tiles_encoding_webp.html">Tiles Encoding WebP</a></td><td>Yes</td><td>Yes, since GDAL 2.0</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/metadata.html">Metadata</a></td><td>Yes</td><td>Yes, since GDAL 1.11</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/wkt_for_crs.md">WKT for Coordinate Reference Systems</a> (WKT v2)</td><td>Yes</td><td>Partially, since GDAL 2.2. GDAL can read databases using this extension, but cannot interpret a SRS entry that has only a WKT v2 entry.</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/tiled_gridded_coverage_data.html">Tiled Gridded Coverage Data</a></td><td>Yes</td><td>Yes, since GDAL 2.3 (GDAL 2.2 supported a preliminary version of this extension)</td></tr>
+</table>
+
 <h2>Examples</h2>
 
 <ul>
@@ -390,9 +431,9 @@ Translation of a GeoTIFF into GeoPackage using GoogleMapsCompatible tiling schem
 </li>
 
 <li>
-Building of overviews of an existing GeoPackage
+Building of overviews of an existing GeoPackage, and forcing JPEG tiles
 <pre>
-% gdaladdo -r cubic my.gpkg 2 4 8 16 32 64
+% gdaladdo -r cubic -oo TILE_FORMAT=JPEG my.gpkg 2 4 8 16 32 64
 </pre>
 </li>
 
@@ -423,8 +464,11 @@ Open a specific raster table in a GeoPackage
 <h3>See Also</h3>
 
 <ul>
-<li> <a href="http://sqlite.org/">SQLite</a>
 <li> <a href="drv_geopackage.html">GeoPackage vector</a> documentation page</li>
+<li> <a href="http://www.geopackage.org/guidance/getting-started.html">Getting Started With GeoPackage</a></li>
+<li> <a href="http://www.geopackage.org/spec/">OGC GeoPackage format standard</a> specification, HTML format (current/development version of the standard)</li>
+<li> <a href="http://www.opengeospatial.org/standards/geopackage">OGC GeoPackage Encoding Standard</a> page</li>
+<li> <a href="http://sqlite.org/">SQLite</a>
 <li> <a href="frmt_various.html#PNG">PNG driver</a> documentation page</li>
 <li> <a href="frmt_jpeg.html">JPEG driver</a> documentation page</li>
 <li> <a href="frmt_webp.html">WEBP driver</a> documentation page</li>

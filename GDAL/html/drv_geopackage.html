@@ -9,7 +9,6 @@
 
 <p>This driver implements support for access to spatial tables in the
 <a href="http://www.opengeospatial.org/standards/geopackage">OGC GeoPackage format standard</a>
-(targeting 1.0/1.0.1)
 The GeoPackage standard uses a SQLite database file as a generic container, and the standard defines:
 </p>
 <ul>
@@ -23,6 +22,16 @@ following non-linear geometry types :CIRCULARSTRING, COMPOUNDCURVE, CURVEPOLYGON
 
 <p>Starting with GDAL 2.0, GeoPackage raster/tiles are supported. See
 <a href="drv_geopackage_raster.html">GeoPackage raster</a> documentation page</p>
+
+<h2>Specification version</h2>
+
+<p>Starting with GDAL 2.2, the driver is able to create GeoPackage databases
+following the 1.0/1.0.1, 1.1 or 1.2 versions.
+For GDAL 2.2, it will automatically
+adjust to the minimum version required for the features of GeoPackage used.
+For GDAL 2.3 or later, it will default to 1.2.
+Explicit version choice can be done by specifying the VERSION dataset creation
+option.</p>
 
 <h2>Limitations</h2>
 
@@ -66,7 +75,7 @@ Starting with GDAL 2.0, the following SQL functions, from the GeoPackage specifi
 <li>ST_MaxY(geom <i>Geometry</i>) : returns the maximum Y coordinate of the geometry</li>
 <li>ST_IsEmpty(geom <i>Geometry</i>) : returns 1 is the geometry is empty (but not null), e.g. a POINT EMPTY geometry</li>
 <li>ST_GeometryType(geom <i>Geometry</i>) : returns the geometry type : 'POINT',
-'LINESTRING', 'POLYGON', 'MULTIPOLYGON', 'MULITLINESTRING', 'MULTIPOINT', 'GEOMETRYCOLLECTION'</li>
+'LINESTRING', 'POLYGON', 'MULTIPOLYGON', 'MULTILINESTRING', 'MULTIPOINT', 'GEOMETRYCOLLECTION'</li>
 <li>ST_SRID(geom <i>Geometry</i>) : returns the SRID of the geometry</li>
 <li>GPKG_IsAssignable(expected_geom_type <i>String</i>, actual_geom_type <i>String</i>) : mainly, needed for the 'Geometry Type Triggers Extension'</li>
 </ul>
@@ -75,7 +84,7 @@ The following functions, with identical syntax and semantics as in Spatialite, a
 
 <ul>
 <li>CreateSpatialIndex(table_name <i>String</i>, geom_column_name <i>String</i>) : creates a spatial index (RTree) on the specified table/geometry column</li>
-<li>DisableSpatialIndex(table_name <i>String</i>, geom_column_name <i>String</i>) : disable an existing spatial index (RTree) on the specified table/geometry column</li>
+<li>DisableSpatialIndex(table_name <i>String</i>, geom_column_name <i>String</i>) : drop an existing spatial index (RTree) on the specified table/geometry column</li>
 </ul>
 
 <h3>Link with Spatialite</h3>
@@ -123,11 +132,24 @@ most OGR utilities, or with the GDALOpenEx() API call.
 <p>When creating a new GeoPackage file, the driver will attempt to
   force the database into a UTF-8 mode for text handling, satisfying
   the OGR strict UTF-8 capability. For pre-existing files, the driver
-  will work with whatever it's given.</p>
+  will work with whatever it is given.</p>
 
 <h3>Dataset Creation Options</h3>
 
-<p>None related to vector</p>
+<p>The following creation options (specific to vector, or common with raster)
+are available:</p>
+
+<ul>
+<li><b>VERSION</b>=AUTO/1.0/1.1/1.2: (GDAL &gt;= 2.2) Set GeoPackage version
+(for application_id and user_version fields). In AUTO mode, this will be equivalent
+to 1.2 starting with GDAL 2.3.</li>
+<li><b>ADD_GPKG_OGR_CONTENTS</b>=YES/NO: (GDAL &gt;= 2.2) Defines whether to add
+a gpkg_ogr_contents table to keep feature count, and associated triggers.
+Defaults to YES.</li>
+</ul>
+
+<p>Other options are available for raster. See the
+<a href="drv_geopackage_raster.html">GeoPackage raster</a> documentation page</p>
 
 <h3>Layer Creation Options</h3>
 
@@ -159,7 +181,7 @@ NOT_REGISTERED option, in which case the non spatial table is not registered at
 all in any GeoPackage system tables.<p>
 </ul>
 
-<h3>Metadata</h3>
+<h2>Metadata</h2>
 
 <p>(GDAL &gt;=2.0) GDAL uses the standardized <a href="http://www.geopackage.org/spec/#_metadata_table">
 <code>gpkg_metadata</code></a> and <a href="http://www.geopackage.org/spec/#_metadata_reference_table">
@@ -201,6 +223,44 @@ GeoPackage 1.2 "attributes" data type as well. Starting with GDAL 2.2, non
 spatial tables are by default created following the GeoPackage 1.2 "attributes"
 data type (can be controlled with the ASPATIAL_VARIANT layer creation option)</p>
 
+<h2>Spatial views</h2>
+
+<p>Views can be created and recognized as valid spatial layers if a corresponding
+record is inserted into the gpkg_contents and gpkg_geometry_columns table.</p>
+
+<p>Starting with GDAL 2.2, in the case of the columns in the SELECT clause of
+the view acts a integer primary key, then it can be recognized by OGR as the
+FID column of the view, provided it is renamed as OGC_FID. Selecting a feature
+id from a source table without renaming will not be sufficient, since due to
+joins this feature id could appear several times. Thus the user must explicitly
+acknowledge that the column is really a primary key.</p>
+
+<p>For example:</p>
+<pre>
+CREATE VIEW my_view AS SELECT foo.fid AS OGC_FID, foo.geom, ... FROM foo JOIN another_table ON foo.some_id = another_table.other_id
+INSERT INTO gpkg_contents (table_name, identifier, data_type, srs_id) VALUES ( 'my_view', 'my_view', 'features', 4326)
+INSERT INTO gpkg_geometry_columns (table_name, column_name, geometry_type_name, srs_id, z, m) values ('my_view', 'my_geom', 'GEOMETRY', 4326, 0, 0)
+</pre>
+
+<p>This requires GDAL to be compiled with the SQLITE_HAS_COLUMN_METADATA option
+and SQLite3 with the SQLITE_ENABLE_COLUMN_METADATA option. Starting with GDAL 2.3,
+this can be easily verified if the SQLITE_HAS_COLUMN_METADATA=YES driver metadata item
+is declared (for example with "ogrinfo --format GPKG")</p>
+
+<h2>Level of support of GeoPackage Extensions</h2>
+
+(Restricted to those have a vector scope)
+
+<table border="1">
+<th>Extension name</th><th>OGC adopted extension ?</th><th>Supported by GDAL?</th>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/nonlinear_geometry_types.html">Non-Linear Geometry Types</a></td><td>Yes</td><td>Yes, since GDAL 2.1</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/rtree_spatial_indexes.html">RTree Spatial Indexes</a></td><td>Yes</td><td>Yes, since GDAL 2.0</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/metadata.html">Metadata</a></td><td>Yes</td><td>Yes, since GDAL 1.11</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/schema.html">Schema</a></td><td>Yes</td><td>No</td></tr>
+<tr><td><a href="http://www.geopackage.org/guidance/extensions/wkt_for_crs.md">WKT for Coordinate Reference Systems</a> (WKT v2)</td><td>Yes</td><td>Partially, since GDAL 2.2. GDAL can read databases using this extension, but cannot interpret a SRS entry that has only a WKT v2 entry.</td></tr>
+<tr><td><a href="file:///home/even/gdal/git/gdal/gdal/ogr/ogrsf_frmts/gpkg/geopackage_aspatial.html">Aspatial support</a></td><td>No</td><td>Yes, since GDAL 2.0. Deprecated in GDAL 2.2 for the <i>attributes</i> official data_type</td></tr>
+</table>
+
 <h3>Examples</h3>
 
 <ul>
@@ -216,7 +276,7 @@ ogr2ogr with <strong>-update</strong>.
 </li>
 
 <li>
-Translation of a directory of shapefiles into a GeoSpackage. Each file will end
+Translation of a directory of shapefiles into a GeoPackage. Each file will end
 up as a new table within the GPKG file.
 The file <code>filename.gpkg</code> must <strong>not</strong> already exist, as it will be created.
 <pre>
@@ -238,10 +298,11 @@ The file <code>filename.gpkg</code> must <strong>not</strong> already exist, as 
 <h3>See Also</h3>
 
 <ul>
-<li> <a href="http://sqlite.org/">SQLite</a><p>
 <li> <a href="drv_geopackage_raster.html">GeoPackage raster</a> documentation page</li><p>
+<li> <a href="http://www.geopackage.org/guidance/getting-started.html">Getting Started With GeoPackage</a></li><p>
 <li> <a href="http://www.geopackage.org/spec/">OGC GeoPackage format standard</a> specification, HTML format (current/development version of the standard)</li><p>
 <li> <a href="http://www.opengeospatial.org/standards/geopackage">OGC GeoPackage Encoding Standard</a> page</li><p>
+<li> <a href="http://sqlite.org/">SQLite</a><p>
 </ul>
 
 </body>

@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20210310
+# Version: 20210710
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -51,10 +51,27 @@ import mmap
 import base64
 import os
 import sys
-CRUN_IN_AWSLAMBDA = False
-CDISABLE_GDAL_CHECK = False
-CDisableVersionCheck = False
 
+
+def getBooleanValue(value):
+    if (value is None):
+        return False
+    if (isinstance(value, bool)):
+        return value
+    val = value
+    if (not isinstance(val, str)):
+        val = str(val)
+    val = val.lower()
+    if val in ['true', 'yes', 't', '1', 'y']:
+        return True
+    return False
+
+
+CRUN_IN_AWSLAMBDA = getBooleanValue(
+    os.environ.get('OR_RUNTIME_AWSLAMBDA', False))
+CDISABLE_GDAL_CHECK = getBooleanValue(os.environ.get('OR_DISABLE_GDAL', False))
+CDisableVersionCheck = getBooleanValue(
+    os.environ.get('OR_DISABLE_VER_CHECK', False))
 
 if (sys.version_info[0] < 3):
     import ConfigParser
@@ -197,6 +214,7 @@ COUT_DELETE_AFTER_UPLOAD_OBSOLETE = 'Out_S3_DeleteAfterUpload'
 COUT_DELETE_AFTER_UPLOAD = 'DeleteAfterUpload'
 CFGLogPath = 'LogPath'
 TarGz = 'tarGz'
+TarGzExt = '.tar.gz'
 # ends
 
 # const
@@ -316,7 +334,7 @@ class ProfileEditorUI(UI):
                     endPoint = self._properties[AwsEndpoint]
                 useAlibaba = endPoint and endPoint.lower().find(SigAlibaba) != -1
                 con = session.resource('s3', endpoint_url=endPoint, config=botocore.config.Config(
-                    s3={'addressing_style': 'virtual'}) if useAlibaba else None)
+                    s3={'addressing_style': 'virtual'}))
                 # this will throw if credentials are invalid.
                 [self._availableBuckets.append(i.name)
                  for i in con.buckets.all()]
@@ -457,7 +475,7 @@ class Lambda:
         userHome = '{}/{}/{}'.format(os.path.expanduser(
             '~').replace('\\', '/'), '.aws', 'credentials')
         with open(userHome) as fptr:
-            self._aws_credentials.readfp(fptr)
+            self._aws_credentials.read_file(fptr)
         if (not self._aws_credentials.has_section(keyProfileName)):
             return False
         self._sns_aws_access_key = self._aws_credentials.get(
@@ -817,11 +835,11 @@ class ThreadPool(object):
         while(1):
             len_threads = len(threads)
             while(len_threads):
-                alive = [t.isAlive() for t in threads]
+                alive = [t.is_alive() for t in threads]
                 countDead = sum(not x for x in alive)
                 if (countDead):
                     lenBuffer = countDead
-                    threads = [t for t in threads if t.isAlive()]
+                    threads = [t for t in threads if t.is_alive()]
                     break
             buffer = []
             for i in range(0, lenBuffer):
@@ -1053,12 +1071,11 @@ class Base(object):
             return False
         if (isinstance(value, bool)):
             return value
-        val = value.lower()
-        if (val == 'true' or
-            val == 'yes' or
-            val == 't' or
-            val == '1' or
-                val == 'y'):
+        val = value
+        if (not isinstance(val, str)):
+            val = str(val)
+        val = val.lower()
+        if val in ['true', 'yes', 't', '1', 'y']:
             return True
         return False
 
@@ -1237,6 +1254,15 @@ class Base(object):
             if (USR_ARG_DEL in user_args):
                 if (user_args[USR_ARG_DEL] and
                         user_args[USR_ARG_DEL]):
+                    isProxyCSV = False
+                    rpt = self.getUserConfiguration.getValue(CPRT_HANDLER)
+                    if (rpt):
+                        proxyPath = rpt._header.get(CRASTERPROXYPATH)
+                        tmpOutput = rpt._header.get(CTEMPOUTPUT)
+                        if (proxyPath and
+                            tmpOutput and
+                            proxyPath[-4:].lower().endswith('.csv')):
+                            isProxyCSV = True
                     for f in ret_buff:
                         try:
                             _is_remove = True
@@ -1245,6 +1271,11 @@ class Base(object):
                                     _is_remove = False
                             if (_is_remove):
                                 try:
+                                    if (isProxyCSV):
+                                        if (f.lower().endswith('.aux.xml')):
+                                            dstAuxPath = os.path.join(os.path.dirname(proxyPath), os.path.basename(f))
+                                            self.message('Copying {} -> {}'.format(f, dstAuxPath))
+                                            shutil.copyfile(f, dstAuxPath)  # GH 104
                                     os.remove(f)
                                 except BaseException:
                                     time.sleep(CDEL_DELAY_SECS)
@@ -1422,7 +1453,7 @@ class UpdateMRF:
                 makedirs(output)
             except Exception as e:
                 self._base.message(str(e), self._base.const_critical_text)
-            return False
+                return False
         if (input.rfind('.') == -1):
             return False
         if (self._base and
@@ -1797,6 +1828,12 @@ class Report:
                 value is None):
             return False
         self._createSnapshot()
+        _type = type.upper()
+        _value = value.lower()
+        if (-1 != input.find('X-Amz-Credential=')):
+            if (input in self._input_list_info):
+                self._input_list_info[input][_type] = _value
+                return True
         _input = input.strip().split('?')[0]
         if (_input.lower().endswith(self._m_skipExtentions)):
             return True     # not flagged as an err
@@ -1822,12 +1859,10 @@ class Report:
             if (_input in self._input_list_info):
                 break
             (p, e) = os.path.splitext(p)
-        _type = type.upper()
         if (_type not in [CRPT_COPIED, CRPT_PROCESSED, CRPT_UPLOADED]):
             self._base.message('Invalid type ({}) at (Reporter)'.format(
                 type), self._base.const_critical_text)
             return False
-        _value = value.lower()
         if (_value not in [CRPT_YES, CRPT_NO]):
             self._base.message('Invalid value ({}) at (Reporter)'.format(
                 _value), self._base.const_critical_text)
@@ -1901,7 +1936,7 @@ class Report:
 
     def read(self, readCallback=None):
         try:
-            with open(self._report_file, 'r') as _fptr:
+            with open(self._report_file, 'r', encoding='utf-8') as _fptr:
                 ln = _fptr.readline()
                 hdr_skipped = False
                 # If 'resume=='retryall', files will be copied/processed/uploaded regardless of the individual file status.
@@ -2023,7 +2058,7 @@ class Report:
     def write(self):
         try:
             _frmt = '{}/{}/{}/{}\n'.replace('/', self.CVSCHAR)
-            with open(self._report_file, 'w+') as _fptr:
+            with open(self._report_file, 'w+', encoding='utf-8') as _fptr:
                 for key in self._header:
                     if (self.CHDR_OP == key):
                         # op==createjob header is not written out into the output .orjob file.
@@ -2049,7 +2084,7 @@ class Report:
     def writeTimeItReport(self, reportFile):
         import csv
         try:
-            with open(reportFile, 'wb') as csvfile:
+            with open(reportFile, 'w', newline='') as csvfile:
                 fieldnames = [TimeIt.Name, TimeIt.Conversion,
                               TimeIt.Overview, TimeIt.Download, TimeIt.Upload]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -2812,8 +2847,14 @@ class Azure(Store):
                 szBlobs = self._blob_service.walk_blobs(
                     name_starts_with=_resumeReporter._input_list[i])
                 try:    # Can throw if the necessary account access permissions are not valid. walk_blobs response is misleading.
+                    bFound = False
                     for blob in szBlobs:
+                        if (not bFound):
+                            bFound = True
                         blobs.append(self.azBlobInternal(blob.name))
+                    if (not bFound):
+                        _resumeReporter.updateRecordStatus(
+                            _resumeReporter._input_list[i], CRPT_COPIED, CRPT_NO)
                 except Exception as e:
                     break
         else:
@@ -2848,15 +2889,20 @@ class Azure(Store):
             cli = self._blob_service.get_blob_client(blob_source)
             with open(writeTo, 'wb') as writer:
                 cli.download_blob().download_to_stream(writer)
-            if (blob_source.lower().endswith('tar.gz')):
+            _, f = os.path.split(blob_source)
+            baseName = f.split(TarGzExt)[0]
+            if (f.lower().endswith(TarGzExt)):
                 tarFile = tarfile.open(writeTo)
-                tarFile.extractall(os.path.dirname(writeTo))
+                extractTo = os.path.join(os.path.dirname(writeTo), baseName)
+                tarFile.extractall(extractTo)
+                bToCloud = self._base.getBooleanValue(
+                    self._base.getUserConfiguration.getValue(CCLOUD_UPLOAD))
                 for x in tarFile.getmembers():
                     if (int(x.type) != 0):
                         continue
                     if (_resumeReporter):
-                        name = '{}{}'.format(
-                            blob_source[:blob_source.rfind('/') + 1], x.name)
+                        name = '{}/{}/{}'.format(
+                            blob_source[:blob_source.rfind('/')], baseName, x.name)
                         _resumeReporter.addFile(name)
                         _resumeReporter._input_list_info[name] = {
                             CRPT_COPIED: CRPT_YES,
@@ -2864,6 +2910,14 @@ class Azure(Store):
                             CRPT_UPLOADED: ''
                         }
                         if (not filterPaths(x.name, self._base.getUserConfiguration.getValue(CCFG_RASTERS_NODE))):
+                            if (not bToCloud):
+                                trail = '{}/{}'.format(baseName, x.name)
+                                dst = os.path.join(
+                                    _resumeReporter._header[CRESUME_HDR_OUTPUT], os.path.dirname(trail))
+                                if (not os.path.exists(dst)):
+                                    os.makedirs(dst)
+                                    shutil.move(os.path.join(
+                                        os.path.dirname(writeTo), trail), dst)
                             continue
                         raster_buff.append(
                             {'dst': _resumeReporter._header[CRESUME_HDR_OUTPUT], 'f': name.replace(_resumeReporter._header[CRESUME_HDR_INPUT], ''), 'src': _resumeReporter._header[CRESUME_HDR_INPUT]})
@@ -2873,7 +2927,8 @@ class Azure(Store):
                     if (raster_buff[i]['f'] == blob_source[nLen:]):
                         raster_buff.pop(i)
                         break
-
+                if (not bToCloud):
+                    os.remove(writeTo)
         except Exception as e:
             self._base.message('({})'.format(str(e)),
                                self._base.const_critical_text)
@@ -2979,14 +3034,14 @@ class Azure(Store):
             if (isUpload):
                 if (getBooleanValue(_user_config.getValue(CISTEMPINPUT))):
                     if (is_raster):
-                        if (writeTo.endswith('tar.gz')):
+                        if (writeTo.endswith(TarGzExt[1:])):
                             tarFile = tarfile.open(writeTo)
-                            parentPath = os.path.dirname(writeTo)
+                            p, f = os.path.split(writeTo)
                             for x in tarFile.getmembers():
                                 if (int(x.type) != 0):
                                     continue
                                 if (not filterPaths(x.name, _user_config.getValue(CCFG_RASTERS_NODE))):
-                                    if (not self._base.S3Upl(os.path.join(parentPath, x.name), user_args_Callback, **{TarGz: True})):
+                                    if (not self._base.S3Upl(os.path.join(p, '{}/{}'.format(f.split(TarGzExt)[0], x.name)), user_args_Callback, **{TarGz: True})):
                                         return False
                             tarFile.close()
                             os.remove(writeTo)
@@ -3039,8 +3094,8 @@ class Azure(Store):
         blob_path = self._input_file_path
         blob_name = os.path.join(
             self._upl_parent_folder, os.path.basename(blob_path))
-# if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
-# return True                          #  "
+##        if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
+##            return True                          #  "
         # return True     # debug. Must be removed before release.
         isContainerCreated = False
         t0 = datetime.now()
@@ -3128,6 +3183,9 @@ class S3Storage:
                 try:
                     awsSessionToken = None
                     sessionProfile = _profile_name
+                    AWSSessionToken, AWSAccessKeyId, AWSSecretAccessKey = \
+                        ['{}{}'.format('OR_OUT_' if direction == CS3STORAGE_OUT else '', i) for i in [
+                            'AWS_SESSION_TOKEN', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']]
                     if (_profile_name and
                             _profile_name.lower().startswith('using_')):
                         roleInfo = self.getIamRoleInfo()
@@ -3138,10 +3196,14 @@ class S3Storage:
                         self.CAWS_ACCESS_KEY_SECRET = roleInfo[self.RoleSecretAccessKey]
                         awsSessionToken = roleInfo[self.RoleToken]
                         # let's initialize the AWS env variables to allow GDAL to work when invoked externally.
-                        os.environ['AWS_ACCESS_KEY_ID'] = self.CAWS_ACCESS_KEY_ID
-                        os.environ['AWS_SECRET_ACCESS_KEY'] = self.CAWS_ACCESS_KEY_SECRET
-                        os.environ['AWS_SESSION_TOKEN'] = awsSessionToken
+                        os.environ[AWSAccessKeyId] = self.CAWS_ACCESS_KEY_ID
+                        os.environ[AWSSecretAccessKey] = self.CAWS_ACCESS_KEY_SECRET
+                        os.environ[AWSSessionToken] = awsSessionToken
                         # ends
+                    if (not awsSessionToken):
+                        if (AWSSessionToken in os.environ):
+                            # it's assumed the [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY] are also set by the client as env vars.
+                            awsSessionToken = os.environ[AWSSessionToken]
                     import botocore
                     session = None
                     self._isBucketPublic = self.CAWS_ACCESS_KEY_ID is None and \
@@ -3153,10 +3215,10 @@ class S3Storage:
                     except botocore.exceptions.ProfileNotFound as e:
                         self._base.message('Invalid profile name ({}), checking with AWS env variables..'.format(
                             _profile_name), self._base.const_warning_text)
-                        if ('AWS_ACCESS_KEY_ID' in os.environ and
-                                'AWS_SECRET_ACCESS_KEY' in os.environ):
-                            self.CAWS_ACCESS_KEY_ID = os.environ['AWS_ACCESS_KEY_ID']
-                            self.CAWS_ACCESS_KEY_SECRET = os.environ['AWS_SECRET_ACCESS_KEY']
+                        if (AWSAccessKeyId in os.environ and
+                                AWSSecretAccessKey in os.environ):
+                            self.CAWS_ACCESS_KEY_ID = os.environ[AWSAccessKeyId]
+                            self.CAWS_ACCESS_KEY_SECRET = os.environ[AWSSecretAccessKey]
                             session = boto3.Session(
                                 self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET)
                     if (not session):
@@ -3181,8 +3243,8 @@ class S3Storage:
                             # initialize access_key, secret_key using the profile.
                             self.CAWS_ACCESS_KEY_ID = session.get_credentials().access_key
                             self.CAWS_ACCESS_KEY_SECRET = session.get_credentials().secret_key
-                            os.environ['AWS_ACCESS_KEY_ID'] = self.CAWS_ACCESS_KEY_ID
-                            os.environ['AWS_SECRET_ACCESS_KEY'] = self.CAWS_ACCESS_KEY_SECRET
+                            os.environ[AWSAccessKeyId] = self.CAWS_ACCESS_KEY_ID
+                            os.environ[AWSSecretAccessKey] = self.CAWS_ACCESS_KEY_SECRET
                         else:
                             self._isBucketPublic = True
                     useAlibaba = endpointURL and endpointURL.lower().find(SigAlibaba) != -1
@@ -3195,6 +3257,7 @@ class S3Storage:
                         self.m_user_config.setValue('{}oss'.format(
                             'in' if direction == CS3STORAGE_IN else 'out'), useAlibaba)
                     bucketCon = session.client('s3')
+                    region = DefS3Region
                     try:
                         loc = bucketCon.get_bucket_location(Bucket=self.m_bucketname)[
                             'LocationConstraint']
@@ -3202,9 +3265,9 @@ class S3Storage:
                             region = loc
                     except Exception as e:
                         self._base.message(
-                            'get/bucket/location ({})'.format(str(e)), self._base.const_warning_text)
+                            'get/bucket/region ({})'.format(str(e)), self._base.const_warning_text)
                     self.con = session.resource('s3', region, endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(
-                        s3={'addressing_style': 'virtual' if useAlibaba else 'path'}))
+                        s3={'addressing_style': 'virtual'}))
                     if (self._isBucketPublic):
                         self.con.meta.client.meta.events.register(
                             'choose-signer.s3.*', botocore.handlers.disable_signing)
@@ -3232,8 +3295,8 @@ class S3Storage:
                 except botocore.exceptions.ClientError as e:
                     try:
                         errCode = int(e.response['Error']['Code'])
-                    except ValueError:
-                        errCode = 403
+                    except ValueError as e:
+                        errCode = -1
                     if (errCode == 403):
                         try:
                             fetchMeta = self.con.meta.client.head_object(
@@ -3254,9 +3317,9 @@ class S3Storage:
                             self.m_bucketname),
                             self._base.const_critical_text)
                         return False
-                    os.environ['AWS_ACCESS_KEY_ID'] = session.get_credentials(
+                    os.environ[AWSAccessKeyId] = session.get_credentials(
                     ).access_key
-                    os.environ['AWS_SECRET_ACCESS_KEY'] = session.get_credentials(
+                    os.environ[AWSSecretAccessKey] = session.get_credentials(
                     ).secret_key
                 except Exception as e:
                     self._base.message(str(e), self._base.const_critical_text)
@@ -3402,11 +3465,11 @@ class S3Storage:
             while(1):
                 nThreads = len(threads)
                 while(nThreads > 0):
-                    alive = [t.isAlive() for t in threads]
+                    alive = [t.is_alive() for t in threads]
                     nDead = sum(not x for x in alive)
                     if (nDead):
                         nBuffer = nDead
-                        threads = [t for t in threads if t.isAlive()]
+                        threads = [t for t in threads if t.is_alive()]
                         break
                 buffer = []
                 if (keysIndx == 0):
@@ -3736,17 +3799,19 @@ def args_Callback(args, user_data=None):
     m_mode = 'chs'
     m_nodata_value = None
     m_predictor = 1
-    m_interleave = 'PIXELS'
+    m_interleave = 'PIXEL'
+    isCOG = False
     if (user_data):
         try:
             userParameters = user_data[CIDX_USER_CONFIG].getValue(
                 'GDAL_Translate_UserParameters')
             if (userParameters):
                 [args.append(i) for i in userParameters.split()]
-            compression_ = user_data[CIDX_USER_CONFIG].getValue('Compression')
+            compression_ = user_data[CIDX_USER_CONFIG].getValue(
+                'Compression').lower()
             useCOGTIFF = user_data[CIDX_USER_CONFIG].getValue('cog') == True
             if (useCOGTIFF):
-                compression_ = 'Deflate'
+                compression_ = 'deflate'
             if (compression_):
                 m_compression = compression_
             compression_quality_ = user_data[CIDX_USER_CONFIG].getValue(
@@ -3774,13 +3839,18 @@ def args_Callback(args, user_data=None):
             mode_ = m_mode.split('_')
             if (len(mode_) > 1):
                 m_mode = mode_[0]      # mode/output
-                m_compression = mode_[1]     # compression
-            if (m_mode.startswith('tif')):
+                if (mode_[1].lower() == 'cog'):
+                    m_mode = mode_[1]
+                    isCOG = True
+                else:
+                    m_compression = mode_[1].lower()     # compression
+            if (m_mode.startswith(('tif', 'cog'))):
                 args.append('-co')
                 args.append('BIGTIFF=IF_NEEDED')
-                args.append('-co')
-                args.append('TILED=YES')
-                m_mode = 'GTiff'   # so that gdal_translate can understand.
+                if (not isCOG):
+                    args.append('-co')
+                    args.append('TILED=YES')
+                    m_mode = 'GTiff'   # so that gdal_translate can understand.
                 if (m_interleave == 'PIXEL' and
                         m_compression.startswith(_JPEG)):
                     _base = user_data[CIDX_USER_CLSBASE]
@@ -3792,8 +3862,9 @@ def args_Callback(args, user_data=None):
                             ret = gdalInfo.bandInfo
                             if (ret and
                                     len(ret) != 1):
-                                args.append('-co')
-                                args.append('PHOTOMETRIC=YCBCR')
+                                if (not isCOG):         # To omit the GDAL warning, COG driver by default selects the PHOTOMETRIC=YCBCR for jpeg compression.
+                                    args.append('-co')
+                                    args.append('PHOTOMETRIC=YCBCR')
                     if (m_compression == _JPEG12):
                         args.append('-co')
                         args.append('NBITS=12')
@@ -3801,7 +3872,7 @@ def args_Callback(args, user_data=None):
                 if (m_interleave == 'PIXEL' and
                         m_compression == 'deflate'):
                     args.append('-co')
-                    args.append(' predictor={}'.format(m_predictor))
+                    args.append('predictor={}'.format(m_predictor))
         except BaseException:     # could throw if index isn't found
             pass    # ingnore with defaults.
     args.append('-of')
@@ -3820,7 +3891,8 @@ def args_Callback(args, user_data=None):
                 args.append('-co')
                 args.append('OPTIONS="MULTISPECTRAL:1"')
         else:
-            args.append('JPEG_QUALITY=%s' % (m_compression_quality))
+            args.append('{}QUALITY={}'.format('JPEG_' if not isCOG else '', m_compression_quality))
+    if (not isCOG):
         args.append('-co')
         args.append('INTERLEAVE=%s' % (m_interleave))
     if (m_compression.startswith(_LERC)):
@@ -4147,6 +4219,12 @@ class Copy:
                                                         token): e].strip().replace('"', '').replace('?', '_')
                                                 isFileNameInHeader = True
                                             break
+                                        # aws pre-signed URL support.
+                                        elif(v.startswith('x-amz-request-id')):
+                                            if (_mkRemoteURL in _rpt._input_list_info):
+                                                _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = file.split('?')[
+                                                    0]
+                                            isFileNameInHeader = True
                                     localPath = self.m_user_config.getValue(
                                         CTEMPINPUT)
                                     if (localPath is None):
@@ -4316,8 +4394,6 @@ class Compression(object):
         self._base = base
 
     def init(self, id=None):
-        if (CDISABLE_GDAL_CHECK):
-            return True
         if (id):
             self.m_id = id
         if (not self._base or
@@ -4331,11 +4407,15 @@ class Compression(object):
             self.CGDAL_ADDO_EXE += CEXEEXT
             self.CGDAL_BUILDVRT_EXE += CEXEEXT
         self.m_user_config = self._base.getUserConfiguration
+        if (CDISABLE_GDAL_CHECK):
+            # forced failure if the env OR_DISABLE_GDAL was set to True but a GDAL conversion template was used.
+            self.m_gdal_path = 'z:/'
+            return True
         # internal gdal_path could get modified here.
         if (not self.m_gdal_path or
                 not os.path.isdir(self.m_gdal_path)):
             if (self.m_gdal_path):
-                self.message('Invalid GDAL path ({}) in paramter file. Using default location.'.format(
+                self.message('Invalid GDAL path ({}) in parameter file. Using default location.'.format(
                     self.m_gdal_path), const_warning_text)
             self.m_gdal_path = os.path.join(os.path.dirname(
                 os.path.abspath(__file__)), r'GDAL/bin')
@@ -4443,7 +4523,7 @@ class Compression(object):
             if (breakInputPath[-1] == breakOututPath[-1]):
                 breakOututPath.pop()
             output_file = '/'.join(breakOututPath) + '/{}.{}'.format(
-                breakInputPath[-1], self.m_user_config.getValue('Mode'))
+                breakInputPath[-1], self.m_user_config.getValue('Mode').split('_')[0])
         post_process_output = output_file
         if (_do_process):
             out_dir_path = os.path.dirname(output_file)
@@ -4539,8 +4619,13 @@ class Compression(object):
             do_pyramids = self.m_user_config.getValue('Pyramids')
             timeIt = kwargs['name'] if 'name' in kwargs else None
             azSAS = self.m_user_config.getValue(CFGAZSAS, False)
+            bUnicode = False
+            try:
+                _ = input_file.encode('ascii')
+            except UnicodeEncodeError as e:
+                bUnicode = True
             inputRaster = self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(
-                CPLANET_IDENTIFY) == -1 and not azSAS and not isTempInput else '"{}"'.format(input_file)
+                CPLANET_IDENTIFY) == -1 and not azSAS and not isTempInput and not bUnicode else '"{}"'.format(input_file)
             useTokenPath = self._base.convertToTokenPath(inputRaster)
             if (useTokenPath is not None):
                 inputRaster = useTokenPath
@@ -4586,7 +4671,7 @@ class Compression(object):
                     self.m_user_config.getValue('vsimem'))
                 args.append('"{}{}"'.format(
                     '/vsimem/' if useVsimem else '', output_file))
-                self.message('Applying compression (%s)' %
+                self.message('Converting (%s)..' %
                              (useTokenPath if useTokenPath else input_file))
                 ret = self._call_external(
                     args, name=timeIt, method=TimeIt.Conversion, store=self._base)
@@ -5034,21 +5119,6 @@ def getInputOutput(inputfldr, outputfldr, file, isinput_s3):
     return (input_file, output_file)
 
 
-def getBooleanValue(value):
-    if (value is None):
-        return False
-    if (isinstance(value, bool)):
-        return value
-    val = value.lower()
-    if (val == 'true' or
-        val == 'yes' or
-        val == 't' or
-        val == '1' or
-            val == 'y'):
-        return True
-    return False
-
-
 def formatExtensions(value):
     if (value is None or
             len(value.strip()) == 0):
@@ -5164,14 +5234,14 @@ def makedirs(filepath):
     try:
         os.makedirs(filepath)
     except Exception as e:
-        if (e.errno == os.errno.EEXIST):     # filepath already exists
+        if (os.path.exists(filepath)):  # filepath already exists
             return
         raise
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.5s'
-    __program_date__ = '20210310'
+    __program_ver__ = 'v2.0.6'
+    __program_date__ = '20210710'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -5267,7 +5337,8 @@ class Application(object):
             'clonemrf',
             'rasterproxy',
             'splitmrf',
-            BundleMaker.CMODE
+            BundleMaker.CMODE,
+            'aid'
         }
         # ends
         # read-in (-mode)
@@ -5281,9 +5352,6 @@ class Application(object):
                     Base.const_critical_text)
             return False
         cfg_mode = cfg_mode.lower()
-        if (cfg_mode == 'tif_cog'):  # suffix for creating cloud optimized geoTiffs
-            cfg.setValue('cog', True)
-            cfg_mode = 'tif'    # reset mode
         cfg.setValue('Mode', cfg_mode)
         # ends
         return True
@@ -5424,6 +5492,7 @@ class Application(object):
         _rpt = cfg = til = None
         if (not self._usr_args):
             return False
+        os.path.sep = '/'
         if (isinstance(self._usr_args, argparse.Namespace)):
             self._args = self._usr_args
         else:
@@ -5794,7 +5863,7 @@ class Application(object):
         if (not cfg.getValue(COUT_CLOUD_TYPE)):
             cfg.setValue(COUT_CLOUD_TYPE, CCLOUD_AMAZON)
         # ends
-        if (self._args.subs):
+        if (self._args.subs is not None):
             cfg.setValue('IncludeSubdirectories',
                          getBooleanValue(self._args.subs))
         # ends
@@ -6006,12 +6075,12 @@ class Application(object):
             Store.TypeGoogle: None
         }
         outputClientIdEnvToRead = {
-            Store.TypeAmazon: 'AWS_ACCESS_KEY_ID',
+            Store.TypeAmazon: 'OR_OUT_AWS_ACCESS_KEY_ID',
             Store.TypeAzure: 'OR_OUT_AZURE_STORAGE_ACCOUNT',
             Store.TypeGoogle: None
         }
         outputClientSecretEnvToRead = {
-            Store.TypeAmazon: 'AWS_SECRET_ACCESS_KEY',
+            Store.TypeAmazon: 'OR_OUT_AWS_SECRET_ACCESS_KEY',
             Store.TypeAzure: 'OR_OUT_AZURE_STORAGE_ACCESS_KEY',
             Store.TypeGoogle: None
         }
@@ -6226,9 +6295,11 @@ class Application(object):
                     inputBucketKeyToRead[cloudDownloadType], False)
             if (in_s3_parent is None or
                     in_s3_bucket is None):
-                self._base.message(
-                    'Invalid/empty value(s) found in node(s) [In_S3_ParentFolder, In_S3_Bucket]', self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
+                if (_rpt and
+                        not _rpt._isInputHTTP):
+                    self._base.message(
+                        'Invalid/empty value(s) found in node(s) [In_S3_ParentFolder, In_S3_Bucket]', self._base.const_critical_text)
+                    return(terminate(self._base, eFAIL))
             # update (in s3 bucket name in config)
             cfg.setValue('In_S3_Bucket', in_s3_bucket)
             in_s3_parent = in_s3_parent.replace('\\', '/')
@@ -6424,11 +6495,11 @@ class Application(object):
             while(1):
                 len_threads = len(threads)
                 while(len_threads):
-                    alive = [t.isAlive() for t in threads]
+                    alive = [t.is_alive() for t in threads]
                     cnt_dead = sum(not x for x in alive)
                     if (cnt_dead):
                         len_buffer = cnt_dead
-                        threads = [t for t in threads if t.isAlive()]
+                        threads = [t for t in threads if t.is_alive()]
                         break
                 buffer = []
                 for i in range(0, len_buffer):
@@ -6664,11 +6735,11 @@ class Application(object):
             while(1):
                 len_threads = len(threads)
                 while(len_threads):
-                    alive = [t.isAlive() for t in threads]
+                    alive = [t.is_alive() for t in threads]
                     cnt_dead = sum(not x for x in alive)
                     if (cnt_dead):
                         len_buffer = cnt_dead
-                        threads = [t for t in threads if t.isAlive()]
+                        threads = [t for t in threads if t.is_alive()]
                         break
                 buffer = []
                 for i in range(0, len_buffer):

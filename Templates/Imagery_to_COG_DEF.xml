@@ -20,7 +20,7 @@
     <!--LERC precision to apply for LERC compression (Def: 0.5 for int data and 0.001 for float data)-->
     <LERCPrecision></LERCPrecision>
     <!--Build pyramids? Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n, only, external]-->
-    <BuildPyramids>true</BuildPyramids>
+    <BuildPyramids>false</BuildPyramids>
     <Predictor>2</Predictor>
     <!--Pyramid levels to create (Def:  2)-->
     <PyramidFactor></PyramidFactor>
@@ -36,7 +36,7 @@
     <!--This needs to be specified when generating caching or clone MRF, the value should be based on the input raster pyramid factor (Def: 2)-->
     <Scale></Scale>
     <!--If ‘True’ raster output extensions will not be renamed to 'mrf'. Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n]-->
-    <KeepExtension>false</KeepExtension>
+    <KeepExtension>true</KeepExtension>
     <!--Simultaneous threads to use for parallel processing/instances of gdal_translate/gdal_addo/etc (Def: 10)-->
     <Threads>4</Threads>
     <!--Path to save log/completed job files-->
