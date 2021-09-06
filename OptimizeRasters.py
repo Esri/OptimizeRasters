@@ -1644,8 +1644,10 @@ class UpdateMRF:
             if (autoCreateRasterProxy):
                 node = doc.getElementsByTagName('Source')
                 if (node):
-                    sourceVal = os.path.join(
-                        _rasterSource, baseURL.split(CloudOGTIFFExt)[0])
+                    sourceVal = _rasterSource
+                    if (not sourceVal.endswith(baseURL)):
+                        sourceVal = os.path.join(
+                            _rasterSource, baseURL.split(CloudOGTIFFExt)[0])
                     node[0].firstChild.nodeValue = sourceVal
             # ends
             if (self._cachePath):
@@ -4851,14 +4853,20 @@ class Compression(object):
                                     _input_file, CRPT_PROCESSED, CRPT_NO)
                             return ret
         # Do we auto generate raster proxy files as part of the raster conversion process?
+        rasterProxyPath = None
         if (self.m_user_config.getValue(CCLONE_PATH)):
             mode = self.m_user_config.getValue('Mode')
             modifyProxy = True
             RecursiveCall = 'recursiveCall'
             if (not mode.endswith('mrf') and
                     RecursiveCall not in kwargs):
-                rasterProxyPath = os.path.join(self.m_user_config.getValue(
-                    CCLONE_PATH, False), os.path.basename(output_file))
+                _outputPath = self._base.convertToForwardSlash(os.path.dirname(output_file))
+                isCloudUpload = self._base.getBooleanValue(
+                    self.m_user_config.getValue(CCLOUD_UPLOAD))
+                isTmpOutput = self.m_user_config.getValue(CISTEMPOUTPUT)
+                _mkOutputPath = _outputPath.replace(self.m_user_config.getValue(CTEMPOUTPUT if isTmpOutput else CCFG_PRIVATE_OUTPUT, False), '')
+                rasterProxyFldr = os.path.join(self.m_user_config.getValue(CCLONE_PATH, False), _mkOutputPath)
+                rasterProxyPath = os.path.join(rasterProxyFldr, os.path.basename(output_file))
                 ret = self.compress(output_file, rasterProxyPath, args_Callback_for_meta,
                                     post_processing_callback=None, updateOrjobStatus=False, createOverviews=False, recursiveCall=True, **kwargs)
                 errorEntries = RasterAssociates.removeRasterProxyAncillaryFiles(
@@ -4867,6 +4875,11 @@ class Compression(object):
                     for err in errorEntries:
                         self.message('Unable to delete ({})'.format(
                             err), self._base.const_warning_text)
+                if (not isCloudUpload):
+                    updateMRF = UpdateMRF(self._base)
+                    if (updateMRF.init(rasterProxyPath, self.m_user_config.getValue(CCLONE_PATH, False), mode,
+                                       self.m_user_config.getValue(CCACHE_PATH, False), self.m_user_config.getValue(CCLONE_PATH, False), self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
+                        updateMRF.copyInputMRFFilesToOutput()
                 modifyProxy = False
             if (modifyProxy):
                 updateMRF = UpdateMRF(self._base)
@@ -4883,7 +4896,7 @@ class Compression(object):
                                    self.m_user_config.getValue(CCACHE_PATH, False), _output_home_path, self.m_user_config.getValue(COUT_VSICURL_PREFIX, False))):
                     updateMRF.copyInputMRFFilesToOutput()
         # ends
-        # call any user-defined fnc for any post-processings.
+        # call any user-defined fnc for any post-processing.
         if (post_processing_callback):
             if (self._base.getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 self.message(
@@ -4891,6 +4904,45 @@ class Compression(object):
             ret = post_processing_callback(post_process_output, post_processing_callback_args, input=os.path.basename(
                 input_file), f=post_process_output, cfg=self.m_user_config)
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
+            _proxyPath = self.m_user_config.getValue(CCLONE_PATH)
+            if (_proxyPath and
+                rasterProxyPath):
+                mode = self.m_user_config.getValue('Mode')
+                if (not mode.endswith('mrf')):
+                    isOutContainerSAS = False    # chs
+                    cloudHandler = self._base.getSecuredCloudHandlerPrefix(
+                        CS3STORAGE_OUT)
+                    if (cloudHandler is None):
+                        isOutContainerSAS = (self._base.getUserConfiguration.getValue(COUT_CLOUD_TYPE, True) == CCLOUD_AZURE and
+                                             azure_storage is not None and
+                                             azure_storage._SASToken is not None)
+                    if (cloudHandler or
+                        isOutContainerSAS):
+                        outContainer = self._base.getUserConfiguration.getValue(
+                            'Out_S3_Bucket', False)
+                        proxyURL = self._base.getUserConfiguration.getValue(
+                            CCFG_PRIVATE_OUTPUT, False)
+                        proxyFileURL = rasterProxyPath.replace(_proxyPath, proxyURL)
+                        isSecured = self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseTokenOnOuput))
+                        _rasterSource = ''
+                        if (isSecured):
+                            _rasterSource = '/{}/{}/{}'.format(cloudHandler, outContainer, proxyFileURL)
+                        else:
+                            urlPrefix = self._base.getUserConfiguration.getValue(
+                            COUT_VSICURL_PREFIX, False)
+                            if (urlPrefix):
+                                if (isOutContainerSAS):
+                                     _rasterSource = '{}{}?{}'.format(urlPrefix, proxyFileURL[len(self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)):], azure_storage._SASToken)
+                                else:
+                                    _rasterSource =  '{}{}'.format(urlPrefix, os.path.basename(rasterProxyPath))
+                        if (not isOutContainerSAS):
+                            _rasterSource = self._base.urlEncode(_rasterSource)
+                        doc = minidom.parse(rasterProxyPath)
+                        nodes = doc.getElementsByTagName('Source')
+                        if (nodes):
+                            nodes.pop().firstChild.nodeValue = _rasterSource
+                            with open (rasterProxyPath, 'w') as writer:
+                                writer.write(doc.childNodes[0].toxml())
         # ends
         if (_rpt and
                 _rpt.operation != COP_UPL):
@@ -5291,7 +5343,7 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6c'
+    __program_ver__ = 'v2.0.6d'
     __program_date__ = '20210906'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
