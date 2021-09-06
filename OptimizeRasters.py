@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20210710
+# Version: 20210906
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -953,6 +953,7 @@ class Base(object):
         self._m_log = msgHandler
         self._m_msg_callback = msgCallback
         self._m_user_config = userConfig
+        self._lastMsg = ''
         if (self._m_msg_callback):
             if (self._m_log):
                 self._m_log.isPrint = False
@@ -964,6 +965,8 @@ class Base(object):
         return True
 
     def message(self, msg, status=const_general_text):
+        if (msg):
+            self._lastMsg = msg
         if (self._m_log):
             self._m_log.Message(msg, status)
         if (self._m_msg_callback):
@@ -2365,8 +2368,16 @@ class S3Upload:
             self.mp.upload_file(self.m_local_file, self.m_s3_bucket.name, self.m_s3_path, extra_args={
                                 'ACL': self.m_acl_policy}, callback=ProgressPercentage(self._base, self.m_local_file))
         except Exception as e:  # trap any connection issues.
-            self._base.message('({})'.format(str(e)),
-                               self._base.const_critical_text)
+            msg = str(e)
+            isRefreshToken = msg.find('(ExpiredToken)') != -1
+            if (isRefreshToken):
+                if ('fptrRefresh' in kwargs):
+                    self.m_s3_bucket = kwargs['fptrRefresh']()
+                    if (self.m_s3_bucket):
+                        ret = self.init()   # will ignore (ret) value to allow (retry) by the caller
+                        self._base.message('recycled at {} -> ret from refreshCallback {}\n'.format(datetime.utcnow(), ret))
+            self._base.message('({})'.format(msg),
+                               self._base.const_warning_text if isRefreshToken else self._base.const_critical_text)
             return False
         return True
 
@@ -3161,6 +3172,7 @@ class S3Storage:
         self._isBucketPublic = False
         self._isRequesterPay = False
         self._isNoAccessToListBuckets = False
+        self._direction = CS3STORAGE_IN
 
     def init(self, remote_path, s3_key, s3_secret, direction):
         if (not isinstance(self._base, Base)):
@@ -3170,6 +3182,7 @@ class S3Storage:
         self.m_user_config = self._base.getUserConfiguration
         self.CAWS_ACCESS_KEY_ID = s3_key
         self.CAWS_ACCESS_KEY_SECRET = s3_secret
+        self._direction = direction
         self.m_bucketname = ''         # no default bucket-name
         if (self.m_user_config):
             s3_bucket = self.m_user_config.getValue('{}_S3_Bucket'.format(
@@ -3418,7 +3431,7 @@ class S3Storage:
             if (subs is not None):    # if there's a value, take it else defaults to (True)
                 subs = self._base.getBooleanValue(root_only_)
         keys = self.list(self.con, self.m_bucketname, prefix,
-                         subs) if not isLink else _rpt
+                         includeSubFolders=subs, keys=[], marker='') if not isLink else _rpt
         if (not keys):
             return False
         isRoot = self.remote_path == '/'
@@ -3525,6 +3538,15 @@ class S3Storage:
             self.con.meta.client.download_file(self.m_bucketname, S3_key, mk_path, ExtraArgs={
                                                'RequestPayer': 'requester'} if self._isRequesterPay else {})
         except Exception as e:
+            msg = str(e)
+            isRefreshToken = msg.find('(ExpiredToken)') != -1
+            if (isRefreshToken):
+                if ('fptrRefresh' in kwargs):
+                    bucket = kwargs['fptrRefresh']()
+                    if (bucket):
+                        ret = self.__copyRemoteToLocal(S3_key, mk_path, **kwargs)    # retry once
+                        if (ret):
+                            return True
             self._base.message('({}\n{})'.format(
                 str(e), mk_path), self._base.const_critical_text)
             if (_rpt):
@@ -3602,7 +3624,7 @@ class S3Storage:
                 return False
         # let's write remote to local
         result = self.__copyRemoteToLocal(
-            S3_key, mk_path, name=S3_key, method=TimeIt.Download, store=self._base)
+            S3_key, mk_path, name=S3_key, method=TimeIt.Download, store=self._base, fptrRefresh=self.refresh)
         if (not result):
             return False
         # ends
@@ -3723,7 +3745,7 @@ class S3Storage:
                         ret = False
                         while(upl_retries and not ret):
                             ret = S3.upload(
-                                name=_source_path, method=TimeIt.Upload, store=self._base)
+                                name=_source_path, method=TimeIt.Upload, store=self._base, fptrRefresh = self.refresh)
                             if (not ret):
                                 # let's sleep for a while until s3 kick-starts
                                 time.sleep(10)
@@ -3750,6 +3772,21 @@ class S3Storage:
             if (not include_subs):
                 return upload_buff
         return upload_buff       # this could be empty.
+
+    def refresh(self):
+        self._base.message('Refreshing token to {}...'.format('read' if self._direction == CS3STORAGE_IN else 'write'))
+        ret = self.init(self.remote_path, self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET, self._direction)
+        roleInfo = self.getIamRoleInfo()
+        self._base.message(
+        'Refreshed token info,\n{}\n{}\n{}\n{}'.format(ret,
+        roleInfo[self.RoleAccessKeyId],
+        roleInfo[self.RoleSecretAccessKey],
+        roleInfo[self.RoleToken])
+        )
+        if (not ret):
+            return None
+        return self.bucketupload
+
 # ends
 
 
@@ -3870,7 +3907,7 @@ def args_Callback(args, user_data=None):
                         args.append('NBITS=12')
                     m_compression = _JPEG
                 if (m_interleave == 'PIXEL' and
-                        m_compression == 'deflate'):
+                        m_compression in ('deflate', 'lzw')):
                     args.append('-co')
                     args.append('predictor={}'.format(m_predictor))
         except BaseException:     # could throw if index isn't found
@@ -4675,6 +4712,20 @@ class Compression(object):
                              (useTokenPath if useTokenPath else input_file))
                 ret = self._call_external(
                     args, name=timeIt, method=TimeIt.Conversion, store=self._base)
+                lstMsg = self._base._lastMsg
+                if (isinstance(lstMsg, bytes)):    # external msgs could be non-unicode.
+                    lstMsg = lstMsg.decode(encoding='utf-8')
+                isAwsTokenExpired = lstMsg.find('The provided token has expired') != -1
+                if (isAwsTokenExpired):
+                    store = S3Storage(self._base)
+                    self.message ('Refreshing token/direct access..')
+                    roleInfo = store.getIamRoleInfo()
+                    os.environ['AWS_ACCESS_KEY_ID'] = roleInfo[store.RoleAccessKeyId]
+                    os.environ['AWS_SECRET_ACCESS_KEY'] = roleInfo[store.RoleSecretAccessKey]
+                    os.environ['AWS_SESSION_TOKEN'] = roleInfo[store.RoleToken]
+                    print ('Retry/External call..')
+                    ret = self._call_external(
+                        args, name=timeIt, method=TimeIt.Conversion, store=self._base)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
                 if (not ret):
                     if (_rpt):
@@ -5240,8 +5291,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6'
-    __program_date__ = '20210710'
+    __program_ver__ = 'v2.0.6c'
+    __program_date__ = '20210906'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
