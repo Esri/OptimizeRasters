@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20210906
+# Version: 20211003
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4901,15 +4901,18 @@ class Compression(object):
             if (self._base.getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 self.message(
                     '[{}-Push]..'.format(self.m_user_config.getValue(COUT_CLOUD_TYPE).capitalize()))
-            ret = post_processing_callback(post_process_output, post_processing_callback_args, input=os.path.basename(
-                input_file), f=post_process_output, cfg=self.m_user_config)
+            _processedPath = os.path.dirname(output_file[len(self.m_user_config.getValue(CTEMPOUTPUT, False)):])
+            _indx = input_file.index(_processedPath)
+            _input = os.path.basename(input_file) if _indx <= 0 else input_file[_indx:]
+            ret = post_processing_callback(post_process_output, post_processing_callback_args, input=_input,
+                f=post_process_output, cfg=self.m_user_config)
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
             _proxyPath = self.m_user_config.getValue(CCLONE_PATH)
             if (_proxyPath and
                 rasterProxyPath):
                 mode = self.m_user_config.getValue('Mode')
                 if (not mode.endswith('mrf')):
-                    isOutContainerSAS = False    # chs
+                    isOutContainerSAS = False
                     cloudHandler = self._base.getSecuredCloudHandlerPrefix(
                         CS3STORAGE_OUT)
                     if (cloudHandler is None):
@@ -5343,8 +5346,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6d'
-    __program_date__ = '20210906'
+    __program_ver__ = 'v2.0.6e'
+    __program_date__ = '20211003'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
