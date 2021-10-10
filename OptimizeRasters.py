@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20211003
+# Version: 20211010
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -5346,8 +5346,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6e'
-    __program_date__ = '20211003'
+    __program_ver__ = 'v2.0.6f'
+    __program_date__ = '20211010'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -6834,6 +6834,7 @@ class Application(object):
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
                 return
+            makedirs(self._args.output) # prepare output dirs.
             len_buffer = cfg_threads
             threads = []
             store_files_indx = 0
@@ -6871,8 +6872,12 @@ class Application(object):
                         if (setPreAssignedURL):
                             preAkey = '{}{}'.format(f['src'], f['f'])
                             if (cloudDownloadType == Store.TypeAmazon):
-                                self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url(
-                                    'get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
+                                    if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken))):
+                                        resp = o_S3_storage.con.meta.client.get_object(Bucket=o_S3_storage.m_bucketname, Key=preAkey) # , Range='bytes={}-{}'.format(0, 4))
+                                        self._args.preFetchedMRF = resp['Body'].read()
+                                    else:
+                                        self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url(
+                                            'get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
                             else:
                                 if (not cfg.getValue(CFGAZSAS)):
                                     from azure.storage.blob import ResourceTypes, AccountSasPermissions, generate_account_sas
@@ -7067,35 +7072,38 @@ def threadProxyRaster(req, base, comp, args):
                 :4]   # mrf XML root node
             # reading as small as possble to determine the correct type to avoid large data transfers for bigger .orjob files.
             sigMRFLength = len(sigMRF)
-            bytesAtHeader = None
             remoteURL = None
-            if (inputFile.startswith(CVSICURL_PREFIX)):
-                dnVSICURL = inputFile.split(CVSICURL_PREFIX)[1]
-                remoteReader = None
-                remoteURL = args.preAssignedURL if (hasattr(
-                    args, 'preAssignedURL') and args.preAssignedURL is not None) else dnVSICURL
-                try:
-                    remoteReader = urlopen(remoteURL)
-                    bytesAtHeader = remoteReader.read(sigMRFLength)
-                except Exception as e:
-                    base.message(str(e), base.const_critical_text)
-                    if (_rpt):
-                        _rpt.updateRecordStatus(
-                            rptName, CRPT_PROCESSED, CRPT_NO)
-                    return False
-                finally:
-                    if (remoteReader):
-                        remoteReader.close()
-            else:
-                try:
-                    with open(inputFile, 'rb') as fptrProxy:
-                        bytesAtHeader = fptrProxy.read(sigMRFLength)
-                except Exception as e:
-                    base.message(str(e), base.const_critical_text)
-                    if (_rpt):
-                        _rpt.updateRecordStatus(
-                            rptName, CRPT_PROCESSED, CRPT_NO)
-                    return False
+            isPreFetchedMRF = True if (hasattr(
+                args, 'preFetchedMRF') and args.preFetchedMRF is not None) else False
+            bytesAtHeader = args.preFetchedMRF[:sigMRFLength] if isPreFetchedMRF else None
+            if (not isPreFetchedMRF):
+                if (inputFile.startswith(CVSICURL_PREFIX)):
+                    dnVSICURL = inputFile.split(CVSICURL_PREFIX)[1]
+                    remoteReader = None
+                    remoteURL = args.preAssignedURL if (hasattr(
+                        args, 'preAssignedURL') and args.preAssignedURL is not None) else dnVSICURL
+                    try:
+                        remoteReader = urlopen(remoteURL)
+                        bytesAtHeader = remoteReader.read(sigMRFLength)
+                    except Exception as e:
+                        base.message(str(e), base.const_critical_text)
+                        if (_rpt):
+                            _rpt.updateRecordStatus(
+                                rptName, CRPT_PROCESSED, CRPT_NO)
+                        return False
+                    finally:
+                        if (remoteReader):
+                            remoteReader.close()
+                else:
+                    try:
+                        with open(inputFile, 'rb') as fptrProxy:
+                            bytesAtHeader = fptrProxy.read(sigMRFLength)
+                    except Exception as e:
+                        base.message(str(e), base.const_critical_text)
+                        if (_rpt):
+                            _rpt.updateRecordStatus(
+                                rptName, CRPT_PROCESSED, CRPT_NO)
+                        return False
             if (bytesAtHeader):
                 mode = 'cachingmrf'
                 if (isinstance(bytesAtHeader, bytes)):
@@ -7110,8 +7118,10 @@ def threadProxyRaster(req, base, comp, args):
                     if (inputFile.startswith(CVSICURL_PREFIX)):
                         remoteReader = None
                         try:
-                            remoteReader = urlopen(remoteURL)
-                            contents = remoteReader.read()
+                            contents = args.preFetchedMRF if isPreFetchedMRF else contents
+                            if (not isPreFetchedMRF):
+                                remoteReader = urlopen(remoteURL)
+                                contents = remoteReader.read()
                             if (not base._isRasterProxyFormat('csv')):
                                 with open(outputFile, 'wb') as writer:
                                     writer.write(contents)
@@ -7171,10 +7181,12 @@ def threadProxyRaster(req, base, comp, args):
     inputMRF = finalPath
     if (isInputMRF):
         homePath = req['src']
-        inputMRF = inputFile
-        if (args.clouddownload and
-                inputFile.startswith(CVSICURL_PREFIX)):
-            inputMRF = remoteURL
+        if (not isPreFetchedMRF):
+            inputMRF = inputFile
+            if (args.clouddownload and
+                    inputFile.startswith(CVSICURL_PREFIX)):
+                if (not isPreFetchedMRF):
+                    inputMRF = remoteURL
     if (updateMRF.init(inputMRF, args.output, mode,
                        args.cache, homePath, usrConfig.getValue(COUT_VSICURL_PREFIX, False))):
         if (not updateMRF.update(finalPath, trueInput=inputFile)):
