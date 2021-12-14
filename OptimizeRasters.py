@@ -6874,7 +6874,9 @@ class Application(object):
                             if (cloudDownloadType == Store.TypeAmazon):
                                     if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken))):
                                         resp = o_S3_storage.con.meta.client.get_object(Bucket=o_S3_storage.m_bucketname, Key=preAkey) # , Range='bytes={}-{}'.format(0, 4))
-                                        self._args.preFetchedMRF = resp['Body'].read()
+                                        self._args.preFetchedMRF = b''
+                                        for chunk in resp['Body'].iter_chunks(chunk_size=1024**3):
+                                            self._args.preFetchedMRF += chunk
                                     else:
                                         self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url(
                                             'get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
