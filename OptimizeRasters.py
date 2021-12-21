@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20211010
+# Version: 20211221
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -5346,8 +5346,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6f'
-    __program_date__ = '20211010'
+    __program_ver__ = 'v2.0.6g'
+    __program_date__ = '20211221'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -6873,8 +6873,19 @@ class Application(object):
                             preAkey = '{}{}'.format(f['src'], f['f'])
                             if (cloudDownloadType == Store.TypeAmazon):
                                     if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken))):
-                                        resp = o_S3_storage.con.meta.client.get_object(Bucket=o_S3_storage.m_bucketname, Key=preAkey) # , Range='bytes={}-{}'.format(0, 4))
-                                        self._args.preFetchedMRF = resp['Body'].read()
+                                        self._args.preFetchedMRF = b''
+                                        oResp = o_S3_storage.con.meta.client.get_object(Bucket=o_S3_storage.m_bucketname, Key=preAkey)
+                                        for i in oResp['Body'].iter_chunks(CMRF_DOC_ROOT_LEN):
+                                            if (not self._args.preFetchedMRF and
+                                                isinstance(i, bytes)):
+                                                hdr = i
+                                                try:
+                                                    hdr = i.decode('utf-8')
+                                                except BaseException:
+                                                    pass  # ignore any invalid start byte issues.
+                                                if (hdr.lower() != '<{}>'.format(CMRF_DOC_ROOT.lower())):
+                                                    break
+                                            self._args.preFetchedMRF += i
                                     else:
                                         self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url(
                                             'get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
@@ -7104,7 +7115,7 @@ def threadProxyRaster(req, base, comp, args):
                             _rpt.updateRecordStatus(
                                 rptName, CRPT_PROCESSED, CRPT_NO)
                         return False
-            if (bytesAtHeader):
+            if (bytesAtHeader is not None):
                 mode = 'cachingmrf'
                 if (isinstance(bytesAtHeader, bytes)):
                     try:
@@ -7123,6 +7134,7 @@ def threadProxyRaster(req, base, comp, args):
                                 remoteReader = urlopen(remoteURL)
                                 contents = remoteReader.read()
                             if (not base._isRasterProxyFormat('csv')):
+                                makedirs(os.path.dirname(outputFile))
                                 with open(outputFile, 'wb') as writer:
                                     writer.write(contents)
                             srcPyramids = contents.find(b'<Rsets') != -1
