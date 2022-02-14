@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2021 Esri
+# Copyright 2022 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20211221
+# Version: 20220214
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1712,9 +1712,7 @@ class UpdateMRF:
                 if (self._or_mode == 'rasterproxy' or
                         self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
                     try:
-                        if (not self._base._isRasterProxyFormat('csv')):
-                            os.remove(self._input)
-                            os.remove('{}.aux.xml'.format(self._input))
+                        os.remove(self._input)
                     except BaseException as e:
                         pass    # not an error
             else:
@@ -5346,8 +5344,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6g'
-    __program_date__ = '20211221'
+    __program_ver__ = 'v2.0.6h'
+    __program_date__ = '20220214'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -7133,10 +7131,9 @@ def threadProxyRaster(req, base, comp, args):
                             if (not isPreFetchedMRF):
                                 remoteReader = urlopen(remoteURL)
                                 contents = remoteReader.read()
-                            if (not base._isRasterProxyFormat('csv')):
-                                makedirs(os.path.dirname(outputFile))
-                                with open(outputFile, 'wb') as writer:
-                                    writer.write(contents)
+                            makedirs(os.path.dirname(outputFile))
+                            with open(outputFile, 'wb') as writer:
+                                writer.write(contents)
                             srcPyramids = contents.find(b'<Rsets') != -1
                             if (_rpt):
                                 ret = _rpt.addMetadata(
