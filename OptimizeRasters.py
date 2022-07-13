@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20220214
+# Version: 20220426
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -3883,7 +3883,7 @@ def args_Callback(args, user_data=None):
                     m_compression = mode_[1].lower()     # compression
             if (m_mode.startswith(('tif', 'cog'))):
                 args.append('-co')
-                args.append('BIGTIFF=IF_NEEDED')
+                args.append('BIGTIFF=YES')
                 if (not isCOG):
                     args.append('-co')
                     args.append('TILED=YES')
@@ -4511,15 +4511,28 @@ class Compression(object):
         self._base.message(write, status)
         return True
 
-    def buildMultibandVRT(self, input_files, output_file):
-        if (len(input_files) == 0):
+    def buildMultibandVRT(self, inputList, output):
+        if (len(inputList) == 0):
             return False
         args = [os.path.join(self.m_gdal_path, self.CGDAL_BUILDVRT_EXE)]
-        args.append(output_file)
-        for f in (input_files):
-            args.append(f)
-        self.message('Creating VRT output file (%s)' % (output_file))
-        return self._call_external(args)
+        vrtPath = os.path.join(os.path.dirname(output), 'filelist.txt')
+        try:
+            with open (vrtPath, 'w') as writer:
+                for f in (inputList):
+                    writer.write(f'{f}\n')
+        except Exception as e:
+            self.message(f'{e}', self._base.const_critical_text)
+            return False
+        args.append('-input_file_list')
+        args.append(vrtPath)
+        args.append(output)
+        self.message('Creating VRT output file (%s)' % (output))
+        ret = self._call_external(args)
+        try:
+            os.remove(vrtPath)
+        except Exception as e:
+            self.message(f'{e}', self._base.const_warning_text)
+        return ret
 
     def compress(self, input_file, output_file, args_callback=None, build_pyramids=True, post_processing_callback=None, post_processing_callback_args=None, **kwargs):
         isRasterProxyCaller = False
@@ -5344,8 +5357,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6h'
-    __program_date__ = '20220214'
+    __program_ver__ = 'v2.0.6i'
+    __program_date__ = '20220426'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
