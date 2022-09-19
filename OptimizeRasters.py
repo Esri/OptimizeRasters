@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20220426
+# Version: 20220919
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -76,10 +76,11 @@ CDisableVersionCheck = getBooleanValue(
 if (sys.version_info[0] < 3):
     import ConfigParser
     from urllib import urlopen, urlencode
+    from urlparse import urlparse
 else:
     import configparser as ConfigParser
     from urllib.request import urlopen
-    from urllib.parse import urlencode
+    from urllib.parse import urlencode, urlparse
 # ends
 
 # enum error codes
@@ -320,6 +321,8 @@ class ProfileEditorUI(UI):
                 awsCredentials = ConfigParser.RawConfigParser()
                 rootPath = '.aws'
                 AwsEndpoint = 'aws_endpoint_url'
+                AwsAddressingStyle = 'addressing_style'
+                useAddrStyle = 'virtual'
                 if (self._credentialProfile):
                     if (self._storageType == self.TypeAlibaba):
                         rootPath = '.OptimizeRasters/Alibaba'
@@ -330,11 +333,15 @@ class ProfileEditorUI(UI):
                         return False
                     endPoint = awsCredentials.get(self._credentialProfile, AwsEndpoint) if awsCredentials.has_option(
                         self._credentialProfile, AwsEndpoint) else None
+                    useAddrStyle = awsCredentials.get(self._credentialProfile, AwsAddressingStyle) if awsCredentials.has_option(
+                        self._credentialProfile, AwsAddressingStyle) else useAddrStyle
                 if (AwsEndpoint in self._properties):
                     endPoint = self._properties[AwsEndpoint]
+                if (AwsAddressingStyle in self._properties):
+                    useAddrStyle = self._properties[AwsAddressingStyle]
                 useAlibaba = endPoint and endPoint.lower().find(SigAlibaba) != -1
                 con = session.resource('s3', endpoint_url=endPoint, config=botocore.config.Config(
-                    s3={'addressing_style': 'virtual'}))
+                    s3={'addressing_style': useAddrStyle}))
                 # this will throw if credentials are invalid.
                 [self._availableBuckets.append(i.name)
                  for i in con.buckets.all()]
@@ -3239,18 +3246,25 @@ class S3Storage:
                     endpointURL = None
                     AWSEndpointURL = 'aws_endpoint_url'
                     AWSRegion = 'region'
+                    AWSAddressingStyle = 'addressing_style'
+                    useAddrStyle = 'virtual'
                     SessionProfile = 'profiles'
                     region = DefS3Region
                     if (_profile_name and
                         SessionProfile in session._session.full_config and
                             _profile_name in session._session.full_config[SessionProfile]):
-                        if (AWSEndpointURL in session._session.full_config[SessionProfile][_profile_name]):
-                            endpointURL = session._session.full_config[
-                                SessionProfile][_profile_name][AWSEndpointURL]
+                        _profile = session._session.full_config[SessionProfile][_profile_name]
+                        if (AWSAddressingStyle in _profile):
+                            useAddrStyle = _profile[AWSAddressingStyle]
+                        if (AWSEndpointURL in _profile):
+                            endpointURL = _profile[AWSEndpointURL]
                             self._base.message('Using {} endpoint> {}'.format(
                                 'output' if direction == CS3STORAGE_OUT else 'input', endpointURL))
-                        if (AWSRegion in session._session.full_config[SessionProfile][_profile_name]):
-                            region = session._session.full_config[SessionProfile][_profile_name][AWSRegion]
+                            resp = urlparse(endpointURL)
+                            os.environ['AWS_S3_ENDPOINT'] = resp.netloc
+                            os.environ['AWS_HTTPS'] = 'false'   # for GDAL to work with custom aws endpoints
+                        if (AWSRegion in _profile):
+                            region = _profile[AWSRegion]
                         profileCredentials = session.get_credentials()
                         if (profileCredentials):
                             # initialize access_key, secret_key using the profile.
@@ -3269,7 +3283,7 @@ class S3Storage:
                         ).secret_key
                         self.m_user_config.setValue('{}oss'.format(
                             'in' if direction == CS3STORAGE_IN else 'out'), useAlibaba)
-                    bucketCon = session.client('s3')
+                    bucketCon = session.client('s3', endpoint_url=endpointURL)
                     region = DefS3Region
                     try:
                         loc = bucketCon.get_bucket_location(Bucket=self.m_bucketname)[
@@ -3279,8 +3293,11 @@ class S3Storage:
                     except Exception as e:
                         self._base.message(
                             'get/bucket/region ({})'.format(str(e)), self._base.const_warning_text)
+                    if ('AWS_VIRTUAL_HOSTING' in os.environ): # AWS env overrides the .aws/credential entry
+                            useAddrStyle = 'path' if not self._base.getBooleanValue(os.environ['AWS_VIRTUAL_HOSTING']) else 'virtual'
+                    os.environ['AWS_VIRTUAL_HOSTING'] = 'false' if useAddrStyle == 'path' else 'true'       # env must be set for GDAL
                     self.con = session.resource('s3', region, endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(
-                        s3={'addressing_style': 'virtual'}))
+                        s3={'addressing_style': useAddrStyle}))
                     if (self._isBucketPublic):
                         self.con.meta.client.meta.events.register(
                             'choose-signer.s3.*', botocore.handlers.disable_signing)
@@ -5357,8 +5374,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6i'
-    __program_date__ = '20220426'
+    __program_ver__ = 'v2.0.6j'
+    __program_date__ = '20220919'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
