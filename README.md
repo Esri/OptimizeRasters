@@ -25,13 +25,8 @@ Raster proxies are small files stored on local file systems that reference much 
 * Configurable using included editable XML files
 * Open source code, implemented in Python using GDAL to handle a variety of raster formats
 
-## What's New in OptimizeRasters 2.0.2
-* Cloud-Optimized GeoTIFF (COG) support
-* google-cloud-storage support
-* AWS Lambda implementation
-* Embed raster proxies in mosaic datasets by generating them as a table
-* Expanded documentation
-* Additional minor fixes and performance enhancements
+## What's New in OptimizeRasters 2.2.0
+  [Release notes](https://github.com/Esri/OptimizeRasters/releases/tag/v2.2.0)
 
 ## Instructions
 **OptimizeRasters Setup**
