@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2022 Esri
+# Copyright 2023 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20220919
+# Version: 20230220
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -1716,12 +1716,6 @@ class UpdateMRF:
             if (rpCSV):
                 _mrfBody = _mrfBody.replace('\n', '') + '\n'
                 self._base._modifiedProxies.append(_mrfBody)
-                if (self._or_mode == 'rasterproxy' or
-                        self._base.getUserConfiguration.getValue(CCLONE_PATH)):  # if using the template 'CreateRasterProxy', keep only the .csv file.
-                    try:
-                        os.remove(self._input)
-                    except BaseException as e:
-                        pass    # not an error
             else:
                 with open(output.split(CloudOGTIFFExt)[0] if isCOGTIFF else output, 'w') as c:
                     c.write(_mrfBody)
@@ -2368,8 +2362,8 @@ class S3Upload:
 
     @TimeIt.timeOperation
     def upload(self, **kwargs):
-        # if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
-        #  return True
+##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
+##            return True
         self._base.message('[S3-Push] {}'.format(self.m_local_file))
         try:
             self.mp.upload_file(self.m_local_file, self.m_s3_bucket.name, self.m_s3_path, extra_args={
@@ -5374,8 +5368,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.6j'
-    __program_date__ = '20220919'
+    __program_ver__ = 'v2.0.7'
+    __program_date__ = '20230220'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \

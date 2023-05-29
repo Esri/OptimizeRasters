@@ -1,4 +1,6 @@
-Tested with ubuntu 18.04
+Last updated at 16:40 2/23/2023
+
+Tested with Ubuntu 18.04.5 LTS
 
 Setup>
 https://esriis-my.sharepoint.com/:f:/g/personal/cham4757_esri_com/EsvFNawbXjlGkKuL49Gi9zIByEpUeZRRmhAHK8t7DzxcpA?e=oHjod6
@@ -11,17 +13,17 @@ curl 7.73.1
 Pease note the following steps to get OR installed on Linux
 
 sudo mkdir /app
-sudo tar -xf OR.tgz -C /app
+sudo tar -xzvf OR.tar.gz -C /app
+cd /app
 
 sudo apt-get -y install python3-pip
-sudo pip3 install --trusted-host pypi.python.org -r requirements.txt
-sudo pip3 install azure.storage.blob==12.3.1 azure.storage.queue
+sudo -H pip3 install --trusted-host pypi.python.org -r requirements.txt
+sudo -H pip3 install azure.storage.blob==12.3.1 azure.storage.queue
 
 export LD_LIBRARY_PATH=/app/GDAL/lib
 export GDAL_DATA=/app/GDAL/share/gdal
 export PATH=$PATH:/app/curl/lib/:/app/curl/bin/:/app/GDAL/bin
-
-cp -rd proj /usr/local/share/proj
+export PROJ_DATA=/app/proj
 
 Verify at the console if GDAL and curl is now on path by typing in the following command(s)
 curl 
