@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20230220
+# Version: 20231006
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -5368,8 +5368,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.7'
-    __program_date__ = '20230220'
+    __program_ver__ = 'v2.0.8'
+    __program_date__ = '20231006'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -5466,7 +5466,8 @@ class Application(object):
             'rasterproxy',
             'splitmrf',
             BundleMaker.CMODE,
-            'aid'
+            'aid',
+            'iiq'
         }
         # ends
         # read-in (-mode)
@@ -6615,11 +6616,11 @@ class Application(object):
                 self.run()
                 return
             # ends
-            raster_buff = files
+            _raster_buff = files
             len_buffer = cfg_threads
             threads = []
             store_files_indx = 0
-            store_files_len = len(raster_buff)
+            store_files_len = len(_raster_buff)
             while(1):
                 len_threads = len(threads)
                 while(len_threads):
@@ -6633,7 +6634,7 @@ class Application(object):
                 for i in range(0, len_buffer):
                     if (store_files_indx == store_files_len):
                         break
-                    buffer.append(raster_buff[store_files_indx])
+                    buffer.append(_raster_buff[store_files_indx])
                     store_files_indx += 1
                 if (not buffer and
                         not threads):
@@ -6657,12 +6658,19 @@ class Application(object):
                             # build pyramids is always turned off for rasters that belong to (.til) files.
                             _build_pyramids = False
                     useBundleMaker = cfg_mode == BundleMaker.CMODE
+                    useIIQMaker = cfg_mode == IIQMaker.CMODE
                     if (useBundleMaker):
                         bundleMaker = BundleMaker(
                             input_file, gdal_path, base=self._base)
                         if (not bundleMaker.init()):
                             continue
                         t = threading.Thread(target=bundleMaker.run)
+                    elif (useIIQMaker):
+                        iiqMaker = IIQMaker(
+                            input_file, gdal_path, base=self._base)
+                        if (not iiqMaker.init()):
+                            continue
+                        ret = iiqMaker.run()
                     else:
                         doProcessRaster = True
                         if (til is not None and
@@ -7235,6 +7243,108 @@ def threadProxyRaster(req, base, comp, args):
                 err), base.const_warning_text)
     # ends
     return True
+
+
+class IIQMaker(Compression):
+
+    CIIQMakerBin = 'iiq2tiff'
+    CMODE = 'iiq'
+
+    def __init__(self, inputRaster, *args, **kwargs):
+        super(IIQMaker, self).__init__(*args, **kwargs)
+        self.inputRaster = inputRaster
+
+    def init(self):
+        if (not super(IIQMaker, self).init()):
+            return False
+        self.homePath = os.path.join(os.path.dirname(
+            os.path.abspath(__file__)), 'iiq2tiff', 'iiq2tiff{}'.format('' if self._base.isLinux() else '.exe'))
+        return True
+
+    def run(self):
+        _resumeReporter = self._base.getUserConfiguration.getValue(
+            CPRT_HANDLER)
+        if (not _resumeReporter):
+            return False
+        toCloud = fromCloud = False
+        if (Report.CHDR_CLOUDUPLOAD in _resumeReporter._header):
+            toCloud = self._base.getBooleanValue(
+                _resumeReporter._header[Report.CHDR_CLOUDUPLOAD])
+        if (Report.CHDR_CLOUD_DWNLOAD in _resumeReporter._header):
+            fromCloud = self._base.getBooleanValue(
+                _resumeReporter._header[Report.CHDR_CLOUD_DWNLOAD])
+        if (fromCloud and
+                (CTEMPINPUT not in _resumeReporter._header)):
+            self.message('-tempinput must be set for cloud IIQ files.',
+                         self._base.const_critical_text)
+            return False
+        outPath = _resumeReporter._header[Report.CHDR_TEMPOUTPUT] if toCloud else _resumeReporter._header[CRESUME_HDR_OUTPUT]
+        inBasePath = os.path.dirname(self.inputRaster.replace(
+            _resumeReporter._header[CRESUME_HDR_INPUT] if CTEMPINPUT not in _resumeReporter._header else _resumeReporter._header[CTEMPINPUT], ''))
+        iiqWritePath = os.path.join(outPath, inBasePath)
+        if (not iiqWritePath.endswith('/')):
+            iiqWritePath += '/'
+        args = [self.homePath,
+                os.path.abspath(self.inputRaster),
+                iiqWritePath
+                ]
+        self.message('IIQ2TIFF> ({})'.format(self.inputRaster))
+        ret = self._call_external(args)
+        self.message(f'Results ({ret})')
+        if (not ret):
+            return ret
+        f, e = os.path.splitext(os.path.basename(self.inputRaster))
+        iiqTiff = os.path.join(iiqWritePath, f'{f}.tiff')
+        args = {}
+        args.update(_resumeReporter._header)
+        args.update({
+            'input': iiqWritePath,
+            'output': iiqWritePath,
+            'subs': False,
+            'config':  os.path.join(os.path.dirname(_resumeReporter._header['config']), 'Imagery_to_COG_DEF.xml')}
+        )
+        # remove download specific items off args that are no longer rquired.
+        args.update({Report.CHDR_CLOUD_DWNLOAD : False})
+        args.pop(CTEMPINPUT, None)
+        # ends
+        rpt = Report(Base())
+        writeToPath = args['output']
+        ORJobFile = os.path.join(writeToPath, '{}{}'.format(
+            rpt.getUniqueFileName(), rpt.CJOB_EXT))
+        rpt.init(ORJobFile)
+        for key in args.keys():
+            rpt.addHeader(key, args[key])   # add necessary headers.
+        rpt.addFile(iiqTiff)
+        rpt.write()
+        args['input'] = ORJobFile
+        app = Application(args)
+        if (not app.init()):
+            self.message('failed/app.init()', self._base.const_critical_text)
+            return False
+        # write out the def .tif extension.
+        app.configuration['KeepExtension'] = False
+        app.run()  # Do processing..
+        rpt = app.getReport()   # Get report/log status
+        if (rpt is None or
+                rpt.hasFailures()):
+            self.message('Processing iiq2tiff->COG orjob file.',
+                         self._base.const_critical_text)
+            return False
+        try:
+            os.remove(iiqTiff)  # remove the iiq2tiff original output
+        except Exception as e:
+            self.message(f'{e}', self._base.const_critical_text)
+            return False
+        if (CTEMPINPUT in _resumeReporter._header and
+                self.inputRaster.startswith(_resumeReporter._header[CTEMPINPUT])):
+            try:
+                os.remove(self.inputRaster)  # remove the tempinput IIQ file.
+            except Exception as e:
+                self.message(f'{e}', self._base.const_warning_text)
+        if (toCloud):
+            # .tiff -> .tif
+            self._base.S3Upl(os.path.join(iiqTiff[:-1]), None)
+        return True
 
 
 def main():
