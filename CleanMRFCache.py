@@ -1,5 +1,5 @@
-#------------------------------------------------------------------------------
-# Copyright 2020 Esri
+# ------------------------------------------------------------------------------
+# Copyright 2024 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -11,18 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Name: CleanMRFCache.py
 # Description: Cleans MRF Cache files by oldest access-time until free space
 # requested has been achieved.
-# Version: 20201109
+# Version: 20240216
 # Requirements: Python
 # Required Arguments: -input
 # Optional Arguments: -mode -ext -size
 # e.g.: -mode = [del,scan], -ext=txt,mrfcache -input=d:/mrfcache_folder
 # Usage: python.exe CleanMRFCache.py <arguments>
 # Author: Esri Imagery Workflows team
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 #!/usr/bin/env python
 
 import sys
@@ -94,6 +94,7 @@ class Cleaner:
 
 def main():
     pass
+
 
 if __name__ == '__main__':
     main()

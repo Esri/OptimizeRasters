@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2023 Esri
+# Copyright 2024 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20231006
+# Version: 20240216
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -345,14 +345,14 @@ class ProfileEditorUI(UI):
                 # this will throw if credentials are invalid.
                 [self._availableBuckets.append(i.name)
                  for i in con.buckets.all()]
-            elif(self._storageType == self.TypeAzure):
+            elif (self._storageType == self.TypeAzure):
                 azure_storage = Azure(
                     self._accessKey, self._secretKey, self._credentialProfile, None)
                 azure_storage.init()
                 # this will throw.
                 [self._availableBuckets.append(
                     i.name) for i in azure_storage._blobSrvCli.list_containers()]
-            elif(self._storageType == self.TypeGoogle):
+            elif (self._storageType == self.TypeGoogle):
                 with open(self._profileName, 'r') as reader:
                     serviceJson = json.load(reader)
                     Project_Id = 'project_id'
@@ -385,10 +385,10 @@ class ProfileEditorUI(UI):
                     if (exCode not in ['invalidaccesskeyid', 'signaturedoesnotmatch']):
                         # the user may not have the access rights to list buckets but the bucket keys/contents could be accessed if the bucket name is known.
                         return True
-                    elif(exCode in ['accessdenied']):
+                    elif (exCode in ['accessdenied']):
                         # the user has valid credentials but without the bucketlist permission.
                         return True
-            elif(self._storageType == self.TypeAzure):
+            elif (self._storageType == self.TypeAzure):
                 if (azure_storage):
                     # It's assumed, SAS string credentials aren't allowed to list buckets and the bucket name is picked from the SAS string.
                     if (azure_storage._SASToken):
@@ -658,7 +658,7 @@ class Lambda:
                 useLambdaFunction = True
         self._base.message('Invoke using ({})'.format(
             'Function' if useLambdaFunction else 'SNS'))
-        while(i < length):
+        while (i < length):
             orjobContent = ''
             for j in range(i, i + jobQueue):
                 if (j == length):
@@ -839,9 +839,9 @@ class ThreadPool(object):
         threads = []
         workers = 0
         maxWorkers = len(self.work)
-        while(1):
+        while (1):
             len_threads = len(threads)
-            while(len_threads):
+            while (len_threads):
                 alive = [t.is_alive() for t in threads]
                 countDead = sum(not x for x in alive)
                 if (countDead):
@@ -928,7 +928,7 @@ class RasterAssociates(object):
             return False
         pos = path.rfind('.')
         ext = None
-        while(pos != -1):
+        while (pos != -1):
             ext = path[pos + 1:]
             pos = path[:pos].rfind('.')
         return ext
@@ -1191,7 +1191,7 @@ class Base(object):
             if (len(ret_buff) == 0):
                 return False
         elif (upload_cloud_type == CCLOUD_AZURE):
-            if(azure_storage is None):
+            if (azure_storage is None):
                 self.message(internal_err_msg, self.const_critical_text)
                 return False
             properties = {
@@ -1225,7 +1225,7 @@ class Base(object):
                                 ret_buff.append(file_to_upload)
                     break
         elif (upload_cloud_type == Store.TypeGoogle):
-            if(google_storage is None):
+            if (google_storage is None):
                 self.message(internal_err_msg, self.const_critical_text)
                 return False
             properties = {
@@ -1271,7 +1271,7 @@ class Base(object):
                         tmpOutput = rpt._header.get(CTEMPOUTPUT)
                         if (proxyPath and
                             tmpOutput and
-                            proxyPath[-4:].lower().endswith('.csv')):
+                                proxyPath[-4:].lower().endswith('.csv')):
                             isProxyCSV = True
                     for f in ret_buff:
                         try:
@@ -1283,9 +1283,12 @@ class Base(object):
                                 try:
                                     if (isProxyCSV):
                                         if (f.lower().endswith('.aux.xml')):
-                                            dstAuxPath = os.path.join(os.path.dirname(proxyPath), os.path.basename(f))
-                                            self.message('Copying {} -> {}'.format(f, dstAuxPath))
-                                            shutil.copyfile(f, dstAuxPath)  # GH 104
+                                            dstAuxPath = os.path.join(
+                                                os.path.dirname(proxyPath), os.path.basename(f))
+                                            self.message(
+                                                'Copying {} -> {}'.format(f, dstAuxPath))
+                                            shutil.copyfile(
+                                                f, dstAuxPath)  # GH 104
                                     os.remove(f)
                                 except BaseException:
                                     time.sleep(CDEL_DELAY_SECS)
@@ -1639,7 +1642,7 @@ class UpdateMRF:
                     node = doc.getElementsByTagName('Source')
                     if (node):
                         node[0].setAttribute('clone', 'true')
-                elif(self._mode == 'splitmrf'):
+                elif (self._mode == 'splitmrf'):
                     CONST_LBL_COMP = 'Compression'
                     node = doc.getElementsByTagName(CONST_LBL_COMP)
                     if (node):
@@ -1858,7 +1861,7 @@ class Report:
                 _path == self._header[CRESUME_HDR_OUTPUT]):
             _input = _input.replace(_path, self._header[CRESUME_HDR_INPUT])
         (p, e) = os.path.splitext(_input)
-        while(e):
+        while (e):
             _input = '{}{}'.format(p, e)
             if (_input in self._input_list_info):
                 break
@@ -1945,7 +1948,7 @@ class Report:
                 hdr_skipped = False
                 # If 'resume=='retryall', files will be copied/processed/uploaded regardless of the individual file status.
                 retryAll = False
-                while(ln):
+                while (ln):
                     ln = ln.strip()
                     if (not ln or
                             ln.startswith('##')):        # ignore empty-lines and comment lines (beginning with '##')
@@ -2362,8 +2365,8 @@ class S3Upload:
 
     @TimeIt.timeOperation
     def upload(self, **kwargs):
-##        if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
-##            return True
+        # if (self.m_local_file.endswith('.lrc')):        # debug. Must be removed before release.
+        # return True
         self._base.message('[S3-Push] {}'.format(self.m_local_file))
         try:
             self.mp.upload_file(self.m_local_file, self.m_s3_bucket.name, self.m_s3_path, extra_args={
@@ -2376,7 +2379,8 @@ class S3Upload:
                     self.m_s3_bucket = kwargs['fptrRefresh']()
                     if (self.m_s3_bucket):
                         ret = self.init()   # will ignore (ret) value to allow (retry) by the caller
-                        self._base.message('recycled at {} -> ret from refreshCallback {}\n'.format(datetime.utcnow(), ret))
+                        self._base.message(
+                            'recycled at {} -> ret from refreshCallback {}\n'.format(datetime.utcnow(), ret))
             self._base.message('({})'.format(msg),
                                self._base.const_warning_text if isRefreshToken else self._base.const_critical_text)
             return False
@@ -3106,8 +3110,8 @@ class Azure(Store):
         blob_path = self._input_file_path
         blob_name = os.path.join(
             self._upl_parent_folder, os.path.basename(blob_path))
-##        if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
-##            return True                          #  "
+# if (blob_name.endswith('.lrc')):         # debug. Must be removed before release.
+# return True                          #  "
         # return True     # debug. Must be removed before release.
         isContainerCreated = False
         t0 = datetime.now()
@@ -3115,7 +3119,7 @@ class Azure(Store):
         max_time_to_wait = 60
         self.message('Accessing container ({})..'.format(
             self._upl_container_name))
-        while(True):
+        while (True):
             try:
                 _access = properties['access'] if properties and 'access' in properties else None
                 self._blobSrvCli.create_container(
@@ -3129,7 +3133,7 @@ class Azure(Store):
                         isContainerCreated = True
                     break
                 tm_pre = datetime.now()
-                while(True):
+                while (True):
                     time_delta = datetime.now() - tm_pre
                     if (time_delta.seconds > time_to_wait_before_retry):
                         break
@@ -3256,7 +3260,8 @@ class S3Storage:
                                 'output' if direction == CS3STORAGE_OUT else 'input', endpointURL))
                             resp = urlparse(endpointURL)
                             os.environ['AWS_S3_ENDPOINT'] = resp.netloc
-                            os.environ['AWS_HTTPS'] = 'false'   # for GDAL to work with custom aws endpoints
+                            # for GDAL to work with custom aws endpoints
+                            os.environ['AWS_HTTPS'] = 'false'
                         if (AWSRegion in _profile):
                             region = _profile[AWSRegion]
                         profileCredentials = session.get_credentials()
@@ -3287,9 +3292,12 @@ class S3Storage:
                     except Exception as e:
                         self._base.message(
                             'get/bucket/region ({})'.format(str(e)), self._base.const_warning_text)
-                    if ('AWS_VIRTUAL_HOSTING' in os.environ): # AWS env overrides the .aws/credential entry
-                            useAddrStyle = 'path' if not self._base.getBooleanValue(os.environ['AWS_VIRTUAL_HOSTING']) else 'virtual'
-                    os.environ['AWS_VIRTUAL_HOSTING'] = 'false' if useAddrStyle == 'path' else 'true'       # env must be set for GDAL
+                    # AWS env overrides the .aws/credential entry
+                    if ('AWS_VIRTUAL_HOSTING' in os.environ):
+                        useAddrStyle = 'path' if not self._base.getBooleanValue(
+                            os.environ['AWS_VIRTUAL_HOSTING']) else 'virtual'
+                    # env must be set for GDAL
+                    os.environ['AWS_VIRTUAL_HOSTING'] = 'false' if useAddrStyle == 'path' else 'true'
                     self.con = session.resource('s3', region, endpoint_url=endpointURL if endpointURL else None, config=botocore.config.Config(
                         s3={'addressing_style': useAddrStyle}))
                     if (self._isBucketPublic):
@@ -3332,7 +3340,7 @@ class S3Storage:
                                 # overrides, the cmd-line -usetoken plus the <UseToken> node value in the parameter file.
                                 self._base.getUserConfiguration.setValue(
                                     UseToken, True)
-                            elif(int(e.response['Error']['Code']) == 403):
+                            elif (int(e.response['Error']['Code']) == 403):
                                 self._isNoAccessToListBuckets = True
                     if (not self._isRequesterPay and
                             not self._isNoAccessToListBuckets):
@@ -3486,9 +3494,9 @@ class S3Storage:
             threads = []
             keysIndx = 0
             nBuffer = CCFG_THREADS
-            while(1):
+            while (1):
                 nThreads = len(threads)
-                while(nThreads > 0):
+                while (nThreads > 0):
                     alive = [t.is_alive() for t in threads]
                     nDead = sum(not x for x in alive)
                     if (nDead):
@@ -3555,7 +3563,8 @@ class S3Storage:
                 if ('fptrRefresh' in kwargs):
                     bucket = kwargs['fptrRefresh']()
                     if (bucket):
-                        ret = self.__copyRemoteToLocal(S3_key, mk_path, **kwargs)    # retry once
+                        ret = self.__copyRemoteToLocal(
+                            S3_key, mk_path, **kwargs)    # retry once
                         if (ret):
                             return True
             self._base.message('({}\n{})'.format(
@@ -3754,9 +3763,9 @@ class S3Storage:
                             continue
                         upl_retries = CS3_UPLOAD_RETRIES
                         ret = False
-                        while(upl_retries and not ret):
+                        while (upl_retries and not ret):
                             ret = S3.upload(
-                                name=_source_path, method=TimeIt.Upload, store=self._base, fptrRefresh = self.refresh)
+                                name=_source_path, method=TimeIt.Upload, store=self._base, fptrRefresh=self.refresh)
                             if (not ret):
                                 # let's sleep for a while until s3 kick-starts
                                 time.sleep(10)
@@ -3785,14 +3794,16 @@ class S3Storage:
         return upload_buff       # this could be empty.
 
     def refresh(self):
-        self._base.message('Refreshing token to {}...'.format('read' if self._direction == CS3STORAGE_IN else 'write'))
-        ret = self.init(self.remote_path, self.CAWS_ACCESS_KEY_ID, self.CAWS_ACCESS_KEY_SECRET, self._direction)
+        self._base.message('Refreshing token to {}...'.format(
+            'read' if self._direction == CS3STORAGE_IN else 'write'))
+        ret = self.init(self.remote_path, self.CAWS_ACCESS_KEY_ID,
+                        self.CAWS_ACCESS_KEY_SECRET, self._direction)
         roleInfo = self.getIamRoleInfo()
         self._base.message(
-        'Refreshed token info,\n{}\n{}\n{}\n{}'.format(ret,
-        roleInfo[self.RoleAccessKeyId],
-        roleInfo[self.RoleSecretAccessKey],
-        roleInfo[self.RoleToken])
+            'Refreshed token info,\n{}\n{}\n{}\n{}'.format(ret,
+                                                           roleInfo[self.RoleAccessKeyId],
+                                                           roleInfo[self.RoleSecretAccessKey],
+                                                           roleInfo[self.RoleToken])
         )
         if (not ret):
             return None
@@ -3910,7 +3921,8 @@ def args_Callback(args, user_data=None):
                             ret = gdalInfo.bandInfo
                             if (ret and
                                     len(ret) != 1):
-                                if (not isCOG):         # To omit the GDAL warning, COG driver by default selects the PHOTOMETRIC=YCBCR for jpeg compression.
+                                # To omit the GDAL warning, COG driver by default selects the PHOTOMETRIC=YCBCR for jpeg compression.
+                                if (not isCOG):
                                     args.append('-co')
                                     args.append('PHOTOMETRIC=YCBCR')
                     if (m_compression == _JPEG12):
@@ -3939,7 +3951,8 @@ def args_Callback(args, user_data=None):
                 args.append('-co')
                 args.append('OPTIONS="MULTISPECTRAL:1"')
         else:
-            args.append('{}QUALITY={}'.format('JPEG_' if not isCOG else '', m_compression_quality))
+            args.append('{}QUALITY={}'.format(
+                'JPEG_' if not isCOG else '', m_compression_quality))
     if (not isCOG):
         args.append('-co')
         args.append('INTERLEAVE=%s' % (m_interleave))
@@ -4017,7 +4030,7 @@ def args_Callback_for_meta(args, user_data=None):
             args.append('-co')
             args.append('OPTIONS="{}{}"'.format('' if not m_lerc_prec else 'LERC_PREC={}'.format(
                 m_lerc_prec), '{}V2=ON'.format(' ' if m_lerc_prec else '') if m_comp == _LERC2 or m_comp == _LERC else ''))
-    elif(m_comp == 'jpeg'):
+    elif (m_comp == 'jpeg'):
         args.append('-co')
         args.append('QUALITY=%s' % (m_compression_quality))
         args.append('-co')
@@ -4268,7 +4281,7 @@ class Copy:
                                                 isFileNameInHeader = True
                                             break
                                         # aws pre-signed URL support.
-                                        elif(v.startswith('x-amz-request-id')):
+                                        elif (v.startswith('x-amz-request-id')):
                                             if (_mkRemoteURL in _rpt._input_list_info):
                                                 _rpt._input_list_info[_mkRemoteURL][Report.CRPT_URL_TRUENAME] = file.split('?')[
                                                     0]
@@ -4528,7 +4541,7 @@ class Compression(object):
         args = [os.path.join(self.m_gdal_path, self.CGDAL_BUILDVRT_EXE)]
         vrtPath = os.path.join(os.path.dirname(output), 'filelist.txt')
         try:
-            with open (vrtPath, 'w') as writer:
+            with open(vrtPath, 'w') as writer:
                 for f in (inputList):
                     writer.write(f'{f}\n')
         except Exception as e:
@@ -4737,17 +4750,19 @@ class Compression(object):
                 ret = self._call_external(
                     args, name=timeIt, method=TimeIt.Conversion, store=self._base)
                 lstMsg = self._base._lastMsg
-                if (isinstance(lstMsg, bytes)):    # external msgs could be non-unicode.
+                # external msgs could be non-unicode.
+                if (isinstance(lstMsg, bytes)):
                     lstMsg = lstMsg.decode(encoding='utf-8')
-                isAwsTokenExpired = lstMsg.find('The provided token has expired') != -1
+                isAwsTokenExpired = lstMsg.find(
+                    'The provided token has expired') != -1
                 if (isAwsTokenExpired):
                     store = S3Storage(self._base)
-                    self.message ('Refreshing token/direct access..')
+                    self.message('Refreshing token/direct access..')
                     roleInfo = store.getIamRoleInfo()
                     os.environ['AWS_ACCESS_KEY_ID'] = roleInfo[store.RoleAccessKeyId]
                     os.environ['AWS_SECRET_ACCESS_KEY'] = roleInfo[store.RoleSecretAccessKey]
                     os.environ['AWS_SESSION_TOKEN'] = roleInfo[store.RoleToken]
-                    print ('Retry/External call..')
+                    print('Retry/External call..')
                     ret = self._call_external(
                         args, name=timeIt, method=TimeIt.Conversion, store=self._base)
                 self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
@@ -4882,13 +4897,17 @@ class Compression(object):
             RecursiveCall = 'recursiveCall'
             if (not mode.endswith('mrf') and
                     RecursiveCall not in kwargs):
-                _outputPath = self._base.convertToForwardSlash(os.path.dirname(output_file))
+                _outputPath = self._base.convertToForwardSlash(
+                    os.path.dirname(output_file))
                 isCloudUpload = self._base.getBooleanValue(
                     self.m_user_config.getValue(CCLOUD_UPLOAD))
                 isTmpOutput = self.m_user_config.getValue(CISTEMPOUTPUT)
-                _mkOutputPath = _outputPath.replace(self.m_user_config.getValue(CTEMPOUTPUT if isTmpOutput else CCFG_PRIVATE_OUTPUT, False), '')
-                rasterProxyFldr = os.path.join(self.m_user_config.getValue(CCLONE_PATH, False), _mkOutputPath)
-                rasterProxyPath = os.path.join(rasterProxyFldr, os.path.basename(output_file))
+                _mkOutputPath = _outputPath.replace(self.m_user_config.getValue(
+                    CTEMPOUTPUT if isTmpOutput else CCFG_PRIVATE_OUTPUT, False), '')
+                rasterProxyFldr = os.path.join(
+                    self.m_user_config.getValue(CCLONE_PATH, False), _mkOutputPath)
+                rasterProxyPath = os.path.join(
+                    rasterProxyFldr, os.path.basename(output_file))
                 ret = self.compress(output_file, rasterProxyPath, args_Callback_for_meta,
                                     post_processing_callback=None, updateOrjobStatus=False, createOverviews=False, recursiveCall=True, **kwargs)
                 errorEntries = RasterAssociates.removeRasterProxyAncillaryFiles(
@@ -4923,15 +4942,17 @@ class Compression(object):
             if (self._base.getBooleanValue(self.m_user_config.getValue(CCLOUD_UPLOAD))):
                 self.message(
                     '[{}-Push]..'.format(self.m_user_config.getValue(COUT_CLOUD_TYPE).capitalize()))
-            _processedPath = os.path.dirname(output_file[len(self.m_user_config.getValue(CTEMPOUTPUT, False)):])
+            _processedPath = os.path.dirname(
+                output_file[len(self.m_user_config.getValue(CTEMPOUTPUT, False)):])
             _indx = input_file.index(_processedPath)
-            _input = os.path.basename(input_file) if _indx <= 0 else input_file[_indx:]
+            _input = os.path.basename(
+                input_file) if _indx <= 0 else input_file[_indx:]
             ret = post_processing_callback(post_process_output, post_processing_callback_args, input=_input,
-                f=post_process_output, cfg=self.m_user_config)
+                                           f=post_process_output, cfg=self.m_user_config)
             self.message('Status: (%s).' % ('OK' if ret else 'FAILED'))
             _proxyPath = self.m_user_config.getValue(CCLONE_PATH)
             if (_proxyPath and
-                rasterProxyPath):
+                    rasterProxyPath):
                 mode = self.m_user_config.getValue('Mode')
                 if (not mode.endswith('mrf')):
                     isOutContainerSAS = False
@@ -4942,31 +4963,36 @@ class Compression(object):
                                              azure_storage is not None and
                                              azure_storage._SASToken is not None)
                     if (cloudHandler or
-                        isOutContainerSAS):
+                            isOutContainerSAS):
                         outContainer = self._base.getUserConfiguration.getValue(
                             'Out_S3_Bucket', False)
                         proxyURL = self._base.getUserConfiguration.getValue(
                             CCFG_PRIVATE_OUTPUT, False)
-                        proxyFileURL = rasterProxyPath.replace(_proxyPath, proxyURL)
-                        isSecured = self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseTokenOnOuput))
+                        proxyFileURL = rasterProxyPath.replace(
+                            _proxyPath, proxyURL)
+                        isSecured = self._base.getBooleanValue(
+                            self._base.getUserConfiguration.getValue(UseTokenOnOuput))
                         _rasterSource = ''
                         if (isSecured):
-                            _rasterSource = '/{}/{}/{}'.format(cloudHandler, outContainer, proxyFileURL)
+                            _rasterSource = '/{}/{}/{}'.format(
+                                cloudHandler, outContainer, proxyFileURL)
                         else:
                             urlPrefix = self._base.getUserConfiguration.getValue(
-                            COUT_VSICURL_PREFIX, False)
+                                COUT_VSICURL_PREFIX, False)
                             if (urlPrefix):
                                 if (isOutContainerSAS):
-                                     _rasterSource = '{}{}?{}'.format(urlPrefix, proxyFileURL[len(self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)):], azure_storage._SASToken)
+                                    _rasterSource = '{}{}?{}'.format(urlPrefix, proxyFileURL[len(
+                                        self.m_user_config.getValue(CCFG_PRIVATE_OUTPUT, False)):], azure_storage._SASToken)
                                 else:
-                                    _rasterSource =  '{}{}'.format(urlPrefix, os.path.basename(rasterProxyPath))
+                                    _rasterSource = '{}{}'.format(
+                                        urlPrefix, os.path.basename(rasterProxyPath))
                         if (not isOutContainerSAS):
                             _rasterSource = self._base.urlEncode(_rasterSource)
                         doc = minidom.parse(rasterProxyPath)
                         nodes = doc.getElementsByTagName('Source')
                         if (nodes):
                             nodes.pop().firstChild.nodeValue = _rasterSource
-                            with open (rasterProxyPath, 'w') as writer:
+                            with open(rasterProxyPath, 'w') as writer:
                                 writer.write(doc.childNodes[0].toxml())
         # ends
         if (_rpt and
@@ -5368,8 +5394,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.8'
-    __program_date__ = '20231006'
+    __program_ver__ = 'v2.0.9'
+    __program_date__ = '20240216'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -5498,7 +5524,7 @@ class Application(object):
         self._base.message('Checking for updates..')
         verMessage = versionCheck.run(
             os.path.dirname(os.path.realpath(__file__)))
-        if(verMessage is not None):
+        if (verMessage is not None):
             self._base.message(verMessage)
         self._base._m_log.CloseCategory()
         return True
@@ -5815,11 +5841,11 @@ class Application(object):
             if (not _rpt.init(self._args.input)):
                 self._base.message(
                     'Unable to init (Reporter/obj)', self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
+                return (terminate(self._base, eFAIL))
             if (not _rpt.read()):
                 self._base.message('Unable to read the -input report file ({})'.format(
                     self._args.input), self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
+                return (terminate(self._base, eFAIL))
             self._args.job = os.path.basename(self._args.input)
             self._base.getUserConfiguration.setValue(CPRT_HANDLER, _rpt)
         # ends
@@ -5859,7 +5885,7 @@ class Application(object):
                     return True
                 # process @ lambda?
                 if (self._isLambdaJob()):
-                    return(terminate(self._base, eOK if self._runLambdaJob(_project_path) else eFAIL))
+                    return (terminate(self._base, eOK if self._runLambdaJob(_project_path) else eFAIL))
                 # ends
                 self._args.op = None
                 self._args.input = _project_path
@@ -5929,8 +5955,8 @@ class Application(object):
             if (splt[0] not in _utility):
                 self._base.message('Invalid utility operation mode ({})'.format(
                     self._args.op), self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
-            if(self._args.op == COP_RPT or
+                return (terminate(self._base, eFAIL))
+            if (self._args.op == COP_RPT or
                     self._args.op == COP_UPL or
                     self._args.op == COP_NOCONVERT or
                     self._args.op == COP_COPYONLY or
@@ -5944,7 +5970,7 @@ class Application(object):
                 if (not g_rpt.init(_project_path, self._args.input if self._args.input else cfg.getValue(CIN_S3_PARENTFOLDER if inAmazon else CIN_AZURE_PARENTFOLDER, False))):
                     self._base.message(
                         'Unable to init (Report)', self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 g_is_generate_report = True
                 if (self._args.op == COP_UPL):
                     self._args.cloudupload = 'true'
@@ -5953,7 +5979,7 @@ class Application(object):
                     if (cfg.getValue(CLOAD_RESTORE_POINT) and
                             _rpt):
                         if (CRESUME_HDR_INPUT not in _rpt._header):
-                            return(terminate(self._base, eFAIL))
+                            return (terminate(self._base, eFAIL))
                         self._args.tempoutput = _rpt._header[CRESUME_HDR_INPUT]
         # read-in <Mode>
         cfg_mode = cfg.getValue('Mode')
@@ -6007,7 +6033,7 @@ class Application(object):
                 except Exception as exp:
                     self._base.message('Unable to create the -tempinput path (%s) [%s]' % (
                         self._args.tempinput, str(exp)), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
             is_input_temp = True         # flag flows to deal with -tempinput
             cfg.setValue(CISTEMPINPUT, is_input_temp)
             cfg.setValue(CTEMPINPUT, self._args.tempinput)
@@ -6035,7 +6061,7 @@ class Application(object):
                 except Exception as exp:
                     self._base.message('Unable to create the -tempoutput path (%s)\n[%s]' % (
                         self._args.tempoutput, str(exp)), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 # ends
             is_output_temp = True
             cfg.setValue(CISTEMPOUTPUT, is_output_temp)
@@ -6053,7 +6079,7 @@ class Application(object):
             except BaseException:
                 self._base.message('\n%s requires the (boto3) module to run its S3 specific operations. Please install (boto3) for python.' % (
                     self.__program_name__), self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
+                return (terminate(self._base, eFAIL))
         # ends
         # take care of missing -input and -output if -clouddownload==True
         # Note/Warning: S3/Azure inputs/outputs are case-sensitive hence wrong (case) could mean no files found on S3/Azure
@@ -6073,13 +6099,13 @@ class Application(object):
                      _rpt.operation != COP_UPL)):
                     self._base.message(
                         '-tempoutput must be specified if -cloudupload=true', self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
             _access = cfg.getValue(COUT_AZURE_ACCESS)
             if (_access):
                 if (_access not in ('private', 'blob', 'container')):
                     self._base.message('Invalid value for ({})'.format(
                         COUT_AZURE_ACCESS), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 # private is not recognized by Azure, used internally only for clarity
                 if (_access == 'private'):
                     # None == private container
@@ -6095,7 +6121,7 @@ class Application(object):
                 else:
                     self._base.message('Invalid value for ({})'.format(
                         COUT_CLOUD_TYPE), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 if (self._args.output):
                     self._args.output = self._args.output.strip().replace('\\', '/')
                 cfg.setValue(COUT_S3_PARENTFOLDER, self._args.output)
@@ -6108,7 +6134,7 @@ class Application(object):
                  not self._args.input)):
                 self._base.message(
                     '-input/-output is not specified!', self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
+                return (terminate(self._base, eFAIL))
         # set output in cfg.
         dst_ = self._base.convertToForwardSlash(self._args.output)
         cfg.setValue(CCFG_PRIVATE_OUTPUT, dst_ if dst_ else '')
@@ -6161,11 +6187,11 @@ class Application(object):
                                 if (cfg.getValue(COUT_S3_PARENTFOLDER, False) != cfg.getValue(CIN_S3_PARENTFOLDER, False)):
                                     self._base.message('<%s> and <%s> must be the same if the -pyramids=only' % (
                                         CIN_S3_PARENTFOLDER, COUT_S3_PARENTFOLDER), const_critical_text)
-                                    return(terminate(self._base, eFAIL))
+                                    return (terminate(self._base, eFAIL))
                         else:
                             self._base.message(
                                 '-input and -output paths must be the same if the -pyramids=only', const_critical_text)
-                            return(terminate(self._base, eFAIL))
+                            return (terminate(self._base, eFAIL))
         if (not getBooleanValue(do_pyramids) and
             do_pyramids != CCMD_PYRAMIDS_ONLY and
                 do_pyramids != CCMD_PYRAMIDS_EXTERNAL and
@@ -6185,7 +6211,7 @@ class Application(object):
         if (not ret):
             self._base.message(
                 'Unable to initialize/compression module', self._base.const_critical_text)
-            return(terminate(self._base, eFAIL))
+            return (terminate(self._base, eFAIL))
         # s3 upload settings.
         out_s3_profile_name = self._args.outputprofile
         if (not out_s3_profile_name):
@@ -6228,7 +6254,7 @@ class Application(object):
                 if ((s3_output is None and self._args.output is None)):
                     self._base.message('Empty/Invalid values detected for keys in the ({}) beginning with (Out_S3|Out_S3_ID|Out_S3_Secret|Out_S3_AWS_ProfileName) or values for command-line args (-outputprofile)'.format(
                         self._args.config), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 # instance of upload storage.
                 S3_storage = S3Storage(self._base)
                 if (self._args.output):
@@ -6243,7 +6269,7 @@ class Application(object):
                 if (not ret):
                     self._base.message(err_init_msg.format(
                         'S3'), const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 S3_storage.inputPath = self._args.output
                 domain = S3_storage.con.meta.client.generate_presigned_url(
                     'get_object', Params={'Bucket': S3_storage.m_bucketname, 'Key': ' '}).split('%20?')[0]
@@ -6281,13 +6307,13 @@ class Application(object):
                     if (not bOutToken):
                         self._base.message('Empty/Invalid values detected for keys ({}/{}/{}/{})'.format(COUT_AZURE_ACCOUNTNAME,
                                                                                                          COUT_AZURE_ACCOUNTKEY, COUT_AZURE_CONTAINER, COUT_AZURE_PROFILENAME), self._base.const_critical_text)
-                        return(terminate(self._base, eFAIL))
+                        return (terminate(self._base, eFAIL))
                 azure_storage = Azure(
                     _account_name, _account_key, _out_profile, self._base)
                 if (not azure_storage.init(CS3STORAGE_OUT)):
                     self._base.message(err_init_msg.format(
                         CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}{}'.format('{}/{}/'.format(azure_storage.getAccountName, _container),
                                                                          self._args.output if self._args.output else cfg.getValue(COUT_S3_PARENTFOLDER, False)))
             elif (cfg.getValue(COUT_CLOUD_TYPE, True) == Store.TypeGoogle):
@@ -6305,18 +6331,18 @@ class Application(object):
                         not _bucket):
                     self._base.message('Empty/Invalid values detected for keys ({}/{})'.format(
                         COUT_GOOGLE_BUCKET, COUT_GOOGLE_PROFILENAME), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 google_storage = Google(None, '', '', _out_profile, self._base)
                 if (not google_storage.init(_bucket)):
                     self._base.message(err_init_msg.format(
                         Store.TypeGoogle.capitalize()), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 cfg.setValue(COUT_VSICURL_PREFIX, '/vsicurl/{}/{}'.format('{}{}'.format(Google.DafaultStorageDomain,
                                                                                         _bucket), self._args.output if self._args.output else cfg.getValue(COUT_GOOGLE_PARENTFOLDER, False)))
             else:
                 self._base.message('Invalid value for ({})'.format(
                     COUT_CLOUD_TYPE), self._base.const_critical_text)
-                return(terminate(self._base, eFAIL))
+                return (terminate(self._base, eFAIL))
         isDeleteAfterUpload = cfg.getValue(COUT_DELETE_AFTER_UPLOAD)
         if (isDeleteAfterUpload is None):
             isDeleteAfterUpload = cfg.getValue(
@@ -6428,7 +6454,7 @@ class Application(object):
                         not _rpt._isInputHTTP):
                     self._base.message(
                         'Invalid/empty value(s) found in node(s) [In_S3_ParentFolder, In_S3_Bucket]', self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
             # update (in s3 bucket name in config)
             cfg.setValue('In_S3_Bucket', in_s3_bucket)
             in_s3_parent = in_s3_parent.replace('\\', '/')
@@ -6443,7 +6469,7 @@ class Application(object):
                 if (not ret):
                     self._base.message(
                         'Unable to initialize S3-storage! Quitting..', self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 # handles EMC namespace cloud urls differently
                 if (str(o_S3_storage.con.meta.client._endpoint.host).lower().endswith('.ecstestdrive.com')):
                     cfg.setValue(CIN_S3_PREFIX, '/vsicurl/http://{}.public.ecstestdrive.com/{}/'.format(
@@ -6457,7 +6483,7 @@ class Application(object):
                 if (not o_S3_storage.getS3Content(o_S3_storage.remote_path, o_S3_storage.S3_copy_to_local, exclude_callback)):
                     self._base.message(
                         'Unable to read S3-Content', self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
             elif (cloudDownloadType == Store.TypeAzure):
                 # let's do (Azure) init
                 self._base.getUserConfiguration.setValue(
@@ -6468,7 +6494,7 @@ class Application(object):
                         not in_azure_storage.getAccountName):
                     self._base.message('({}) download initialization error. Check input credentials/profile name. Quitting..'.format(
                         CCLOUD_AZURE.capitalize()), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 in_azure_storage._include_subFolders = self._base.getBooleanValue(
                     cfg.getValue('IncludeSubdirectories'))
                 _restored = cfg.getValue(CLOAD_RESTORE_POINT)
@@ -6483,7 +6509,7 @@ class Application(object):
                 cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format('{}/{}/'.format(
                     in_azure_storage.getAccountName, cfg.getValue('In_S3_Bucket'))))
                 if (not in_azure_storage.browseContent(in_s3_bucket, _azParent, in_azure_storage.copyToLocal, exclude_callback)):
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 if (not _restored):
                     _files = in_azure_storage.getBrowseContent()
                     if (_files):
@@ -6495,7 +6521,7 @@ class Application(object):
                 if (not inGoogleStorage.init(in_s3_bucket)):
                     self._base.message('({}) download initialization error. Check input credentials/profile name. Quitting..'.format(
                         Store.TypeGoogle.capitalize()), self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 inGoogleStorage._include_subFolders = self._base.getBooleanValue(
                     cfg.getValue('IncludeSubdirectories'))
                 restored = cfg.getValue(CLOAD_RESTORE_POINT)
@@ -6510,7 +6536,7 @@ class Application(object):
                 cfg.setValue(CIN_S3_PREFIX, '/vsicurl/{}'.format(
                     '{}{}/'.format(Google.DafaultStorageDomain, self._args.inputbucket)))
                 if (not inGoogleStorage.browseContent(in_s3_bucket, gsParent, inGoogleStorage.copyToLocal, exclude_callback)):
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 if (not restored):
                     _files = inGoogleStorage.getBrowseContent()
                     if (_files):
@@ -6531,13 +6557,13 @@ class Application(object):
                 if (not ret):
                     self._base.message(
                         CONST_CPY_ERR_0, self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 ret = cpy.processs(self._base.S3Upl if is_cloud_upload else None,
                                    user_args_Callback, fn_pre_process_copy_default)
                 if (not ret):
                     self._base.message(
                         CONST_CPY_ERR_1, self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 if (is_input_temp):
                     pass        # no post custom code yet for non-rasters
             if (cfg_mode == BundleMaker.CMODE):
@@ -6600,7 +6626,7 @@ class Application(object):
                             not _rpt.read()):
                         self._base.message('Unable to read the -input report file ({})'.format(
                             self._args.input), self._base.const_critical_text)
-                        return(terminate(self._base, eFAIL))
+                        return (terminate(self._base, eFAIL))
                     self._base.getUserConfiguration.setValue(
                         CPRT_HANDLER, _rpt)
                     ret = eOK if self._runLambdaJob(
@@ -6608,7 +6634,7 @@ class Application(object):
                     if (ret == eOK):
                         if (self._args.op != COP_LAMBDA):   # synchronous call.
                             self._moveJobFileToLogPath()
-                    return(terminate(self._base, ret))
+                    return (terminate(self._base, ret))
                 # ends
                 self._args.op = None
                 self._args.input = _project_path
@@ -6621,9 +6647,9 @@ class Application(object):
             threads = []
             store_files_indx = 0
             store_files_len = len(_raster_buff)
-            while(1):
+            while (1):
                 len_threads = len(threads)
-                while(len_threads):
+                while (len_threads):
                     alive = [t.is_alive() for t in threads]
                     cnt_dead = sum(not x for x in alive)
                     if (cnt_dead):
@@ -6833,13 +6859,13 @@ class Application(object):
                 if (not ret):
                     self._base.message(
                         CONST_CPY_ERR_0, self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
                 ret = cpy.processs(
                     pre_processing_callback=fn_pre_process_copy_default)
                 if (not ret):
                     self._base.message(
                         CONST_CPY_ERR_1, self._base.const_critical_text)
-                    return(terminate(self._base, eFAIL))
+                    return (terminate(self._base, eFAIL))
             if (g_is_generate_report and
                     g_rpt):
                 for req in raster_buff:
@@ -6864,14 +6890,14 @@ class Application(object):
                 cfg.setValue(CLOAD_RESTORE_POINT, True)
                 self.run()
                 return
-            makedirs(self._args.output) # prepare output dirs.
+            makedirs(self._args.output)  # prepare output dirs.
             len_buffer = cfg_threads
             threads = []
             store_files_indx = 0
             store_files_len = len(raster_buff)
-            while(1):
+            while (1):
                 len_threads = len(threads)
-                while(len_threads):
+                while (len_threads):
                     alive = [t.is_alive() for t in threads]
                     cnt_dead = sum(not x for x in alive)
                     if (cnt_dead):
@@ -6893,7 +6919,7 @@ class Application(object):
                     if (isinput_s3 and
                             o_S3_storage is not None):
                         setPreAssignedURL = True
-                elif(cloudDownloadType == Store.TypeAzure):
+                elif (cloudDownloadType == Store.TypeAzure):
                     if (isinput_s3 and
                             in_azure_storage is not None):
                         setPreAssignedURL = True
@@ -6902,23 +6928,25 @@ class Application(object):
                         if (setPreAssignedURL):
                             preAkey = '{}{}'.format(f['src'], f['f'])
                             if (cloudDownloadType == Store.TypeAmazon):
-                                    if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken))):
-                                        self._args.preFetchedMRF = b''
-                                        oResp = o_S3_storage.con.meta.client.get_object(Bucket=o_S3_storage.m_bucketname, Key=preAkey)
-                                        for i in oResp['Body'].iter_chunks(CMRF_DOC_ROOT_LEN):
-                                            if (not self._args.preFetchedMRF and
+                                if (self._base.getBooleanValue(self._base.getUserConfiguration.getValue(UseToken))):
+                                    self._args.preFetchedMRF = b''
+                                    oResp = o_S3_storage.con.meta.client.get_object(
+                                        Bucket=o_S3_storage.m_bucketname, Key=preAkey)
+                                    for i in oResp['Body'].iter_chunks(CMRF_DOC_ROOT_LEN):
+                                        if (not self._args.preFetchedMRF and
                                                 isinstance(i, bytes)):
-                                                hdr = i
-                                                try:
-                                                    hdr = i.decode('utf-8')
-                                                except BaseException:
-                                                    pass  # ignore any invalid start byte issues.
-                                                if (hdr.lower() != '<{}>'.format(CMRF_DOC_ROOT.lower())):
-                                                    break
-                                            self._args.preFetchedMRF += i
-                                    else:
-                                        self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url(
-                                            'get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
+                                            hdr = i
+                                            try:
+                                                hdr = i.decode('utf-8')
+                                            except BaseException:
+                                                # ignore any invalid start byte issues.
+                                                pass
+                                            if (hdr.lower() != '<{}>'.format(CMRF_DOC_ROOT.lower())):
+                                                break
+                                        self._args.preFetchedMRF += i
+                                else:
+                                    self._args.preAssignedURL = o_S3_storage.con.meta.client.generate_presigned_url(
+                                        'get_object', Params={'Bucket': o_S3_storage.m_bucketname, 'Key': preAkey})
                             else:
                                 if (not cfg.getValue(CFGAZSAS)):
                                     from azure.storage.blob import ResourceTypes, AccountSasPermissions, generate_account_sas
@@ -7063,7 +7091,7 @@ class Application(object):
                         rpWriter.write('{};{}\n'.format(i + 1, proxyStr))
         # ends
         self._base.message('Done..\n')
-        return(terminate(self._base, _status))
+        return (terminate(self._base, _status))
 
     def _moveJobFileToLogPath(self):
         global _rpt
@@ -7116,7 +7144,8 @@ def threadProxyRaster(req, base, comp, args):
             remoteURL = None
             isPreFetchedMRF = True if (hasattr(
                 args, 'preFetchedMRF') and args.preFetchedMRF is not None) else False
-            bytesAtHeader = args.preFetchedMRF[:sigMRFLength] if isPreFetchedMRF else None
+            bytesAtHeader = args.preFetchedMRF[:
+                                               sigMRFLength] if isPreFetchedMRF else None
             if (not isPreFetchedMRF):
                 if (inputFile.startswith(CVSICURL_PREFIX)):
                     dnVSICURL = inputFile.split(CVSICURL_PREFIX)[1]
@@ -7304,7 +7333,7 @@ class IIQMaker(Compression):
             'config':  os.path.join(os.path.dirname(_resumeReporter._header['config']), 'Imagery_to_COG_DEF.xml')}
         )
         # remove download specific items off args that are no longer rquired.
-        args.update({Report.CHDR_CLOUD_DWNLOAD : False})
+        args.update({Report.CHDR_CLOUD_DWNLOAD: False})
         args.pop(CTEMPINPUT, None)
         # ends
         rpt = Report(Base())
