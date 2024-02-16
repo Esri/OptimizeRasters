@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2021 Esri
+# Copyright 2024 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.pyt
 # Description: UI for OptimizeRasters
-# Version: 20210712
+# Version: 20240216
 # Requirements: ArcMap / gdal_translate / gdaladdo
 # Required Arguments:optTemplates, inType, inprofiles, inBucket, inPath, outType
 # outprofiles, outBucket, outPath
@@ -69,7 +69,7 @@ def setXMLXPathValue(doc, xPath, key, value):
     for node in nodes:
         parents = []
         c = node
-        while(c.parentNode):
+        while (c.parentNode):
             parents.insert(0, c.nodeName)
             c = c.parentNode
         p = '/'.join(parents)
@@ -157,7 +157,8 @@ def setPaths(xFname, values):
 
 
 def returnPaths(xFname):
-    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor', 'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters']
+    keyList = ['Mode', 'RasterFormatFilter', 'ExcludeFilter', 'IncludeSubdirectories', 'Compression', 'Quality', 'LERCPrecision', 'BuildPyramids', 'PyramidFactor',
+               'PyramidSampling', 'PyramidCompression', 'NoDataValue', 'BlockSize', 'Scale', 'KeepExtension', 'Threads', 'Op', 'GDAL_Translate_UserParameters']
     xfName2 = os.path.normpath(xFname)
     if (not os.path.exists(xfName2)):
         return None
@@ -203,7 +204,7 @@ def config_Init(parentfolder, filename):
     global awsfile
     config = ConfigParser.RawConfigParser()
     awsfolder = '{}/{}/'.format(os.path.expanduser(
-                        '~').replace('\\', '/'), parentfolder)
+        '~').replace('\\', '/'), parentfolder)
     if (filename == '*.json'):  # google cs filter
         for r, d, f in os.walk(awsfolder):
             for service in f:
@@ -262,7 +263,8 @@ def config_writeSections(configfileName, peAction, section, option1, value1, opt
                 storageType = OptimizeRasters.CCLOUD_AZURE
             elif (option1.lower().startswith('alibaba')):
                 storageType = OptimizeRasters.ProfileEditorUI.TypeAlibaba
-        profileEditorUI = OptimizeRasters.ProfileEditorUI(section, storageType, value1, value2, aws_endpoint_url=value3)
+        profileEditorUI = OptimizeRasters.ProfileEditorUI(
+            section, storageType, value1, value2, aws_endpoint_url=value3)
         ret = profileEditorUI.validateCredentials()
         if (not ret):
             [arcpy.AddError(i) for i in profileEditorUI.errors]
@@ -292,7 +294,8 @@ def getAvailableBuckets(ctlProfileType, ctlProfileName):
                 storageType = OptimizeRasters.Store.TypeAzure
             elif (inputSourceType.find('google') != -1):
                 storageType = OptimizeRasters.Store.TypeGoogle
-            ORUI = OptimizeRasters.OptimizeRastersUI(ctlProfileName.value, storageType)
+            ORUI = OptimizeRasters.OptimizeRastersUI(
+                ctlProfileName.value, storageType)
             if (not ORUI):
                 raise Exception()
             return ORUI.getAvailableBuckets()
@@ -313,7 +316,8 @@ def checkPrerequisites(parameters, cloudType, ctrlIndexPos):
             cType = 'google-cloud'
             from google.cloud import storage
     except ImportError as e:
-        parameters[ctrlIndexPos].setErrorMessage('{}\nTo fix, please install the python module ({}).'.format(str(e), cType))
+        parameters[ctrlIndexPos].setErrorMessage(
+            '{}\nTo fix, please install the python module ({}).'.format(str(e), cType))
         return False
     return True
 
@@ -373,9 +377,11 @@ class ResumeJobs(object):
         if (not aJob.lower().endswith(CORJOB)):
             aJob += CORJOB
         template_path = os.path.realpath(__file__)
-        configFN = '{}/{}'.format(os.path.dirname(template_path), os.path.basename(aJob)).replace('\\', '/')
+        configFN = '{}/{}'.format(os.path.dirname(template_path),
+                                  os.path.basename(aJob)).replace('\\', '/')
         if (not os.path.exists(configFN)):      # detect errors early.
-            arcpy.AddError('Err. OptimizeRasters job file ({}) is not found!'.format(configFN))
+            arcpy.AddError(
+                'Err. OptimizeRasters job file ({}) is not found!'.format(configFN))
             return False
         args['input'] = configFN
        # let's run (OptimizeRasters)
@@ -383,7 +389,8 @@ class ResumeJobs(object):
         app = OptimizeRasters.Application(args)
         app.postMessagesToArcGIS = True
         if (not app.init()):
-            arcpy.AddError('Err. Unable to initialize (OptimizeRasters module)')
+            arcpy.AddError(
+                'Err. Unable to initialize (OptimizeRasters module)')
             return False
         return app.run()
         # ends
@@ -415,7 +422,7 @@ class ProfileEditor(object):
             datatype="GPString",
             parameterType="Required",
             direction="Input")
-        #profileName.value = 'or_public_in'
+        # profileName.value = 'or_public_in'
 
         iAmRolePara = arcpy.Parameter(
             displayName="IAM Role Profile",
@@ -458,7 +465,8 @@ class ProfileEditor(object):
         action.enabled = False
 
         iAmRolePara.value = False
-        parameters = [profileType, profileName, accessKey, secretAccessKey, imRoleURL, action]
+        parameters = [profileType, profileName,
+                      accessKey, secretAccessKey, imRoleURL, action]
         return parameters
 
     def updateParameters(self, parameters):
@@ -476,7 +484,8 @@ class ProfileEditor(object):
                 valSecretKey = parameters[3].value
                 parameters[3].value = ' ' if isSAS else parameters[3].value if valSecretKey != ' ' else ''
                 parameters[3].enabled = not isSAS   # secret access key
-                parameters[4].enabled = not isSAS   # endpoint isn't used for SAS
+                # endpoint isn't used for SAS
+                parameters[4].enabled = not isSAS
             config_Init(pFolder, pfileName)
             if parameters[1].altered == True:
                 pName = parameters[1].valueAsText
@@ -501,7 +510,8 @@ class ProfileEditor(object):
         typeAZ = 'Microsoft Azure'
         pType = parameters[0].valueAsText
         if (pType != 'Amazon S3') and (pType != typeAZ):
-            parameters[0].setErrorMessage('Invalid Value. Pick from List only.')
+            parameters[0].setErrorMessage(
+                'Invalid Value. Pick from List only.')
             return
         else:
             if (not checkPrerequisites(parameters, pType, 0)):
@@ -511,7 +521,8 @@ class ProfileEditor(object):
             pType = parameters[0].valueAsText
             pName = parameters[1].valueAsText
             if (config.has_section(pName)):
-                parameters[1].setWarningMessage('Profile name already exists. Select the appropriate action.')
+                parameters[1].setWarningMessage(
+                    'Profile name already exists. Select the appropriate action.')
             else:
                 parameters[1].clearMessage()
 
@@ -543,7 +554,8 @@ class ProfileEditor(object):
         if (accessSeceretKey == ' '):
             accessSeceretKey = ''
         endPointURL = parameters[4].valueAsText
-        config_writeSections(awsfile, peAction, pName, option1, accessKeyID, option2, accessSeceretKey, option3, endPointURL)
+        config_writeSections(awsfile, peAction, pName, option1,
+                             accessKeyID, option2, accessSeceretKey, option3, endPointURL)
 
 
 class OptimizeRasters(object):
@@ -556,7 +568,9 @@ class OptimizeRasters(object):
         self.tool = 'ConvertFiles'
 
     def getParameterInfo(self):
-        storageTypes = ['Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud']    # 'local' must be the first element.
+        # 'local' must be the first element.
+        storageTypes = ['Local', 'Amazon S3',
+                        'Microsoft Azure', 'Google Cloud']
         optTemplates = arcpy.Parameter(
             displayName="Configuration File",
             name="optTemplates",
@@ -684,7 +698,8 @@ class OptimizeRasters(object):
             parameterType='Optional',
             direction='Input')
 
-        parameters = [optTemplates, inType, inprofiles, issecured, inBucket, inPath, intempFolder, outType, outprofiles, outBucket, outPath, outtempFolder, cloneMRFFolder, cacheMRFFolder, editValue, configVals]
+        parameters = [optTemplates, inType, inprofiles, issecured, inBucket, inPath, intempFolder, outType,
+                      outprofiles, outBucket, outPath, outtempFolder, cloneMRFFolder, cacheMRFFolder, editValue, configVals]
         return parameters
 
     def updateParameters(self, parameters):
@@ -709,10 +724,12 @@ class OptimizeRasters(object):
                 templateinUse = optTemplates
                 template_path = os.path.realpath(__file__)
                 _CTEMPLATE_FOLDER = 'Templates'
-                configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
+                configFN = os.path.join(os.path.join(os.path.dirname(
+                    template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                 if not os.path.exists(configFN):
                     _CTEMPLATE_FOLDER = 'UserTemplates'
-                    configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
+                    configFN = os.path.join(os.path.join(os.path.dirname(
+                        template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                 allValues = returnPaths(configFN)
                 if (allValues):
                     attchValues(parameters[15], allValues)
@@ -721,10 +738,12 @@ class OptimizeRasters(object):
                 if templateinUse != optTemplates:
                     template_path = os.path.realpath(__file__)
                     _CTEMPLATE_FOLDER = 'Templates'
-                    configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
+                    configFN = os.path.join(os.path.join(os.path.dirname(
+                        template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                     if not os.path.exists(configFN):
                         _CTEMPLATE_FOLDER = 'UserTemplates'
-                        configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
+                        configFN = os.path.join(os.path.join(os.path.dirname(
+                            template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
                     allValues = returnPaths(configFN)
                     if (allValues):
                         attchValues(parameters[15], allValues)
@@ -771,7 +790,8 @@ class OptimizeRasters(object):
             results = response['response']['results']
             if (results and
                     response['response']['buckets']):
-                parameters[4].filter.list = response['response']['buckets']        # 3 == bucket names
+                # 3 == bucket names
+                parameters[4].filter.list = response['response']['buckets']
             else:
                 if (parameters[1].value == 'Local'):
                     parameters[4].filter.list = [' ']
@@ -829,7 +849,8 @@ class OptimizeRasters(object):
             results = response['response']['results']
             if (results and
                     response['response']['buckets']):
-                parameters[9].filter.list = response['response']['buckets']        # 8 == bucket names
+                # 8 == bucket names
+                parameters[9].filter.list = response['response']['buckets']
             else:
                 if (parameters[7].value == 'Local'):
                     parameters[9].filter.list = [' ']
@@ -855,10 +876,14 @@ class OptimizeRasters(object):
                 parameters[11].enabled = True
 
     def updateMessages(self, parameters):
-        storageTypes = ('Local', 'Amazon S3', 'Microsoft Azure', 'Google Cloud')    # 'local' must be the first element.
+        # 'local' must be the first element.
+        storageTypes = ('Local', 'Amazon S3',
+                        'Microsoft Azure', 'Google Cloud')
         errMessageListOnly = 'Invalid Value. Pick from List only.'
-        if (parameters[12].altered == True):    # GH 99 i.e. to disable all errors related to (datatype='DEFolder') to allow for
-            parameters[12].clearMessage()       # .csv filenames in ('UI/Raster Proxy Output Folder') together with the folder picker option/CHS.
+        # GH 99 i.e. to disable all errors related to (datatype='DEFolder') to allow for
+        if (parameters[12].altered == True):
+            # .csv filenames in ('UI/Raster Proxy Output Folder') together with the folder picker option/CHS.
+            parameters[12].clearMessage()
         if parameters[1].altered == True:
             pType = parameters[1].valueAsText
             if (pType not in storageTypes):
@@ -875,10 +900,12 @@ class OptimizeRasters(object):
                 if (not checkPrerequisites(parameters, pType, 7)):
                     return False
                 parameters[7].clearMessage()
-                if (pType in storageTypes[1:]):  # skip the first element/local.
+                # skip the first element/local.
+                if (pType in storageTypes[1:]):
                     if parameters[11].altered == False:
                         if parameters[11].enabled == True:
-                            parameters[11].SetWarningMessage('For cloud storage output, a temporary output location is required.')
+                            parameters[11].SetWarningMessage(
+                                'For cloud storage output, a temporary output location is required.')
                     else:
                         if parameters[11].valueAsText != '':
                             parameters[11].clearMessage()
@@ -892,10 +919,12 @@ class OptimizeRasters(object):
         optTemplates = parameters[0].valueAsText
         template_path = os.path.realpath(__file__)
         _CTEMPLATE_FOLDER = 'Templates'
-        configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
+        configFN = os.path.join(os.path.join(os.path.dirname(
+            template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
         if os.path.exists(configFN) == False:
             _CTEMPLATE_FOLDER = 'UserTemplates'
-            configFN = os.path.join(os.path.join(os.path.dirname(template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
+            configFN = os.path.join(os.path.join(os.path.dirname(
+                template_path), _CTEMPLATE_FOLDER), optTemplates + '.xml')
 
         inType = parameters[1].valueAsText
         inprofiles = parameters[2].valueAsText
@@ -918,7 +947,8 @@ class OptimizeRasters(object):
         args['output'] = outPath
         args['tempinput'] = intempFolder
         if (outtempFolder):
-            args['tempoutput'] = outtempFolder  # used only if -cloudupload=true
+            # used only if -cloudupload=true
+            args['tempoutput'] = outtempFolder
         args['input'] = inPath
         if inType == 'Local':
             pass
@@ -954,7 +984,8 @@ class OptimizeRasters(object):
         app = OptimizeRasters.Application(args)
         app.postMessagesToArcGIS = True
         if (not app.init()):
-            arcpy.AddError('Err. Unable to initialize (OptimizeRasters module)')
+            arcpy.AddError(
+                'Err. Unable to initialize (OptimizeRasters module)')
             return False
         return app.run()
         # ends
