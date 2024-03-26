@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20240216
+# Version: 20240301
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4744,11 +4744,25 @@ class Compression(object):
                 useVsimem = self._base.getBooleanValue(
                     self.m_user_config.getValue('vsimem'))
                 args.append('"{}{}"'.format(
-                    '/vsimem/' if useVsimem else '', output_file))
+                    '/vsimem/' if useVsimem else '', output_file))       # chs
                 self.message('Converting (%s)..' %
                              (useTokenPath if useTokenPath else input_file))
-                ret = self._call_external(
-                    args, name=timeIt, method=TimeIt.Conversion, store=self._base)
+                gdal_path = self.m_user_config.getValue(CCFG_GDAL_PATH, False)
+                use_iiq = _input_file.lower().endswith('.iiq')
+                if (use_iiq and
+                        do_process):
+                    iiqMaker = IIQMaker(
+                        _input_file, gdal_path, base=self._base)
+                    if (not iiqMaker.init() or
+                            not iiqMaker.run()):
+                        if (_rpt):
+                            _rpt.updateRecordStatus(
+                                _input_file, CRPT_PROCESSED, CRPT_NO)
+                        return False
+                    args[-2] = iiqMaker.output_path  # input pos to GDAL
+                    ret = self._call_external(
+                        args, name=timeIt, method=TimeIt.Conversion, store=self._base)
+                    iiqMaker.cleanup()  # cleanup iiq temp files.
                 lstMsg = self._base._lastMsg
                 # external msgs could be non-unicode.
                 if (isinstance(lstMsg, bytes)):
@@ -5395,7 +5409,7 @@ def makedirs(filepath):
 
 class Application(object):
     __program_ver__ = 'v2.0.9'
-    __program_date__ = '20240216'
+    __program_date__ = '20240301'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -6684,19 +6698,12 @@ class Application(object):
                             # build pyramids is always turned off for rasters that belong to (.til) files.
                             _build_pyramids = False
                     useBundleMaker = cfg_mode == BundleMaker.CMODE
-                    useIIQMaker = cfg_mode == IIQMaker.CMODE
                     if (useBundleMaker):
                         bundleMaker = BundleMaker(
                             input_file, gdal_path, base=self._base)
                         if (not bundleMaker.init()):
                             continue
                         t = threading.Thread(target=bundleMaker.run)
-                    elif (useIIQMaker):
-                        iiqMaker = IIQMaker(
-                            input_file, gdal_path, base=self._base)
-                        if (not iiqMaker.init()):
-                            continue
-                        ret = iiqMaker.run()
                     else:
                         doProcessRaster = True
                         if (til is not None and
@@ -7282,18 +7289,16 @@ class IIQMaker(Compression):
     def __init__(self, inputRaster, *args, **kwargs):
         super(IIQMaker, self).__init__(*args, **kwargs)
         self.inputRaster = inputRaster
+        self.iiqTiff = self.iiqWriteFolder = None     # IIQ output filename
 
     def init(self):
         if (not super(IIQMaker, self).init()):
             return False
-        self.homePath = os.path.join(os.path.dirname(
-            os.path.abspath(__file__)), 'iiq2tiff', 'iiq2tiff{}'.format('' if self._base.isLinux() else '.exe'))
-        return True
-
-    def run(self):
         _resumeReporter = self._base.getUserConfiguration.getValue(
             CPRT_HANDLER)
         if (not _resumeReporter):
+            self.message('IIQMaker/resumeReporter/not initialized...',
+                         self._base.const_critical_text)
             return False
         toCloud = fromCloud = False
         if (Report.CHDR_CLOUDUPLOAD in _resumeReporter._header):
@@ -7307,72 +7312,41 @@ class IIQMaker(Compression):
             self.message('-tempinput must be set for cloud IIQ files.',
                          self._base.const_critical_text)
             return False
+        self.homePath = os.path.join(os.path.dirname(
+            os.path.abspath(__file__)), 'iiq2tiff', 'iiq2tiff{}'.format('' if self._base.isLinux() else '.exe'))
         outPath = _resumeReporter._header[Report.CHDR_TEMPOUTPUT] if toCloud else _resumeReporter._header[CRESUME_HDR_OUTPUT]
         inBasePath = os.path.dirname(self.inputRaster.replace(
             _resumeReporter._header[CRESUME_HDR_INPUT] if CTEMPINPUT not in _resumeReporter._header else _resumeReporter._header[CTEMPINPUT], ''))
-        iiqWritePath = os.path.join(outPath, inBasePath)
-        if (not iiqWritePath.endswith('/')):
-            iiqWritePath += '/'
+        self.iiqWriteFolder = os.path.join(outPath, inBasePath)
+        if (not self.iiqWriteFolder.endswith('/')):
+            self.iiqWriteFolder += '/'
+        f, e = os.path.splitext(os.path.join(
+            self.iiqWriteFolder, os.path.basename(self.inputRaster)))
+        self.iiqTiff = f'{f}.tiff'
+        return True
+
+    def run(self):
         args = [self.homePath,
                 os.path.abspath(self.inputRaster),
-                iiqWritePath
+                self.iiqWriteFolder
                 ]
         self.message('IIQ2TIFF> ({})'.format(self.inputRaster))
         ret = self._call_external(args)
-        self.message(f'Results ({ret})')
-        if (not ret):
-            return ret
-        f, e = os.path.splitext(os.path.basename(self.inputRaster))
-        iiqTiff = os.path.join(iiqWritePath, f'{f}.tiff')
-        args = {}
-        args.update(_resumeReporter._header)
-        args.update({
-            'input': iiqWritePath,
-            'output': iiqWritePath,
-            'subs': False,
-            'config':  os.path.join(os.path.dirname(_resumeReporter._header['config']), 'Imagery_to_COG_DEF.xml')}
-        )
-        # remove download specific items off args that are no longer rquired.
-        args.update({Report.CHDR_CLOUD_DWNLOAD: False})
-        args.pop(CTEMPINPUT, None)
-        # ends
-        rpt = Report(Base())
-        writeToPath = args['output']
-        ORJobFile = os.path.join(writeToPath, '{}{}'.format(
-            rpt.getUniqueFileName(), rpt.CJOB_EXT))
-        rpt.init(ORJobFile)
-        for key in args.keys():
-            rpt.addHeader(key, args[key])   # add necessary headers.
-        rpt.addFile(iiqTiff)
-        rpt.write()
-        args['input'] = ORJobFile
-        app = Application(args)
-        if (not app.init()):
-            self.message('failed/app.init()', self._base.const_critical_text)
-            return False
-        # write out the def .tif extension.
-        app.configuration['KeepExtension'] = False
-        app.run()  # Do processing..
-        rpt = app.getReport()   # Get report/log status
-        if (rpt is None or
-                rpt.hasFailures()):
-            self.message('Processing iiq2tiff->COG orjob file.',
-                         self._base.const_critical_text)
-            return False
+        self.message(f'Results ({self.inputRaster}=>{ret})')
+        return ret
+
+    @property
+    def output_path(self):
+        return self.iiqTiff
+
+    def cleanup(self):
         try:
-            os.remove(iiqTiff)  # remove the iiq2tiff original output
+            os.remove(self.iiqTiff)  # the iiq2tiff original output
+            # remove IIQMaker ancillary file
+            os.remove(os.path.join(self.iiqWriteFolder, 'xmp.xml'))
         except Exception as e:
-            self.message(f'{e}', self._base.const_critical_text)
+            self.message(f'{e}', self._base.const_warning_text)
             return False
-        if (CTEMPINPUT in _resumeReporter._header and
-                self.inputRaster.startswith(_resumeReporter._header[CTEMPINPUT])):
-            try:
-                os.remove(self.inputRaster)  # remove the tempinput IIQ file.
-            except Exception as e:
-                self.message(f'{e}', self._base.const_warning_text)
-        if (toCloud):
-            # .tiff -> .tif
-            self._base.S3Upl(os.path.join(iiqTiff[:-1]), None)
         return True
 
 
