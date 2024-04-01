@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20240301
+# Version: 20240401
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4760,9 +4760,11 @@ class Compression(object):
                                 _input_file, CRPT_PROCESSED, CRPT_NO)
                         return False
                     args[-2] = iiqMaker.output_path  # input pos to GDAL
-                    ret = self._call_external(
-                        args, name=timeIt, method=TimeIt.Conversion, store=self._base)
-                    iiqMaker.cleanup()  # cleanup iiq temp files.
+                ret = self._call_external(
+                    args, name=timeIt, method=TimeIt.Conversion, store=self._base)
+                if (use_iiq and
+                        do_process):
+                        iiqMaker.cleanup()  # cleanup iiq temp files.
                 lstMsg = self._base._lastMsg
                 # external msgs could be non-unicode.
                 if (isinstance(lstMsg, bytes)):
@@ -5408,8 +5410,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.9'
-    __program_date__ = '20240301'
+    __program_ver__ = 'v2.0.10'
+    __program_date__ = '20240401'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
