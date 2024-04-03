@@ -8,7 +8,7 @@
     <!--File extensions considered as (Rasters). These files will not be copied from the input path-->
     <RasterFormatFilter>tif,tiff,TIF,TIFF,img,jp2,JP2,IMG,ntf,NTF,til,TIL</RasterFormatFilter>
     <!--File extensions to ignore completely while copying files/data from the input path-->
-    <ExcludeFilter>tmp,rrd,idx,lrc,mrf_cache,pjp,ppng,pft,pzp,ovr,aux.xml,aux,tfw,TFW,pdf,PDF,HTM,JPG,jpg,gml,GML,XSL,KMZ,kmz,pjg</ExcludeFilter>
+    <ExcludeFilter>tmp,rrd,idx,lrc,mrf_cache,pjp,ppng,pft,pzp,ovr,aux.xml,aux,tfw,TFW,pdf,PDF,HTM,jpg,JPG,jpeg,JPEG,gml,GML,XSL,KMZ,kmz,pjg</ExcludeFilter>
     <!--'true' will scan for (Rasters) in sub-directories. Acceptable values are [true, yes, t, 1, y, false, no, f, 0, n]-->
     <IncludeSubdirectories>true</IncludeSubdirectories>
     <!--Compression to use on output (Rasters)-->
