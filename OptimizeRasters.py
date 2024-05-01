@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20240402
+# Version: 20240430
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -75,12 +75,12 @@ CDisableVersionCheck = getBooleanValue(
 
 if (sys.version_info[0] < 3):
     import ConfigParser
-    from urllib import urlopen, urlencode
+    from urllib import urlopen, urlencode, quote
     from urlparse import urlparse
 else:
     import configparser as ConfigParser
     from urllib.request import urlopen
-    from urllib.parse import urlencode, urlparse
+    from urllib.parse import urlencode, urlparse, quote
 # ends
 
 # enum error codes
@@ -1366,16 +1366,17 @@ class GDALInfo(object):
             setattr(self, p, None)
         return True
 
-    def process(self, input):
+    def process(self, input_path):
         if (not self._GDALPath):
             self.message('Not initialized!', self._base.const_critical_text)
             return False
         if (not input):             # invalid input
             return False
         args = [self._GDALPath]
-        args.append('"{}"'.format(input))
+        args.append('"{}"'.format(input_path) if not input_path.startswith(
+            '"') and not input_path.endswith('"') else input_path)
         self.message('Using GDALInfo ({})..'.format(
-            input), self._base.const_general_text)
+            input_path), self._base.const_general_text)
         return self._call_external(args)
 
     def message(self, msg, status=0):
@@ -4698,11 +4699,12 @@ class Compression(object):
                 _ = input_file.encode('ascii')
             except UnicodeEncodeError as e:
                 bUnicode = True
-            inputRaster = self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(
-                CPLANET_IDENTIFY) == -1 and not azSAS and not isTempInput and not bUnicode else '"{}"'.format(input_file)
-            useTokenPath = self._base.convertToTokenPath(inputRaster)
+            useTokenPath = self._base.convertToTokenPath(input_file)
             if (useTokenPath is not None):
-                inputRaster = useTokenPath
+                inputRaster = f'"{useTokenPath}"'
+            else:
+                inputRaster = self._base.urlEncode(input_file) if _vsicurl_input and input_file.find(
+                    CPLANET_IDENTIFY) == -1 and not azSAS and not isTempInput and not bUnicode else '"{}"'.format(input_file)
             if (do_pyramids != CCMD_PYRAMIDS_ONLY and
                     do_process):
                 args = [os.path.join(
@@ -4744,7 +4746,7 @@ class Compression(object):
                 useVsimem = self._base.getBooleanValue(
                     self.m_user_config.getValue('vsimem'))
                 args.append('"{}{}"'.format(
-                    '/vsimem/' if useVsimem else '', output_file))       # chs
+                    '/vsimem/' if useVsimem else '', output_file))
                 self.message('Converting (%s)..' %
                              (useTokenPath if useTokenPath else input_file))
                 gdal_path = self.m_user_config.getValue(CCFG_GDAL_PATH, False)
@@ -4764,7 +4766,7 @@ class Compression(object):
                     args, name=timeIt, method=TimeIt.Conversion, store=self._base)
                 if (use_iiq and
                         do_process):
-                        iiqMaker.cleanup()  # cleanup iiq temp files.
+                    iiqMaker.cleanup()  # cleanup iiq temp files.
                 lstMsg = self._base._lastMsg
                 # external msgs could be non-unicode.
                 if (isinstance(lstMsg, bytes)):
@@ -5410,8 +5412,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.10'
-    __program_date__ = '20240402'
+    __program_ver__ = 'v2.0.11'
+    __program_date__ = '20240430'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -6964,7 +6966,7 @@ class Application(object):
                                                                    read=True),
                                                                expiry=datetime.utcnow() + timedelta(hours=1))
                                     self._args.preAssignedURL = '{}/{}/{}?{}'.format(
-                                        in_azure_storage._account_name, in_s3_bucket, preAkey, SAS)
+                                        in_azure_storage._account_name, in_s3_bucket, quote(preAkey), SAS)
                         t = threading.Thread(target=threadProxyRaster, args=(
                             f, self._base, comp, self._args))
                         t.daemon = True
