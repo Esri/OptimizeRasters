@@ -15,7 +15,7 @@
 # Name: CleanMRFCache.py
 # Description: Cleans MRF Cache files by oldest access-time until free space
 # requested has been achieved.
-# Version: 20240216
+# Version: 20240507
 # Requirements: Python
 # Required Arguments: -input
 # Optional Arguments: -mode -ext -size
@@ -117,7 +117,7 @@ parser.add_argument('-ext',
                     help='Extensions to filter-in. e.g. -ext=mrfcache,txt',
                     dest='ext')
 parser.add_argument('-size', type=int,
-                    help='Free size requested in bytes. e.g. -size=1000000',
+                    help='Free size requested in Gigabytes. e.g. -size=1',
                     dest='size', default=2000000000)
 
 log = None
