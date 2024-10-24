@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20240430
+# Version: 20241024
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4565,10 +4565,12 @@ class Compression(object):
             if (not kwargs[UpdateOrjobStatus]):
                 isRasterProxyCaller = True
         if (_rpt):
-            if (input_file in _rpt._input_list_info and
-                    Report.CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
-                output_file = '{}/{}'.format(os.path.dirname(
-                    output_file), _rpt._input_list_info[input_file][Report.CRPT_URL_TRUENAME])
+            if input_file in _rpt._input_list_info:
+                if _rpt._input_list_info[input_file][CRPT_PROCESSED] == "yes":
+                    return True
+                if (Report.CRPT_URL_TRUENAME in _rpt._input_list_info[input_file]):
+                    output_file = '{}/{}'.format(os.path.dirname(
+                        output_file), _rpt._input_list_info[input_file][Report.CRPT_URL_TRUENAME])
         _vsicurl_input = self.m_user_config.getValue(CIN_S3_PREFIX, False)
         _input_file = input_file.replace(
             _vsicurl_input, '') if _vsicurl_input else input_file
@@ -5412,8 +5414,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.11'
-    __program_date__ = '20240430'
+    __program_ver__ = 'v2.0.13'
+    __program_date__ = '20241024'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -7092,10 +7094,15 @@ class Application(object):
         if (self._base._isRasterProxyFormat('csv')):
             pfname = cfg.getValue('rpfname', False)
             if (pfname):
+                use_existing = os.path.exists(pfname)
+                obj_id = 0                
+                if use_existing:
+                    obj_id = int(time.time()) % 100000000
                 with open(pfname, 'a') as rpWriter:
-                    rpWriter.write('ObjectID;Raster\n')
-                    for i in range(0, len(self._base._modifiedProxies)):
-                        proxyStr = self._base._modifiedProxies[i]
+                    if not use_existing:
+                        rpWriter.write('ObjectID;Raster\n')
+                    for i in range(obj_id, obj_id + len(self._base._modifiedProxies)):
+                        proxyStr = self._base._modifiedProxies[i- obj_id]
                         proxyStr = ' '.join(
                             proxyStr.split()).replace('"', '\'')
                         proxyStr = '><'.join(proxyStr.split('> <'))
