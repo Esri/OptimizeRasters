@@ -75,11 +75,11 @@ CDisableVersionCheck = getBooleanValue(
 
 if (sys.version_info[0] < 3):
     import ConfigParser
-    from urllib import urlopen, urlencode, quote
+    from urllib import urlopen, urlencode, quote, Request
     from urlparse import urlparse
 else:
     import configparser as ConfigParser
-    from urllib.request import urlopen
+    from urllib.request import urlopen, Request
     from urllib.parse import urlencode, urlparse, quote
 # ends
 
@@ -3374,15 +3374,34 @@ class S3Storage:
         return True
 
     def getIamRoleInfo(self):
+        # Get IMDSv2 token
+        self._base.message('Getting Iam Role Info')
+        try:
+            req = Request("http://169.254.169.254/latest/api/token", method='PUT')
+            req.add_header('X-aws-ec2-metadata-token-ttl-seconds', '21600')
+            imds_token = urlopen(req).read().decode('utf-8')
+            self._base.message('Got security IMDSv2 token')
+        except Exception as e:
+            self._base.message('Unable to get IMDSv2 token. ({})'.format(str(e)), self._base.const_critical_text)
+            imds_token = ''
+        
         roleMetaUrl = 'http://169.254.169.254/latest/meta-data/iam/security-credentials'
         urlResponse = None
         try:
-            urlResponse = urlopen(roleMetaUrl)
+            # use request to add token header
+            roleMeta_req = Request(roleMetaUrl)
+            roleMeta_req.add_header("X-aws-ec2-metadata-token", imds_token)
+            urlResponse = urlopen(roleMeta_req)
             IamRole = urlResponse.read().decode('utf-8')
+            self._base.message('Found IAM Role ({})'.format(IamRole))
             if (IamRole.find('404') != -1):
                 return None
             urlResponse.close()
-            urlResponse = urlopen('{}/{}'.format(roleMetaUrl, IamRole))
+            
+            # use request to add token header
+            roleMeta_req2 = Request('{}/{}'.format(roleMetaUrl, IamRole))
+            roleMeta_req2.add_header("X-aws-ec2-metadata-token", imds_token)
+            urlResponse = urlopen(roleMeta_req2)
             roleInfo = json.loads(urlResponse.read())
         except Exception as e:
             self._base.message('IAM Role not found.\n{}'.format(
@@ -3394,7 +3413,9 @@ class S3Storage:
         if (self.RoleAccessKeyId in roleInfo and
             self.RoleSecretAccessKey in roleInfo and
                 self.RoleToken in roleInfo):
+            self._base.message('Returning IAM Role credentials ({})'.format(IamRole))
             return roleInfo
+        self._base.message('Unable to decode Role info', self._base.const_critical_text)
         return None
 
     def getEndPoint(self, domain):
