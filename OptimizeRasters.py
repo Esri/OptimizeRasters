@@ -3379,7 +3379,7 @@ class S3Storage:
         try:
             req = Request("http://169.254.169.254/latest/api/token", method='PUT')
             req.add_header('X-aws-ec2-metadata-token-ttl-seconds', '21600')
-            imds_token = urlopen(req).read().decode('utf-8')
+            imds_token = urlopen(req, timeout=2).read().decode('utf-8')
             self._base.message('Got security IMDSv2 token')
         except Exception as e:
             self._base.message('Unable to get IMDSv2 token. ({})'.format(str(e)), self._base.const_critical_text)
@@ -3390,7 +3390,8 @@ class S3Storage:
         try:
             # use request to add token header
             roleMeta_req = Request(roleMetaUrl)
-            roleMeta_req.add_header("X-aws-ec2-metadata-token", imds_token)
+            if imds_token != '':
+                roleMeta_req.add_header("X-aws-ec2-metadata-token", imds_token)
             urlResponse = urlopen(roleMeta_req)
             IamRole = urlResponse.read().decode('utf-8')
             self._base.message('Found IAM Role ({})'.format(IamRole))
@@ -3400,7 +3401,8 @@ class S3Storage:
             
             # use request to add token header
             roleMeta_req2 = Request('{}/{}'.format(roleMetaUrl, IamRole))
-            roleMeta_req2.add_header("X-aws-ec2-metadata-token", imds_token)
+            if imds_token != '':
+                roleMeta_req2.add_header("X-aws-ec2-metadata-token", imds_token)
             urlResponse = urlopen(roleMeta_req2)
             roleInfo = json.loads(urlResponse.read())
         except Exception as e:
