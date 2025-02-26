@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Copyright 2024 Esri
+# Copyright 2025 Esri
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20241024
+# Version: 20250220
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -214,6 +214,7 @@ DefS3Region = 'us-east-1'
 COUT_DELETE_AFTER_UPLOAD_OBSOLETE = 'Out_S3_DeleteAfterUpload'
 COUT_DELETE_AFTER_UPLOAD = 'DeleteAfterUpload'
 CFGLogPath = 'LogPath'
+CLOG_FOLDER = 'logs'
 TarGz = 'tarGz'
 TarGzExt = '.tar.gz'
 # ends
@@ -240,7 +241,6 @@ CS3_UPLOAD_RETRIES = 3
 CS3STORAGE_IN = 0
 CS3STORAGE_OUT = 1
 # ends
-
 
 class TimeIt(object):
     Name = 'Name'
@@ -1104,9 +1104,10 @@ class Base(object):
     def close(self):
         if (self._m_log):
             if (not CRUN_IN_AWSLAMBDA):
-                usrLogFolder = self.getUserConfiguration.getValue(CFGLogPath)
-                if (usrLogFolder is not None):
-                    self._m_log.SetLogFolder(usrLogFolder)
+                if self.getUserConfiguration:
+                    usrLogFolder = self.getUserConfiguration.getValue(CFGLogPath)
+                    if (usrLogFolder is not None):
+                        self._m_log.SetLogFolder(usrLogFolder)
                 # persist information/errors collected.
                 self._m_log.WriteLog('#all')
 
@@ -1743,6 +1744,7 @@ class Report:
     CHDR_CLOUD_DWNLOAD = 'clouddownload'
     CHDR_MODE = 'mode'
     CHDR_OP = 'op'
+    CHDR_JOB = 'job'
     # Delay in secs before the partial status of the .orjob gets written to the local disk.
     SnapshotDelay = 20
 
@@ -5437,8 +5439,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.13'
-    __program_date__ = '20241024'
+    __program_ver__ = 'v2.0.14'
+    __program_date__ = '20250220'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
@@ -5462,18 +5464,23 @@ class Application(object):
             self._args.config = os.path.abspath(
                 os.path.join(os.path.dirname(__file__), CCFG_FILE))
         config_ = self._args.config
+        job = None
         if (self._args.input and            # Pick up the config file name from a (resume) job file.
                 self._args.input.lower().endswith(Report.CJOB_EXT)):
             _r = Report(Base())
             if (not _r.init(self._args.input)):
-                self.writeToConsole('Err. ({})/init'.format(self._args.input))
+                self._base.message(
+                    f"({self._args.input})/init", self._base.const_critical_text)
                 return False
             # Big .orjob files can take some time.
-            self.writeToConsole('ORJob> Reading/Preparing data. Please wait..')
+            self._base.message(
+                "ORJob/Reading/Preparing data. Please wait..", self._base.const_general_text)
             if (not _r.read()):
-                self.writeToConsole('Err. ({})/read'.format(self._args.input))
+                self._base.message(
+                    f"({self._args.input})/read", self._base.const_critical_text)
                 return False
-            self.writeToConsole('ORJob> Done.')  # msg end of read.
+            self._base.message(
+                "ORJob/Done.", self._base.const_general_text)
             if (CRPT_HEADER_KEY in _r._header):
                 config_ = _r._header[CRPT_HEADER_KEY]
             if (Report.CHDR_MODE in _r._header):
@@ -5481,15 +5488,21 @@ class Application(object):
                 self._args.mode = _r._header[Report.CHDR_MODE]
             if (Report.CHDR_OP in _r._header):
                 self._args.op = _r._header[Report.CHDR_OP]
+            if Report.CHDR_JOB in _r._header:
+                job = _r._header[Report.CHDR_JOB]
             _r = None
         # replace/force the original path to abspath.
         self._args.config = os.path.abspath(config_).replace('\\', '/')
         cfg = Config()
         ret = cfg.init(config_, 'Defaults')
+        if ret:
+            cfg.setValue(CFGLogPath, job)
         if (not ret):
-            msg = 'Err. Unable to read-in settings from ({})'.format(config_)
+            msg = f"Unable to read-in settings from ({config_})"
             # log file is not up yet, write to (console)
-            self.writeToConsole(msg, const_critical_text)
+            # self.writeToConsole(msg, const_critical_text)
+            self._base.message(
+                msg, self._base.const_critical_text)
             return False
         # ends
         # deal with cfg extensions (rasters/exclude list)
@@ -5574,41 +5587,21 @@ class Application(object):
 
     def __setupLogSupport(self):
         log = None
+        self._base = Base()
         try:
             solutionLib_path = os.path.realpath(__file__)
             if (not os.path.isdir(solutionLib_path)):
                 solutionLib_path = os.path.dirname(solutionLib_path)
-            _CLOG_FOLDER = 'logs'
-            self._log_path = os.path.join(solutionLib_path, _CLOG_FOLDER)
+            self._log_path = os.path.join(solutionLib_path, CLOG_FOLDER)
             sys.path.append(os.path.join(solutionLib_path, 'SolutionsLog'))
             import logger
             log = logger.Logger()
             log.Project('OptimizeRasters')
             log.LogNamePrefix('OR')
             log.StartLog()
-            cfg_log_path = cfg.getValue(CFGLogPath)
-            if (self._args.job):
-                cfg_log_path = self._args.job
-            if (not cfg_log_path):
-                LogPath = 'logPath'
-                if (LogPath in self._usr_args):
-                    cfg_log_path = self._usr_args[LogPath]
-            if (cfg_log_path):
-                if (cfg_log_path.lower().endswith(Report.CJOB_EXT)):
-                    (cfg_log_path, f) = os.path.split(cfg_log_path)
-                if (not os.path.isdir(cfg_log_path)):
-                    try:
-                        os.makedirs(cfg_log_path)
-                    except Exception as e:
-                        Message('Invalid log-path (%s). Resetting to (%s)' %
-                                (cfg_log_path, self._log_path))
-                        cfg_log_path = None
-            if (cfg_log_path):
-                self._log_path = os.path.join(cfg_log_path, _CLOG_FOLDER)
-            log.SetLogFolder(self._log_path)
-            print('Log-path set to ({})'.format(self._log_path))
+            log.SetLogFolder(self.__set_log_folders())
         except Exception as e:
-            print('Warning: External logging support disabled! ({})'.format(str(e)))
+            log.Message(f'External logging support possibly disabled! ({e})', const_warning_text)
         # let's write to log (input config file content plus all cmd-line args)
         if (log):
             log.Message('version={}/{}'.format(Application.__program_ver__,
@@ -5636,10 +5629,11 @@ class Application(object):
             # ends
             # inject cfg content
             log.CreateCategory('Input-config-values')
-            for v in cfg.m_cfgs:
-                if (v == 'cmdline'):
-                    continue
-                log.Message('%s=%s' % (v, cfg.m_cfgs[v]), const_general_text)
+            if cfg:
+                for v in cfg.m_cfgs:
+                    if (v == 'cmdline'):
+                        continue
+                    log.Message('%s=%s' % (v, cfg.m_cfgs[v]), const_general_text)
             log.CloseCategory()
             # ends
         return Base(log, self._msg_callback, cfg)
@@ -5682,9 +5676,7 @@ class Application(object):
         return _rpt if _rpt else None
 
     def init(self):
-        global _rpt, \
-            cfg, \
-            til
+        global _rpt, cfg, til
         self.writeToConsole(self.__program_name__)
         self.writeToConsole(self.__program_desc__)
         _rpt = cfg = til = None
@@ -5702,9 +5694,13 @@ class Application(object):
                     pass
             if (self._args.__getattr__(CRESUME_ARG) is None):
                 self._args.__setattr__(CRESUME_ARG, True)
-        if (not self.__load_config__(self._args)):
-            return False
         self._base = self.__setupLogSupport()         # initialize log support.
+        self.__set_log_folders()        # remap post cfg updates.
+        if (not self.__load_config__(self._args)):
+            self._base.close()
+            return False
+        self._base._m_user_config = cfg     # chs
+        self.__set_log_folders()        # remap post cfg updates.
         if (self._base.getMessageHandler):
             self._base._m_log.isGPRun = self.postMessagesToArcGIS
         if (not CDisableVersionCheck):
@@ -5712,6 +5708,7 @@ class Application(object):
         if (not self._base.init()):
             self._base.message(
                 'Unable to initialize the (Base) module', self._base.const_critical_text)
+            self._base.close()
             return False
         if (self._args.input and
             self._args.input.lower().endswith(Report.CJOB_EXT) and
@@ -5721,6 +5718,7 @@ class Application(object):
             if (not _rpt.init(self._args.input)):
                 self._base.message('Unable to init (Report/job)',
                                    self._base.const_critical_text)
+                self._base.close()
                 return False
             for arg in vars(self._args):
                 if (arg == CRESUME_HDR_INPUT):
@@ -5730,6 +5728,7 @@ class Application(object):
             if (not _rpt.read(self.__jobContentCallback)):
                 self._base.message(
                     'Unable to read the -input job file.', self._base.const_critical_text)
+                self._base.close()
                 return False
             if (CRESUME_HDR_OUTPUT in self._usr_args):
                 # override the output path in the .orjob file if a custom 'output' path exists.
@@ -7158,6 +7157,34 @@ class Application(object):
                 'Unable to move the .orjob file to the log path.', self._base.const_warning_text)
             status = eFAIL
         return status
+
+    def __set_log_folders(self):
+        """setup log folders, create log folder(s) if necessary."""
+        cfg_log_path = cfg.getValue(CFGLogPath) if cfg else f"./{CLOG_FOLDER}"
+        if self._args.job:
+            cfg_log_path = self._args.job
+        if not cfg_log_path:
+            LogPath = "logPath"
+            if LogPath in self._usr_args:
+                cfg_log_path = self._usr_args[LogPath]
+        if cfg_log_path:
+            if cfg_log_path.lower().endswith(Report.CJOB_EXT):
+                (cfg_log_path, f) = os.path.split(cfg_log_path)
+            if not os.path.isdir(cfg_log_path):
+                try:
+                    os.makedirs(cfg_log_path)
+                except Exception as e:
+                    self._base.message(
+                        f"Invalid log-path {cfg_log_path}). Resetting to ({self._log_path})\n{e}",
+                        const_warning_text,
+                    )
+                    cfg_log_path = None
+        if cfg_log_path:
+            self._log_path = os.path.join(cfg_log_path, CLOG_FOLDER)
+        if cfg:
+            cfg.setValue(CFGLogPath, self._log_path)
+            self._base.message(f"Log-path set to ({self._log_path}))")
+        return cfg_log_path
 
 
 def threadProxyRaster(req, base, comp, args):
