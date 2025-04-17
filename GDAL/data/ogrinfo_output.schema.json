@@ -149,6 +149,10 @@
         },
         "comment": {
           "type": "string"
+        },
+        "timezone": {
+          "type": "string",
+          "pattern": "^(localtime|(mixed timezones)|UTC|((\\+|-)[0-9][0-9]:[0-9][0-9]))$"
         }
       },
       "required": [
@@ -208,8 +212,26 @@
             "maxItems": 4
           }
         },
+        "extent3D": {
+          "type": "array",
+          "items": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "minItems": 6,
+            "maxItems": 6
+          }
+        },
         "coordinateSystem": {
-          "$ref": "#/definitions/coordinateSystem"
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/coordinateSystem"
+            }
+          ]
         },
         "supportedSRSList": {
           "type": "array",
@@ -243,6 +265,18 @@
               }
             ]
           }
+        },
+        "xyCoordinateResolution": {
+          "type": "number"
+        },
+        "zCoordinateResolution": {
+          "type": "number"
+        },
+        "mCoordinateResolution": {
+          "type": "number"
+        },
+        "coordinatePrecisionFormatSpecificOptions": {
+          "type": "object"
         }
       },
       "required": [
@@ -370,7 +404,6 @@
         }
       },
       "required": [
-        "description",
         "type",
         "fieldType",
         "splitPolicy",
@@ -382,6 +415,9 @@
     "group": {
       "type": "object",
       "properties": {
+        "name": {
+          "type": "string"
+        },
         "layerNames": {
           "type": "array",
           "items": {

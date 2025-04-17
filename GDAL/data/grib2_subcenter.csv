@@ -8,14 +8,14 @@ center_code,subcenter_code,name
 7,7,"Climate Prediction Center"
 7,8,"Aviation Weather Center"
 7,9,"Storm Prediction Center"
-7,10," National Hurricane Center"
-7,11," NWS Techniques Development Laboratory"
-7,12," NESDIS Office of Research and Applications"
-7,13," Federal Aviation Administration"
-7,14," NWS Meteorological Development Laboratory"
-7,15," North American Regional Reanalysis Project"
-7,16," Space Weather Prediction Center"
-7,17," ESRL Global Systems Division"
+7,10,National Hurricane Center
+7,11,NWS Techniques Development Laboratory
+7,12,NESDIS Office of Research and Applications
+7,13,Federal Aviation Administration
+7,14,NWS Meteorological Development Laboratory
+7,15,North American Regional Reanalysis Project
+7,16,Space Weather Prediction Center
+7,17,ESRL Global Systems Division
 8,0,"National Digital Forecast Database"
 161,1,"Great Lakes Environmental Research Laboratory"
 161,2,"Forecast Systems Laboratory"

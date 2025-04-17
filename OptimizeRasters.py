@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------------------
 # Name: OptimizeRasters.py
 # Description: Optimizes rasters via gdal_translate/gdaladdo
-# Version: 20250220
+# Version: 20250416
 # Requirements: Python
 # Required Arguments: -input -output
 # Optional Arguments: -mode -cache -config -quality -prec -pyramids
@@ -4514,10 +4514,14 @@ class Compression(object):
         # ends
         # set gdal_data enviornment path
         rootGdal = os.path.dirname(self.m_gdal_path)
-        os.environ['GDAL_DATA'] = os.path.join(rootGdal, 'data')
+        os.environ["GDAL_DATA"] = os.environ.get("GDAL_DATA", os.path.join(rootGdal, "data"))
+        os.environ['GDAL_IIQ_SENSOR_PROFILES_LOCATION'] = os.environ.get("GDAL_IIQ_SENSOR_PROFILES_LOCATION", os.path.join(os.environ["GDAL_DATA"], "IIQSensorProfiles")) # IIQ support
         # disable CURL SSL certificate problem
-        os.environ['GDAL_HTTP_UNSAFESSL'] = 'true'
-        os.environ['LD_LIBRARY_PATH'] = os.path.join(rootGdal, 'lib')
+        os.environ["GDAL_HTTP_UNSAFESSL"] = "true"
+        libPath = os.environ.get("LD_LIBRARY_PATH", "")
+        or_lib_path = os.path.join(rootGdal, "bin")
+        os.environ["LD_LIBRARY_PATH"] = f'{libPath}{os.pathsep}{or_lib_path}'
+        os.environ["GDAL_DRIVER_PATH"] = os.environ.get("GDAL_DRIVER_PATH", os.path.join(or_lib_path, "gdalplugins"))
         # ends
         msg_text = '(%s) is not found at (%s)'
         _gdal_translate = os.path.join(
@@ -4777,7 +4781,7 @@ class Compression(object):
                 self.message('Converting (%s)..' %
                              (useTokenPath if useTokenPath else input_file))
                 gdal_path = self.m_user_config.getValue(CCFG_GDAL_PATH, False)
-                use_iiq = _input_file.lower().endswith('.iiq')
+                use_iiq = _input_file.lower().endswith('.xiiq')
                 if (use_iiq and
                         do_process):
                     iiqMaker = IIQMaker(
@@ -5439,8 +5443,8 @@ def makedirs(filepath):
 
 
 class Application(object):
-    __program_ver__ = 'v2.0.14'
-    __program_date__ = '20250220'
+    __program_ver__ = 'v2.0.15'
+    __program_date__ = '20250416'
     __program_name__ = 'OptimizeRasters.py {}/{}'.format(
         __program_ver__, __program_date__)
     __program_desc__ = 'Convert raster formats to a valid output format through GDAL_Translate.\n' + \
