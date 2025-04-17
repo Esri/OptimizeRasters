@@ -15,197 +15,169 @@
 # Name: CleanMRFCache.py
 # Description: Cleans MRF Cache files by oldest access-time until free space
 # requested has been achieved.
-# Version: 20240507
+# Version: 20250317
 # Requirements: Python
 # Required Arguments: -input
 # Optional Arguments: -mode -ext -size
-# e.g.: -mode = [del,scan], -ext=txt,mrfcache -input=d:/mrfcache_folder
+# e.g.: -mode = [del,scan], -ext=txt,mrfcache -input=d:/mrfcache_folder -percentcleanup=50
 # Usage: python.exe CleanMRFCache.py <arguments>
 # Author: Esri Imagery Workflows team
 # ------------------------------------------------------------------------------
 #!/usr/bin/env python
 
 import sys
-import operator
 import argparse
 import os
 import ctypes
-import platform
 
 
-def Message(msg, status=0):
-    try:
-        if (log is not None):
-            log.Message(msg, status)
-            return
-    except:
-        pass
+def log_message(msg):
+    """Prints message and flushes stdout for real-time output."""
     print(msg)
-   # for any paprent processes to receive the stdout realtime.
     sys.stdout.flush()
 
 
 class Cleaner:
-    def __init__(self):
-        pass
+    """
+    Scans and cleans files in a directory based on access time.
 
-    def init(self, input_path, extensions=()):
-        self.m_extensions = extensions
-        self.m_input_path = input_path.replace('\\', '/')
-        if (self.m_input_path.endswith('/') is False):
-            self.m_input_path += '/'
-        self.m_info = []
-        return True
+    Attributes:
+        input_path (str): Target directory.
+        extensions (set): File extensions to filter.
+        file_info (list): Metadata of scanned files (path, size, access time).
 
-    def getFreeDiskSpace(self, input_path):      # static
+    Methods:
+        get_free_disk_space(path): Returns total and available disk space in bytes.
+        get_file_info(root_only=False): Scans for matching files and stores metadata.
+    """
+
+    def __init__(self, input_path, extensions=None):
+        self.input_path = os.path.normpath(input_path) + os.sep
+        self.extensions = set(extensions or [])
+        self.file_info = []
+
+    @staticmethod
+    def get_free_disk_space(path):
+        """Returns total and available disk space in bytes."""
         try:
-            fbytes = ctypes.c_ulonglong(0)
+            total_space = ctypes.c_ulonglong(0)
+            free_space = ctypes.c_ulonglong(0)
             ctypes.windll.kernel32.GetDiskFreeSpaceExW(
-                ctypes.c_wchar_p(input_path),
-                None,
-                None,
-                ctypes.pointer(fbytes))
-        except:
-            return -1
-        return fbytes
+                ctypes.c_wchar_p(path), None,
+                ctypes.pointer(total_space),
+                ctypes.pointer(free_space)
+            )
+            return total_space.value, free_space.value
+        except Exception:
+            return -1, -1
 
-    def getFileInfo(self, root_only=False):
-        Message('[Generate file list]..')
-        for r, d, f in os.walk(self.m_input_path):
-            if (root_only):
-                if (r != self.m_input_path):
-                    continue
-            for file in f:
-                (f_, e_) = os.path.splitext(file)
-                if ((e_[1:].lower() in self.m_extensions)):
-                    mk_path = os.path.join(r, file).replace('\\', '/')
+    def get_file_info(self, root_only=False):
+        """Scans the directory and collects file information."""
+        log_message("[Scanning files]...")
+        for root, _, files in os.walk(self.input_path):
+            if root_only and root != self.input_path:
+                continue
 
-                    self.m_info.append({
-                        'f': mk_path,
-                        's': os.path.getsize(mk_path),
-                        'at': os.path.getatime(mk_path)
-                    })
+            for file in files:
+                _, ext = os.path.splitext(file)
+                if ext.lstrip(".").lower() in self.extensions:
+                    file_path = os.path.join(root, file)
                     try:
-                        pass
+                        self.file_info.append({
+                            "f": file_path,
+                            "s": os.path.getsize(file_path),
+                            "at": os.path.getatime(file_path)
+                        })
                     except Exception as exp:
-                        Message('Err: (%s)' % (str(inf)))
-        return True
+                        log_message(f"Err: {exp}")
+        return bool(self.file_info)
 
 
 def main():
-    pass
+    __program_ver__ = "v1.0"
+    __program_name__ = f"CleanMRFCache.py {__program_ver__}"
 
+    parser = argparse.ArgumentParser(
+        description="Cleans MRF Cache files based on access-time until the required free space is achieved."
+    )
+    parser.add_argument("-input", required=True, help="Input directory", dest="input_path")
+    parser.add_argument("-mode", help="Processing mode. Valid mode: [del]", dest="mode", default="scan")
+    parser.add_argument("-ext", help="Extensions to filter (comma-separated). e.g., -ext=mrfcache,txt", dest="ext")
+    parser.add_argument("-size", type=int, help="Free space required in GB (default: 2GB)", dest="size", default=2)
+    parser.add_argument("-percentcleanup", type=int, help="Percentage of disk to clean (1-100)", dest="percentcleanup")
 
-if __name__ == '__main__':
-    main()
+    args = parser.parse_args()
 
+    log_message(__program_name__)
+    log_message(parser.description)
 
-if __name__ == '__main__':
-    main()
+    # Validate extensions
+    extensions = {"mrfcache"}
+    if args.ext:
+        extensions.update(map(str.strip, args.ext.lower().split(",")))
 
-__program_ver__ = 'v1.0'
-__program_name__ = 'CleanMRFCache.py %s' % __program_ver__
+    # Initialize Cleaner
+    cleaner = Cleaner(args.input_path, extensions)
 
-parser = argparse.ArgumentParser(description='Cleans MRF Cache files by '
-                                 'oldest access-time until free space '
-                                 'requested has been achieved.\n')
+    # Retrieve disk space
+    total_disk_space, space_available = cleaner.get_free_disk_space(os.path.dirname(args.input_path))
+    if space_available == -1:
+        log_message(f"Err: Unable to determine free disk space for {args.input_path}")
+        exit(1)
+        
+    if total_disk_space == -1:
+        log_message(f"Err: Unable to determine total disk space for {args.input_path}")
+        exit(1)
 
-parser.add_argument('-input', help='Input directory', dest='input_path')
-parser.add_argument('-mode', help='Processing mode. Valid modes [del]',
-                    dest='mode', default='scan')
-parser.add_argument('-ext',
-                    help='Extensions to filter-in. e.g. -ext=mrfcache,txt',
-                    dest='ext')
-parser.add_argument('-size', type=int,
-                    help='Free size requested in Gigabytes. e.g. -size=1',
-                    dest='size', default=2000000000)
+    # Calculate space to free
+    if args.percentcleanup:
+        if not (1 <= args.percentcleanup <= 100):
+            log_message("Err: -percentcleanup must be between 1 and 100.")
+            exit(1)
+        space_to_free = (args.percentcleanup / 100) * total_disk_space
+    else:
+        space_to_free = args.size * 1_000_000_000  # Convert GB to bytes
 
-log = None
+    if space_available >= space_to_free:
+        log_message("The disk already has the requested free space.")
+        log_message(f"Total space available: {space_available / (1024 * 1024):.2f} MB")
+        exit(0)
 
-Message(__program_name__)
-Message(parser.description)
+    log_message(f"Mode: {args.mode.lower()}")
 
-args = parser.parse_args()
+    if not cleaner.get_file_info():
+        log_message("Err: No matching files found.")
+        exit(1)
 
-extensions = ['mrfcache']
+    # Sort files by access time (oldest first)
+    process = sorted(cleaner.file_info, key=lambda x: x["at"])
+    total_savings = 0
 
-# check for extensions
-if (args.ext is not None):
-    ext_ = args.ext.split(',')
-    for e in ext_:
-        e = e.strip().lower()
-        if ((e in extensions) is False):
-            extensions.append(e)
-# ends
+    for file_info in process:
+        file_path, size, atime = file_info["f"], file_info["s"], file_info["at"]
+        print(f"{file_path} [{size} bytes] [atime: {atime}]")
+        total_savings += size
 
-# check input path
-if (args.input_path is None):
-    Message('Err: -input is required.')
-    exit(0)
-# ends
-
-# clean-up instance
-cln = Cleaner()
-cln.init(args.input_path, extensions)
-# ends
-
-# let's get the free space
-space_available = cln.getFreeDiskSpace(os.path.dirname(args.input_path))
-if (space_available == -1):  # an error has occured
-    Message('Err: Unable to get the free-disk-space for the path (%s)' %
-            (args.input_path))
-    exit(1)
-# ends
-
-space_to_free = args.size * 1000000000
-space_available = space_available.value
-
-if (space_available >= space_to_free):
-    Message('The disk already has the requested free space')
-    exit(0)
-
-# setup -mode
-is_mode = not args.mode is None
-arg_mode = args.mode.lower()
-
-Message('Mode (%s)' % arg_mode)  # display the user/default selected (-mode)
-# ends
-
-ret = cln.getFileInfo()
-if (ret is False):
-    Message('Err: Unable to scan for files. Quitting..')
-    exit(1)
-
-process = sorted(cln.m_info, key=operator.itemgetter('at'), reverse=False)
-
-print('\nResults:')
-tot_savings = 0
-for f in process:
-    print('%s [%s] [%s]' % (f['f'], f['s'], f['at']))
-    tot_savings += f['s']
-    if (is_mode):
-        if (arg_mode == 'del'):
-            Message('[Del] %s' % (f['f']))
-            # let's delete here.
+        if args.mode.lower() == "del":
             try:
-                pass
-                os.remove(f['f'])
-            except Exception as exp:
-                Message('Err: Unable to remove (%s). Skipping..' % (f['f']))
-                continue
-            space_available += f['s']
-            if (space_available >= space_to_free):
-                pass
-                Message('\nRequired disk space has been freed.')
-                break
-            # ends
+                os.remove(file_path)
+                space_available += size
+                log_message(f"[Deleted] {file_path}")
 
-msg = '\nTotal savings if files get deleted: [%d] bytes.' % (tot_savings)
-if (arg_mode == 'del'):
-    msg = '\nTotal space freed [%d] bytes' % (space_available)
-    if (space_available < space_to_free):
-        Message('\nUnable to free space requested.')
+                if space_available >= space_to_free:
+                    log_message("\nRequired disk space has been freed.")
+                    break
+            except OSError as e:
+                log_message(f"Err: Unable to delete {file_path}. Skipping... ({e})")
 
-Message(msg)
+    log_message(f"\nPotential savings: {total_savings} bytes.")
+    if args.mode.lower() == "del":
+        log_message(f"Total space freed: {space_available} bytes")
+        if space_available < space_to_free:
+            log_message("\nUnable to free the requested space.")
 
-Message('\nDone..')
+    log_message("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
