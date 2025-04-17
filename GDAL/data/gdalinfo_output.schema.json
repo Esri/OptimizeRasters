@@ -176,6 +176,7 @@
           }
         },
         "size": {
+          "$comment": "note that the order of items in side is width,height",
           "$ref": "#/definitions/arrayOfTwoIntegers"
         },
         "coordinateSystem": {
@@ -276,7 +277,7 @@
     },
 
     "stac": {
-      "$comment": "Derived from https://raw.githubusercontent.com/stac-extensions/projection/main/json-schema/schema.json#/definitions/fields, https://raw.githubusercontent.com/stac-extensions/eo/main/json-schema/schema.json#/definitions/bands and https://raw.githubusercontent.com/stac-extensions/eo/main/json-schema/schema.json#/definitions/bands",
+      "$comment": "Derived from https://raw.githubusercontent.com/stac-extensions/projection/main/json-schema/schema.json#/definitions/fields, https://raw.githubusercontent.com/stac-extensions/eo/v1.1.0/json-schema/schema.json#/definitions/bands and https://raw.githubusercontent.com/stac-extensions/eo/v1.1.0/json-schema/schema.json#/definitions/bands",
       "type": "object",
       "properties": {
         "proj:epsg": {
@@ -306,6 +307,7 @@
         },
 
         "proj:shape": {
+          "$comment": "note that the order of items in proj:shape is height,width starting with GDAL 3.8.5 (previous versions ordered it wrongly as width,height)",
           "title": "Shape",
           "type": "array",
           "minItems": 2,
@@ -332,10 +334,10 @@
           }
         },
         "eo:bands": {
-          "$ref": "https://raw.githubusercontent.com/stac-extensions/eo/main/json-schema/schema.json#/definitions/bands"
+          "$ref": "https://raw.githubusercontent.com/stac-extensions/eo/v1.1.0/json-schema/schema.json#/definitions/bands"
         },
         "raster:bands": {
-          "$ref": "https://raw.githubusercontent.com/stac-extensions/eo/main/json-schema/schema.json#/definitions/bands"
+          "$ref": "https://raw.githubusercontent.com/stac-extensions/eo/v1.1.0/json-schema/schema.json#/definitions/bands"
         }
       },
       "additionalProperties": false

@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 /******************************************************************************
- * $Id$
- *
  * Project:  GDAL/OGR
  * Purpose:  XML Schema for GDAL VRT files.
  * Author:   Even Rouault, <even dot rouault at spatialys dot com>
@@ -10,49 +8,84 @@
  **********************************************************************
  * Copyright (c) 2015, Even Rouault
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 -->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" version="1.0">
-    <xs:element name="VRTDataset">
-        <xs:complexType>
-            <xs:sequence>
-                <xs:choice minOccurs="0" maxOccurs="unbounded">
-                    <xs:element name="SRS" type="SRSType"/>
-                    <xs:element name="GeoTransform" type="xs:string"/>
-                    <xs:element name="GCPList" type="GCPListType"/>
-                    <xs:element name="BlockXSize" type="nonNegativeInteger32"/>
-                    <xs:element name="BlockYSize" type="nonNegativeInteger32"/>
-                    <xs:element name="Metadata" type="MetadataType"/> <!-- may be repeated -->
-                    <xs:element name="VRTRasterBand" type="VRTRasterBandType"/> <!-- may be repeated -->
-                    <xs:element name="MaskBand" type="MaskBandType"/>
-                    <xs:element name="GDALWarpOptions" type="GDALWarpOptionsType"/> <!-- only if subClass="VRTWarpedDataset" -->
-                    <xs:element name="PansharpeningOptions" type="PansharpeningOptionsType"/> <!-- only if subClass="VRTPansharpenedDataset" -->
-                    <xs:element name="Group" type="GroupType"/> <!-- only for multidimensional dataset -->
-                    <xs:element name="OverviewList" type="OverviewListType"/>
-                </xs:choice>
-            </xs:sequence>
-            <xs:attribute name="subClass" type="xs:string"/>
-            <xs:attribute name="rasterXSize" type="nonNegativeInteger32"/>
-            <xs:attribute name="rasterYSize" type="nonNegativeInteger32"/>
-        </xs:complexType>
+    <xs:element name="VRTDataset" type="VRTDatasetType">
+        <xs:annotation>
+            <xs:documentation>Root element</xs:documentation>
+        </xs:annotation>
     </xs:element>
+
+    <xs:complexType name="VRTDatasetType">
+        <xs:sequence>
+            <xs:choice minOccurs="0" maxOccurs="unbounded">
+                <xs:element name="SRS" type="SRSType"/>
+                <xs:element name="GeoTransform" type="xs:string"/>
+                <xs:element name="GCPList" type="GCPListType"/>
+                <xs:element name="BlockXSize" type="nonNegativeInteger32"/>
+                <xs:element name="BlockYSize" type="nonNegativeInteger32"/>
+                <xs:element name="Metadata" type="MetadataType">
+                    <xs:annotation>
+                        <xs:documentation>May be repeated</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="VRTRasterBand" type="VRTRasterBandType">
+                    <xs:annotation>
+                        <xs:documentation>May be repeated</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="MaskBand" type="MaskBandType"/>
+                <xs:element name="GDALWarpOptions" type="GDALWarpOptionsType">
+                    <xs:annotation>
+                        <xs:documentation>Allowed only if subClass="VRTWarpedDataset"</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="PansharpeningOptions" type="PansharpeningOptionsType">
+                    <xs:annotation>
+                        <xs:documentation>Allowed only if subClass="VRTPansharpenedDataset"</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="Input" type="InputType">
+                    <xs:annotation>
+                        <xs:documentation>Allowed only if subClass="VRTProcessedDataset"</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="OutputBands" type="OutputBandsType">
+                    <xs:annotation>
+                        <xs:documentation>Allowed only if subClass="VRTProcessedDataset"</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="ProcessingSteps" type="ProcessingStepsType">
+                    <xs:annotation>
+                        <xs:documentation>Allowed only if subClass="VRTProcessedDataset"</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="Group" type="GroupType">
+                    <xs:annotation>
+                        <xs:documentation>only for multidimensional dataset</xs:documentation>
+                    </xs:annotation>
+                </xs:element>
+                <xs:element name="OverviewList" type="OverviewListType"/>
+            </xs:choice>
+        </xs:sequence>
+        <xs:attribute name="subClass" type="DatasetSubclassType"/>
+        <xs:attribute name="rasterXSize" type="nonNegativeInteger32"/>
+        <xs:attribute name="rasterYSize" type="nonNegativeInteger32"/>
+    </xs:complexType>
+
+    <xs:simpleType name="DatasetSubclassType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="VRTWarpedDataset"/>
+            <xs:enumeration value="VRTPansharpenedDataset"/>
+            <xs:enumeration value="VRTProcessedDataset">
+                <xs:annotation>
+                    <xs:documentation>Added in GDAL 3.9</xs:documentation>
+                </xs:annotation>
+            </xs:enumeration>
+        </xs:restriction>
+    </xs:simpleType>
 
     <xs:complexType name="OverviewListType">
         <xs:simpleContent>
@@ -138,6 +171,7 @@
     <xs:complexType name="PanchroBandType">
         <xs:sequence>
             <xs:element name="SourceFilename" type="SourceFilenameType"/>
+            <xs:element name="OpenOptions" type="OpenOptionsType"/>
             <xs:element name="SourceBand" type="xs:string"/>  <!-- should be refined into xs:nonNegativeInteger or mask,xs:nonNegativeInteger -->
         </xs:sequence>
     </xs:complexType>
@@ -145,6 +179,7 @@
     <xs:complexType name="SpectralBandType">
         <xs:sequence>
             <xs:element name="SourceFilename" type="SourceFilenameType"/>
+            <xs:element name="OpenOptions" type="OpenOptionsType"/>
             <xs:element name="SourceBand" type="xs:string"/>  <!-- should be refined into xs:nonNegativeInteger or mask,xs:nonNegativeInteger -->
         </xs:sequence>
         <xs:attribute name="dstBand" type="xs:nonNegativeInteger"/>
@@ -154,6 +189,81 @@
         <xs:sequence>
             <xs:any processContents="skip" minOccurs="0" maxOccurs="unbounded"/>
         </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="InputType">
+        <xs:sequence>
+            <xs:choice minOccurs="0" maxOccurs="1">
+                <xs:element name="SourceFilename" type="SourceFilenameType"/>
+                <xs:element name="VRTDataset" type="VRTDatasetType"/>
+            </xs:choice>
+        </xs:sequence>
+        <xs:attribute name="unscale" type="xs:string"> <!-- added in GDAL 3.11 -->
+            <xs:annotation>
+                <xs:documentation>
+                    YES, NO, or AUTO.
+                    If not specified, AUTO is the default and will result in
+                    unscaling all input bands to Float64 if any input band has
+                    a defined scale/offset.
+                </xs:documentation>
+            </xs:annotation>
+        </xs:attribute>
+    </xs:complexType>
+
+    <xs:complexType name="OutputBandsType">
+        <xs:sequence/>
+        <xs:attribute name="count" type="xs:string">
+            <xs:annotation>
+                <xs:documentation>FROM_SOURCE, FROM_LAST_STEP or positive integer value.
+                If not specified, FROM_SOURCE is the default if there are no VRTRasterBand elements.
+                Otherwise, if there are VRTRasterBand elements, they are used.
+                </xs:documentation>
+            </xs:annotation>
+        </xs:attribute>
+        <xs:attribute name="dataType" type="xs:string">
+            <xs:annotation>
+                <xs:documentation>FROM_SOURCE, FROM_LAST_STEP or one of the allowed values of DataTypeType.
+                If not specified, FROM_SOURCE is the default if there are no VRTRasterBand elements.
+                Otherwise, if there are VRTRasterBand elements, they are used.
+                </xs:documentation>
+            </xs:annotation>
+        </xs:attribute>
+    </xs:complexType>
+
+    <xs:complexType name="ProcessingStepsType">
+        <xs:sequence minOccurs="1" maxOccurs="unbounded">
+            <xs:element name="Step" type="ProcessingStepType"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="ProcessingStepType">
+        <xs:annotation>
+            <xs:documentation>Processing step of a VRTPansharpenedDataset</xs:documentation>
+        </xs:annotation>
+        <xs:sequence>
+            <xs:element name="Algorithm" type="xs:string" minOccurs="1">
+                <xs:annotation>
+                    <xs:documentation>Builtin allowed names are BandAffineCombination, LUT, LocalScaleOffset, Trimming. More algorithms can be registered at run-time.</xs:documentation>
+                </xs:annotation>
+            </xs:element>
+            <xs:element name="Argument" type="ArgumentType" maxOccurs="unbounded"/>
+        </xs:sequence>
+        <xs:attribute name="name" type="xs:string"/>
+    </xs:complexType>
+
+    <xs:complexType name="ArgumentType">
+        <xs:annotation>
+            <xs:documentation>Argument of a processing function</xs:documentation>
+        </xs:annotation>
+        <xs:simpleContent>
+            <xs:extension base="xs:string">
+                <xs:attribute name="name" type="xs:string" use="required">
+                    <xs:annotation>
+                        <xs:documentation>Allowed names are specific to each processing function</xs:documentation>
+                    </xs:annotation>
+                </xs:attribute>
+            </xs:extension>
+        </xs:simpleContent>
     </xs:complexType>
 
     <xs:complexType name="MDIType">
@@ -187,7 +297,9 @@
                 <xs:element name="SimpleSource" type="SimpleSourceType"/>
                 <xs:element name="ComplexSource" type="ComplexSourceType"/>
                 <xs:element name="AveragedSource" type="SimpleSourceType"/>
+                <xs:element name="NoDataFromMaskSource" type="NoDataFromMaskSourceType"/>
                 <xs:element name="KernelFilteredSource" type="KernelFilteredSourceType"/>
+                <xs:element name="ArraySource" type="ArraySourceType"/>
 
                 <!-- for a VRTDerivedRasterBand -->
                 <xs:element name="PixelFunctionType" type="xs:string"/>
@@ -230,6 +342,7 @@
             <xs:enumeration value="VRTDerivedRasterBand"/>
             <xs:enumeration value="VRTRawRasterBand"/>
             <xs:enumeration value="VRTPansharpenedRasterBand"/>
+            <xs:enumeration value="VRTProcessedRasterBand"/>
         </xs:restriction>
     </xs:simpleType>
 
@@ -312,16 +425,19 @@
     <xs:simpleType name="DataTypeType">
         <xs:restriction base="xs:string">
             <xs:enumeration value="Byte"/>
+            <xs:enumeration value="Int8"/>
             <xs:enumeration value="UInt16"/>
             <xs:enumeration value="Int16"/>
             <xs:enumeration value="UInt32"/>
             <xs:enumeration value="Int32"/>
             <xs:enumeration value="UInt64"/>
             <xs:enumeration value="Int64"/>
+            <xs:enumeration value="Float16"/>
             <xs:enumeration value="Float32"/>
             <xs:enumeration value="Float64"/>
             <xs:enumeration value="CInt16"/>
             <xs:enumeration value="CInt32"/>
+            <xs:enumeration value="CFloat16"/>
             <xs:enumeration value="CFloat32"/>
             <xs:enumeration value="CFloat64"/>
         </xs:restriction>
@@ -346,13 +462,33 @@
             <xs:enumeration value="YCbCr_Cb"/>
             <xs:enumeration value="YCbCr_Cr"/>
             <xs:enumeration value="Undefined"/>
+            <xs:enumeration value="Pan"/> <!-- 3.10 addition -->
+            <xs:enumeration value="Coastal"/> <!-- 3.10 addition -->
+            <xs:enumeration value="RedEdge"/> <!-- 3.10 addition -->
+            <xs:enumeration value="NIR"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SWIR"/> <!-- 3.10 addition -->
+            <xs:enumeration value="MWIR"/> <!-- 3.10 addition -->
+            <xs:enumeration value="LWIR"/> <!-- 3.10 addition -->
+            <xs:enumeration value="TIR"/> <!-- 3.10 addition -->
+            <xs:enumeration value="OtherIR"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_Ka"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_K"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_Ku"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_X"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_C"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_S"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_L"/> <!-- 3.10 addition -->
+            <xs:enumeration value="SAR_P"/> <!-- 3.10 addition -->
         </xs:restriction>
     </xs:simpleType>
 
     <xs:group name="SimpleSourceElementsGroup">
         <xs:sequence>
             <xs:choice minOccurs="0" maxOccurs="unbounded">
-                <xs:element name="SourceFilename" type="SourceFilenameType"/>
+                <xs:choice minOccurs="0" maxOccurs="1">
+                    <xs:element name="SourceFilename" type="SourceFilenameType"/>
+                    <xs:element name="VRTDataset" type="VRTDatasetType"/> <!-- added in GDAL 3.11 -->
+                </xs:choice>
                 <xs:element name="OpenOptions" type="OpenOptionsType"/>
                 <xs:element name="SourceBand" type="xs:string"/>  <!-- should be refined into xs:nonNegativeInteger or mask,xs:nonNegativeInteger -->
                 <xs:element name="SourceProperties" type="SourcePropertiesType"/>
@@ -405,6 +541,21 @@
         <xs:attribute name="resampling" type="xs:string"/>
     </xs:complexType>
 
+    <xs:group name="NoDataFromMaskSourceElementsGroup">
+        <xs:sequence>
+            <xs:choice minOccurs="0" maxOccurs="unbounded">
+                <xs:group ref="SimpleSourceElementsGroup"/>
+                <xs:element name="NODATA" type="DoubleOrNanType"/> <!-- NODATA and UseMaskBand are mutually exclusive -->
+                <xs:element name="MaskValueThreshold" type="xs:double"/>
+                <xs:element name="RemappedValue" type="xs:double"/>
+            </xs:choice>
+        </xs:sequence>
+    </xs:group>
+
+    <xs:complexType name="NoDataFromMaskSourceType">
+        <xs:group ref="NoDataFromMaskSourceElementsGroup"/>
+    </xs:complexType>
+
     <xs:complexType name="KernelFilteredSourceType">
         <xs:sequence>
             <xs:choice minOccurs="0" maxOccurs="unbounded">
@@ -434,6 +585,31 @@
             <xs:enumeration value="NAN"/>
         </xs:restriction>
     </xs:simpleType>
+
+    <xs:complexType name="ArraySourceType">
+        <xs:sequence>
+            <xs:element ref="AbstractArray"/>
+            <xs:element name="SrcRect" type="RectType" minOccurs="0"/>
+            <xs:element name="DstRect" type="RectType" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:element name="AbstractArray" type="AbstractArrayType" abstract="true"/>
+
+    <xs:complexType name="AbstractArrayType"/>
+
+    <xs:element name="SingleSourceArray" substitutionGroup="AbstractArray" type="SingleSourceArrayType"/>
+
+    <xs:complexType name="SingleSourceArrayType">
+        <xs:complexContent>
+            <xs:extension base="AbstractArrayType">
+                <xs:sequence>
+                    <xs:element name="SourceFilename" type="SourceFilenameType"/>
+                    <xs:element name="SourceArray" type="xs:string"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
 
     <xs:complexType name="SourceFilenameType">
         <xs:simpleContent>
@@ -498,34 +674,40 @@
     </xs:complexType>
 
     <xs:complexType name="ArrayType">
-        <xs:sequence>
-            <xs:element name="DataType" type="xs:string" minOccurs="1" maxOccurs="1"/>
-            <xs:sequence>
-                    <xs:choice minOccurs="0" maxOccurs="unbounded">
-                        <xs:element name="Dimension" type="DimensionType"/>
-                        <xs:element name="DimensionRef" type="DimensionRefType"/>
-                    </xs:choice>
-                </xs:sequence>
-            <xs:element name="SRS" type="SRSType" minOccurs="0" maxOccurs="1"/>
-            <xs:element name="Unit" type="xs:string" minOccurs="0" maxOccurs="1"/>
-            <xs:element name="NoDataValue" type="DoubleOrNanType" minOccurs="0" maxOccurs="1"/>
-            <xs:element name="Offset" type="xs:double" minOccurs="0" maxOccurs="1"/>
-            <xs:element name="Scale" type="xs:double" minOccurs="0" maxOccurs="1"/>
-            <xs:choice>
-                <xs:element name="RegularlySpacedValues" type="RegularlySpacedValuesType" minOccurs="0" maxOccurs="1"/>
+        <xs:complexContent>
+            <xs:extension base="AbstractArrayType">
                 <xs:sequence>
-                    <xs:choice minOccurs="0" maxOccurs="unbounded">
-                        <xs:element name="ConstantValue" type="ConstantValueType"/>
-                        <xs:element name="InlineValues" type="InlineValuesType"/>
-                        <xs:element name="InlineValuesWithValueElement" type="InlineValuesWithValueElementType"/>
-                        <xs:element name="Source" type="SourceType"/>
+                    <xs:element name="DataType" type="xs:string" minOccurs="1" maxOccurs="1"/>
+                    <xs:sequence>
+                            <xs:choice minOccurs="0" maxOccurs="unbounded">
+                                <xs:element name="Dimension" type="DimensionType"/>
+                                <xs:element name="DimensionRef" type="DimensionRefType"/>
+                            </xs:choice>
+                        </xs:sequence>
+                    <xs:element name="SRS" type="SRSType" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="Unit" type="xs:string" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="NoDataValue" type="DoubleOrNanType" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="Offset" type="xs:double" minOccurs="0" maxOccurs="1"/>
+                    <xs:element name="Scale" type="xs:double" minOccurs="0" maxOccurs="1"/>
+                    <xs:choice>
+                        <xs:element name="RegularlySpacedValues" type="RegularlySpacedValuesType" minOccurs="0" maxOccurs="1"/>
+                        <xs:sequence>
+                            <xs:choice minOccurs="0" maxOccurs="unbounded">
+                                <xs:element name="ConstantValue" type="ConstantValueType"/>
+                                <xs:element name="InlineValues" type="InlineValuesType"/>
+                                <xs:element name="InlineValuesWithValueElement" type="InlineValuesWithValueElementType"/>
+                                <xs:element name="Source" type="SourceType"/>
+                            </xs:choice>
+                        </xs:sequence>
                     </xs:choice>
+                    <xs:element name="Attribute" type="AttributeType" minOccurs="0" maxOccurs="unbounded"/>
                 </xs:sequence>
-            </xs:choice>
-            <xs:element name="Attribute" type="AttributeType" minOccurs="0" maxOccurs="unbounded"/>
-        </xs:sequence>
-        <xs:attribute name="name" type="xs:string" use="required"/>
+                <xs:attribute name="name" type="xs:string" use="required"/>
+            </xs:extension>
+        </xs:complexContent>
     </xs:complexType>
+
+    <xs:element name="Array" substitutionGroup="AbstractArray" type="ArrayType"/>
 
     <xs:complexType name="RegularlySpacedValuesType">
         <xs:attribute name="start" type="xs:double" use="required"/>
@@ -604,6 +786,141 @@
     <xs:complexType name="DimensionRefType">
         <xs:sequence/>
         <xs:attribute name="ref" type="xs:string" use="required"/>
+    </xs:complexType>
+
+    <xs:element name="DerivedArray" substitutionGroup="AbstractArray" type="DerivedArrayType"/>
+
+    <xs:complexType name="DerivedArrayType">
+        <xs:complexContent>
+            <xs:extension base="AbstractArrayType">
+                <xs:sequence>
+                    <xs:element ref="AbstractArray"/>
+                    <xs:element name="Step" type="StepType" minOccurs="0" maxOccurs="unbounded"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <xs:complexType name="StepType">
+        <xs:sequence minOccurs="0" maxOccurs="unbounded">
+            <xs:element ref="AbstractStep"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:element name="AbstractStep" type="AbstractStepType" abstract="true"/>
+
+    <xs:complexType name="AbstractStepType"/>
+
+    <xs:element name="View" substitutionGroup="AbstractStep" type="ViewType"/>
+
+    <xs:complexType name="ViewType">
+        <xs:complexContent>
+            <xs:extension base="AbstractStepType">
+                <xs:attribute name="expr" type="xs:string" use="required"/>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <xs:element name="Transpose" substitutionGroup="AbstractStep" type="TransposeType"/>
+
+    <xs:complexType name="TransposeType">
+        <xs:complexContent>
+            <xs:extension base="AbstractStepType">
+                <xs:attribute name="newOrder" type="CommaSeparatedListOfIntegerType" use="required"/>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <xs:simpleType name="CommaSeparatedListOfIntegerType">
+      <xs:restriction base="xs:string">
+        <xs:pattern value="(\d)+(,(\d)+).*"/>
+      </xs:restriction>
+    </xs:simpleType>
+
+    <xs:element name="Resample" substitutionGroup="AbstractStep" type="ResampleType"/>
+
+    <xs:complexType name="ResampleType">
+        <xs:complexContent>
+            <xs:extension base="AbstractStepType">
+                <xs:sequence>
+                    <xs:element name="Dimension" type="DimensionType" minOccurs="0" maxOccurs="unbounded"/>
+                    <xs:element name="ResampleAlg" type="ResampleAlgType" minOccurs="0"/>
+                    <xs:element name="SRS" type="SRSType" minOccurs="0"/>
+                    <xs:element name="Option" type="OptionType" minOccurs="0" maxOccurs="unbounded"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <xs:simpleType name="ResampleAlgType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="NearestNeighbour"/>
+            <xs:enumeration value="Bilinear"/>
+            <xs:enumeration value="Cubic"/>
+            <xs:enumeration value="CubicSpline"/>
+            <xs:enumeration value="Lanczos"/>
+            <xs:enumeration value="Average"/>
+            <xs:enumeration value="RMS"/>
+            <xs:enumeration value="Mode"/>
+            <xs:enumeration value="Gauss"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:complexType name="OptionType">
+        <xs:simpleContent>
+            <xs:extension base="xs:string">
+                <xs:attribute name="name" type="xs:string"/>
+            </xs:extension>
+        </xs:simpleContent>
+    </xs:complexType>
+
+    <xs:element name="Grid" substitutionGroup="AbstractStep" type="GridType"/>
+
+    <xs:complexType name="GridType">
+        <xs:complexContent>
+            <xs:extension base="AbstractStepType">
+                <xs:sequence>
+                    <xs:element name="GridOptions" type="xs:string" minOccurs="1"/>
+                    <xs:element name="XArray" minOccurs="0">
+                        <xs:complexType>
+                            <xs:sequence>
+                                <xs:element ref="AbstractArray"/>
+                            </xs:sequence>
+                        </xs:complexType>
+                    </xs:element>
+                    <xs:element name="YArray" minOccurs="0">
+                        <xs:complexType>
+                            <xs:sequence>
+                                <xs:element ref="AbstractArray"/>
+                            </xs:sequence>
+                        </xs:complexType>
+                    </xs:element>
+                    <xs:element name="Option" type="OptionType" minOccurs="0" maxOccurs="unbounded"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <xs:element name="GetMask" substitutionGroup="AbstractStep" type="GetMaskType"/>
+
+    <xs:complexType name="GetMaskType">
+        <xs:complexContent>
+            <xs:extension base="AbstractStepType">
+                <xs:sequence>
+                    <xs:element name="Option" type="OptionType" minOccurs="0" maxOccurs="unbounded"/>
+                </xs:sequence>
+            </xs:extension>
+        </xs:complexContent>
+    </xs:complexType>
+
+    <xs:element name="GetUnscaled" substitutionGroup="AbstractStep" type="GetUnscaledType"/>
+
+    <xs:complexType name="GetUnscaledType">
+        <xs:complexContent>
+            <xs:extension base="AbstractStepType">
+                <xs:sequence/>
+            </xs:extension>
+        </xs:complexContent>
     </xs:complexType>
 
 </xs:schema>
