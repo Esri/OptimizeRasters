@@ -31,8 +31,7 @@ Raster proxies are small files stored on local file systems that reference much 
 ## Instructions
 **OptimizeRasters Setup**
 
-1. Click the link to download the [OptimizeRasters setup zip file](https://esriis-my.sharepoint.com/:u:/g/personal/cham4757_esri_com/EWTQ255rLdtHsWB3ow9u0p4BmIEoe61uNvPnYl3TfxixBQ?e=vOsJHJ). The file can be downloaded by clicking on the   
-   download arrow icon on the top-left corner of the browser page. 
+1. Click the link to download the [OptimizeRasters setup zip file](https://esriis-my.sharepoint.com/:u:/g/personal/cham4757_esri_com/EWTQ255rLdtHsWB3ow9u0p4BmIEoe61uNvPnYl3TfxixBQ?e=vOsJHJ). The file can be downloaded by clicking on the download arrow icon on the top-left corner of the browser page. 
 
 2. Double‑click the downloaded ZIP file to access and install the OptimizeRasters Windows setup EXE located inside.
 
