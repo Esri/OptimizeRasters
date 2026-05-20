@@ -425,6 +425,7 @@
     <xs:simpleType name="DataTypeType">
         <xs:restriction base="xs:string">
             <xs:enumeration value="Byte"/>
+            <xs:enumeration value="UInt8"/>
             <xs:enumeration value="Int8"/>
             <xs:enumeration value="UInt16"/>
             <xs:enumeration value="Int16"/>
@@ -515,6 +516,7 @@
     <xs:complexType name="SimpleSourceType">
         <xs:group ref="SimpleSourceElementsGroup"/>
         <xs:attribute name="resampling" type="xs:string"/>
+        <xs:attribute name="name" type="xs:string"/>
     </xs:complexType>
 
     <xs:group name="ComplexSourceElementsGroup">
@@ -529,6 +531,7 @@
                 <xs:element name="SrcMax" type="xs:double"/>
                 <xs:element name="DstMin" type="xs:double"/>
                 <xs:element name="DstMax" type="xs:double"/>
+                <xs:element name="Clip" type="xs:boolean"/> <!-- added in 3.11 -->
                 <xs:element name="NODATA" type="DoubleOrNanType"/> <!-- NODATA and UseMaskBand are mutually exclusive -->
                 <xs:element name="UseMaskBand" type="xs:boolean"/> <!-- NODATA and UseMaskBand are mutually exclusive -->
                 <xs:element name="LUT" type="xs:string"/>
@@ -539,6 +542,7 @@
     <xs:complexType name="ComplexSourceType">
         <xs:group ref="ComplexSourceElementsGroup"/>
         <xs:attribute name="resampling" type="xs:string"/>
+        <xs:attribute name="name" type="xs:string"/>
     </xs:complexType>
 
     <xs:group name="NoDataFromMaskSourceElementsGroup">
@@ -561,9 +565,11 @@
             <xs:choice minOccurs="0" maxOccurs="unbounded">
                 <xs:group ref="ComplexSourceElementsGroup"/>
                 <xs:element name="Kernel" type="KernelType"/>
+                <xs:element name="Function" type="xs:string"/>  <!-- added in 3.12 -->
             </xs:choice>
         </xs:sequence>
         <xs:attribute name="resampling" type="xs:string"/>
+        <xs:attribute name="name" type="xs:string" />
     </xs:complexType>
 
     <xs:complexType name="KernelType">
@@ -592,6 +598,7 @@
             <xs:element name="SrcRect" type="RectType" minOccurs="0"/>
             <xs:element name="DstRect" type="RectType" minOccurs="0"/>
         </xs:sequence>
+        <xs:attribute name="name" type="xs:string"/>
     </xs:complexType>
 
     <xs:element name="AbstractArray" type="AbstractArrayType" abstract="true"/>
@@ -684,6 +691,7 @@
                                 <xs:element name="DimensionRef" type="DimensionRefType"/>
                             </xs:choice>
                         </xs:sequence>
+                    <xs:element name="BlockSize" type="integerList" minOccurs="0" maxOccurs="1"/>
                     <xs:element name="SRS" type="SRSType" minOccurs="0" maxOccurs="1"/>
                     <xs:element name="Unit" type="xs:string" minOccurs="0" maxOccurs="1"/>
                     <xs:element name="NoDataValue" type="DoubleOrNanType" minOccurs="0" maxOccurs="1"/>
@@ -701,6 +709,7 @@
                         </xs:sequence>
                     </xs:choice>
                     <xs:element name="Attribute" type="AttributeType" minOccurs="0" maxOccurs="unbounded"/>
+                    <xs:element name="Overviews" type="OverviewsType" minOccurs="0" maxOccurs="1"/>
                 </xs:sequence>
                 <xs:attribute name="name" type="xs:string" use="required"/>
             </xs:extension>
@@ -708,6 +717,16 @@
     </xs:complexType>
 
     <xs:element name="Array" substitutionGroup="AbstractArray" type="ArrayType"/>
+
+    <xs:complexType name="OverviewsType">
+        <xs:sequence>
+            <xs:choice minOccurs="1" maxOccurs="unbounded">
+                <xs:element name="Array" type="ArrayType"/>
+                <xs:element name="ArrayFullName" type="xs:string"/>
+            </xs:choice>
+        </xs:sequence>
+    </xs:complexType>
+
 
     <xs:complexType name="RegularlySpacedValuesType">
         <xs:attribute name="start" type="xs:double" use="required"/>
@@ -734,7 +753,10 @@
 
     <xs:complexType name="InlineValuesWithValueElementType">
         <xs:sequence>
-            <xs:element name="Value" type="xs:string" minOccurs="1" maxOccurs="unbounded"/>
+            <xs:choice minOccurs="1" maxOccurs="unbounded">
+                <xs:element name="Value" type="xs:string"/>
+                <xs:element name="NullValue"/>
+            </xs:choice>
         </xs:sequence>
         <xs:attribute name="offset" type="xs:string"/>
         <xs:attribute name="count" type="xs:string"/>
